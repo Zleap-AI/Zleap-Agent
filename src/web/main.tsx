@@ -1314,7 +1314,7 @@ function WorkspaceTab() {
       if (current && current.workspaceId === workspaceId) {
         return data.mcpServers.find((server) => server.id === current.id) ?? current;
       }
-      return data.mcpServers[0] ?? createMcpServerDraft(workspaceId);
+      return data.mcpServers[0] ?? null;
     });
   }
 

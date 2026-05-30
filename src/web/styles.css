@@ -110,9 +110,15 @@ button:disabled {
 
 .config-panel,
 .context-panel,
-.editor-panel,
 .memory-editor {
   padding: 14px;
+  overflow: auto;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.editor-panel {
+  padding: 14px 14px 0;
   overflow: auto;
   min-height: 0;
   max-height: 100%;
@@ -776,10 +782,17 @@ pre {
 }
 
 .workspace-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin: 16px -14px 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid #dce2e8;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
 }
 
 .tool-editor {

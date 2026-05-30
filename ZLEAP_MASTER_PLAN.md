@@ -353,6 +353,8 @@
   - Workspace UI supports deleting non-built-in workspaces through the existing creator-gated delete API. Built-in `main/file/cli` workspaces cannot be deleted from the UI.
   - Workspace tool UI is workspace-first: after selecting or creating a workspace, the user registers tools into that workspace.
   - Workspace tool UI supports MCP Server registration/editing/deletion, local stdio and remote Streamable HTTP configuration, discovery from the selected server, choosing discovered tools to mount, and deleting mounted tools. Manual JSON binding editing is advanced/debug-only and must not be the normal MCP setup path.
+  - Workspace UI must not auto-expand an empty MCP Server registration form when the selected workspace has no MCP Server. The empty state should stay compact until the user chooses to add a server.
+  - Workspace save/delete actions must remain visible while the workspace editor scrolls vertically.
   - Workspace tool lists show whether each tool is runtime-bound, MCP-bound, or still a placeholder, and system/runtime tools are visually separated from workspace-registered tools.
   - Memory table supports filter/add/edit/delete.
   - Memory editor supports metadata JSON editing, client-side JSON validation, policy-aware add buttons for event/impression/skill, and visible strategy-layer error feedback.

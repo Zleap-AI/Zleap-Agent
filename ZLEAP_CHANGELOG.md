@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:10 +08:00
+
+Purpose:
+- Keep the Workspace editor compact when a workspace has no MCP Server.
+- Keep workspace save/delete actions reachable during vertical scrolling.
+
+Changed:
+- Stopped auto-creating an MCP Server draft when the selected workspace has no MCP Servers; the registration form now opens only after clicking `新增 Server`.
+- Made the Workspace editor action bar sticky at the bottom of the scrollable editor panel.
+- Updated `ZLEAP_MASTER_PLAN.md` with the compact MCP empty-state and persistent workspace actions rules.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 06:08 +08:00
 
 Purpose:
