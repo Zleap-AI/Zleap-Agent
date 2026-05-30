@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:25 +08:00
+
+Purpose:
+- Teach the agent the internal workspace concept clearly enough to decide when to enter or exit workspaces.
+
+Changed:
+- Added an explicit workspace decision contract to the runtime system prompt: workspace is an internal capability boundary, `main` plans/integrates, and child workspaces specialize with limited tools.
+- Clarified in the prompt that child workspaces should call `exitWorkspace` when work is complete, failed, blocked, missing tools, requires user input/approval, or needs another workspace.
+- Added regression coverage that the assembled system message includes the workspace contract and `enterWorkspace`/`exitWorkspace` handoff language.
+- Updated `ZLEAP_MASTER_PLAN.md` with the rule that the system prompt should teach the internal workspace model while final user-facing answers still hide it.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:18 +08:00
 
 Purpose:

@@ -1538,6 +1538,10 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("writeSkillMemory"), true);
   assert.equal(systemMessage.includes("生命周期 hooks"), true);
   assert.equal(systemMessage.includes("writeAgentSelfImpression"), true);
+  assert.equal(systemMessage.includes("workspace 是内部能力边界"), true);
+  assert.equal(systemMessage.includes("enterWorkspace"), true);
+  assert.equal(systemMessage.includes("exitWorkspace"), true);
+  assert.equal(systemMessage.includes("suggestedNextSteps"), true);
   const agent = repos.getAgent("default-agent");
   assert.equal(/workspace|context|runtime/i.test(agent.personalityPrompt), false);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "enterWorkspace"), true);

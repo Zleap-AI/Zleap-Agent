@@ -43,6 +43,7 @@
   - Context assembly uses an explicit `AttentionBudgetManager` before prompt assembly. Budgeting must preserve valid JSON for structured runtime partitions such as memory, task, history, workspace results, and tool results, so context trimming does not silently erase parsed payloads.
   - `PromptAssembler` produces OpenAI-compatible chat messages.
   - User messages stay clean. System prompt, personality prompt, and internal runtime strategy are merged into the single `system` context segment and the single OpenAI-compatible system message.
+  - The system prompt must teach the agent the internal workspace model: workspace is an internal capability boundary; `main` plans and integrates; child workspaces specialize with limited tools; child workspaces decide when to call `exitWorkspace` after completion, failure, blockage, missing tools, needed user input, needed approval, or a need for another workspace. The final user-facing answer still hides these mechanics.
   - Final user-facing assistant replies must not expose runtime, workspace, context stack, memory injection, or tool orchestration details. Those mechanics are internal unless the user explicitly asks to inspect them.
   - The default personality prompt guides natural human-like replies. It must not mention workspace/context/runtime internals.
   - Agent stable identity configuration is creator-gated. Persisted agent name, system prompt, personality prompt, default model, and default base URL are architecture/identity settings, not ordinary per-user chat preferences.
