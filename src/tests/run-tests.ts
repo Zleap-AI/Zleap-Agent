@@ -949,7 +949,7 @@ class MultiStepToolLoopLLMClient implements LLMClient {
       };
     }
     if (this.calls === 2) {
-      assert.equal(input.messages.filter((message) => message.role === "tool").length, 3);
+      assert.equal(input.messages.filter((message) => message.role === "tool").length, 4);
       return {
         message: {
           role: "assistant",
@@ -1031,7 +1031,7 @@ class StreamingMultiStepToolLoopLLMClient implements LLMClient {
       return;
     }
     if (this.calls === 2) {
-      assert.equal(input.messages.filter((message) => message.role === "tool").length, 3);
+      assert.equal(input.messages.filter((message) => message.role === "tool").length, 4);
       yield { type: "tool_call_delta", index: 0, id: "stream-second-memory", name: "writeUserImpression" };
       yield {
         type: "tool_call_delta",
@@ -1571,6 +1571,10 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("enterWorkspace"), true);
   assert.equal(systemMessage.includes("exitWorkspace"), true);
   assert.equal(systemMessage.includes("suggestedNextSteps"), true);
+  assert.equal(systemMessage.includes("## Callable Tools"), false);
+  assert.equal(systemMessage.includes("\"toolCount\""), false);
+  assert.equal(systemMessage.includes("\"availableWorkspaces\""), false);
+  assert.equal(firstInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.workspace"), true);
   const agent = repos.getAgent("default-agent");
   assert.equal(/workspace|context|runtime/i.test(agent.personalityPrompt), false);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "enterWorkspace"), true);
@@ -1581,16 +1585,17 @@ async function testRuntimeContextAndTools() {
   assert.equal(lastInput?.tools.some((tool) => tool.name === "writeUserImpression"), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "final_messages"), true);
-  const firstSystemMessage = firstInput?.messages[0]?.content ?? "";
-  assert.equal(firstSystemMessage.includes("\"id\": \"main\""), true);
-  assert.equal(firstSystemMessage.includes("\"id\": \"file\""), true);
-  assert.equal(firstSystemMessage.includes("\"id\": \"cli\""), true);
-  const childWorkspaceRegistry = childInput?.messages[0]?.content ?? "";
-  assert.equal(childWorkspaceRegistry.includes("\"id\": \"cli\""), true);
+  const firstWorkspaceToolMessage = firstInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
+  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"main\""), true);
+  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"file\""), true);
+  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), true);
+  const childWorkspaceToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
+  assert.equal(childWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), true);
   assert.equal(childInput?.tools.some((tool) => tool.name === "enterWorkspace"), false);
-  assert.equal((lastInput?.messages[0]?.content ?? "").includes("\"id\": \"cli\""), true);
-  assert.equal(childInput?.messages[0]?.content?.includes("memoryPolicy"), true);
-  assert.equal(childInput?.messages[0]?.content?.includes("maxEventMemories"), true);
+  const lastWorkspaceToolMessage = lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
+  assert.equal(lastWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), true);
+  assert.equal(childWorkspaceToolMessage?.content?.includes("memoryPolicy"), true);
+  assert.equal(childWorkspaceToolMessage?.content?.includes("maxEventMemories"), true);
   assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.local_conversation" && (message.content ?? "").includes("\"workspaceId\": \"file\"")), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "history" && segment.content.includes("\"suggestedNextSteps\"")), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
@@ -1790,6 +1795,22 @@ async function testAgentSelfImpressionRecallIsAgentScoped() {
   const repos = createRepos();
   repos.createMemory({
     memoryType: "impression",
+    userId: "agent-scope-user",
+    relationId: "impression:user:agent-scope-user:self-recall",
+    title: "Current user recall",
+    summary: "current user impression must be recalled with agent self impressions",
+    detail: "The default agent should see the current user's impression."
+  }, "creator", "creator");
+  repos.createMemory({
+    memoryType: "impression",
+    userId: "other-user",
+    relationId: "impression:user:other-user:self-recall",
+    title: "Other user recall leak",
+    summary: "other user impression must not be recalled",
+    detail: "The default agent must not see another user's impression."
+  }, "creator", "creator");
+  repos.createMemory({
+    memoryType: "impression",
     agentId: "default-agent",
     relationId: "impression:agent:default-agent:self-recall",
     title: "Default self recall",
@@ -1838,6 +1859,8 @@ async function testAgentSelfImpressionRecallIsAgentScoped() {
 
   const memoryToolMessage = fake.lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: Array<{ title: string }> };
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Current user recall"), true);
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Other user recall leak"), false);
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Default self recall"), true);
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Other self recall"), false);
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Global self recall leak"), false);

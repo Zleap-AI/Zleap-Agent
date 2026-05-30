@@ -298,12 +298,10 @@ export class PromptAssembler {
         return fallback;
       }
     };
-    const systemContent = ["system", "workspace"]
-      .map((key) => byType.get(key as ContextSegment["segmentType"]))
-      .filter(Boolean)
-      .map((segment) => `## ${segment!.title}\n${segment!.content}`)
-      .join("\n\n");
+    const systemSegment = byType.get("system");
+    const systemContent = systemSegment ? `## ${systemSegment.title}\n${systemSegment.content}` : "";
 
+    const workspaceToolCallId = "runtime_context_workspace";
     const memoryToolCallId = "runtime_context_memory";
     const localConversationToolCallId = "runtime_context_local_conversation";
     return [
@@ -315,6 +313,14 @@ export class PromptAssembler {
         role: "assistant",
         content: null,
         tool_calls: [
+          {
+            id: workspaceToolCallId,
+            type: "function",
+            function: {
+              name: "runtime_context.workspace",
+              arguments: "{}"
+            }
+          },
           {
             id: memoryToolCallId,
             type: "function",
@@ -332,6 +338,15 @@ export class PromptAssembler {
             }
           }
         ]
+      },
+      {
+        role: "tool",
+        tool_call_id: workspaceToolCallId,
+        name: "runtime_context.workspace",
+        content: JSON.stringify(parseSegment("workspace", {
+          currentWorkspace: {},
+          availableWorkspaces: []
+        }), null, 2)
       },
       {
         role: "tool",

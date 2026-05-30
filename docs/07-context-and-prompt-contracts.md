@@ -29,6 +29,8 @@ The synthetic tool results follow the same simplified structure: `runtime_contex
 
 The Web UI should render parseable context JSON as structured inspection views, not raw blobs. Arrays of records, especially the callable `tools` snapshot, should become table-like views with readable columns for names, descriptions, schemas, bindings, risk, and workspace metadata. Raw JSON remains useful for provider payload logs and parse failures, but the normal context stack should make runtime partitions easy to verify at a glance.
 
+Provider messages must keep the same boundary. The system message contains only system/personality/runtime rules; it must not contain the serialized `tools` segment and should not carry large workspace JSON dumps. Workspace context is injected as a synthetic `runtime_context.workspace` tool result, memory as `runtime_context.memory`, and local task/history/tool evidence as `runtime_context.local_conversation`. Callable function schemas are sent only through the OpenAI-compatible top-level `tools` array.
+
 ## 2026-05-30 更新：子 workspace 上下文交付契约
 
 子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`。

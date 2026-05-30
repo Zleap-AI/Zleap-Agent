@@ -2,6 +2,27 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:50 +08:00
+
+Purpose:
+- Fix prompt assembly boundaries and guard current-user impression recall.
+
+Changed:
+- Changed prompt assembly so the system message contains only system/personality/runtime policy text.
+- Moved workspace manifest/context injection from the system message into a synthetic `runtime_context.workspace` tool result.
+- Kept memory and local conversation as synthetic tool results, and kept callable schemas only in the OpenAI-compatible top-level `tools` request array.
+- Added tests proving the system message no longer includes `## Callable Tools`, `toolCount`, or workspace JSON, while the workspace manifest is still visible through `runtime_context.workspace`.
+- Added recall coverage proving current-user impressions and current-agent self impressions are both injected, while other users' impressions are excluded.
+- Updated master/context/concept docs with the corrected prompt assembly boundary.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 07:43 +08:00
 
 Purpose:
