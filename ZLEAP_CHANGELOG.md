@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:35 +08:00
+
+Purpose:
+- Make every saved LLM call inspectable from the Chat UI, not only the initial user-message turn.
+
+Changed:
+- Added current-conversation trace loading to the Chat page so it can group `context_segments` by `llmCallId`.
+- Added an `LLM 调用检查点` list in the right panel; each checkpoint opens the exact context stack for that saved LLM request.
+- Made user, assistant, workspace, and function-call/process messages clickable when they can be associated with an LLM call.
+- Cached the selected LLM call id in browser state.
+- Updated `ZLEAP_MASTER_PLAN.md` so future UI work preserves per-LLM-call context inspection.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:25 +08:00
 
 Purpose:

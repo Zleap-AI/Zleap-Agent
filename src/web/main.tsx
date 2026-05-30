@@ -8,6 +8,7 @@ type ChatMessage = {
   id: string;
   role: string;
   content: string;
+  inspectLlmCallId?: string;
   workspaceId?: string;
   eventKind?: string;
   title?: string;
@@ -44,6 +45,7 @@ type CachedState = {
   output?: AgentRunOutput | null;
   retryMessage?: string;
   selectedTurnId?: string;
+  selectedLlmCallId?: string;
   agentDraft?: Partial<AgentConfig>;
 };
 
@@ -122,6 +124,64 @@ function processMessageDetail(item: ChatMessage): string {
     item.content
   ].filter(Boolean);
   return lines.join("\n\n");
+}
+
+function parseJsonText(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function segmentsForLlmCall(segments: ContextSegment[], llmCallId: string): ContextSegment[] {
+  return segments
+    .filter((segment) => segment.llmCallId === llmCallId)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+function workspaceIdForLlmCall(segments: ContextSegment[]): string {
+  const workspaceSegment = segments.find((segment) => segment.segmentType === "workspace");
+  if (!workspaceSegment) return "未知";
+  const parsed = parseJsonText(workspaceSegment.content) as { currentWorkspace?: { id?: unknown } };
+  return typeof parsed?.currentWorkspace?.id === "string" ? parsed.currentWorkspace.id : "未知";
+}
+
+function llmCallLabel(call: LLMCallSnapshot, segments: ContextSegment[], index: number): string {
+  const workspaceId = workspaceIdForLlmCall(segments);
+  return `#${index + 1} · ${workspaceId} · ${call.status}`;
+}
+
+function inferMessageLlmCallId(
+  item: ChatMessage,
+  index: number,
+  llmCalls: LLMCallSnapshot[],
+  contextSegments: ContextSegment[]
+): string {
+  if (item.inspectLlmCallId) return item.inspectLlmCallId;
+  const fromTurn = item.turnOutput?.contextSegments?.[0]?.llmCallId;
+  if (item.role === "用户" && fromTurn) return fromTurn;
+  if (llmCalls.length === 0) return fromTurn ?? "";
+
+  if (item.role === "助手") return llmCalls.at(-1)?.id ?? "";
+
+  if (item.toolNames?.length) {
+    const toolName = item.toolNames[0];
+    const fromContext = contextSegments.find((segment) => segment.segmentType === "tool_result" && segment.content.includes(toolName));
+    if (fromContext) return fromContext.llmCallId;
+    const fromResponse = llmCalls.find((call) => call.responseJson.includes(toolName) || call.messagesJson.includes(toolName));
+    if (fromResponse) return fromResponse.id;
+  }
+
+  if (item.workspaceId) {
+    const workspaceCall = llmCalls.find((call) => {
+      const segments = segmentsForLlmCall(contextSegments, call.id);
+      return workspaceIdForLlmCall(segments) === item.workspaceId;
+    });
+    if (workspaceCall) return workspaceCall.id;
+  }
+
+  return llmCalls[Math.min(index, llmCalls.length - 1)]?.id ?? fromTurn ?? "";
 }
 
 const SYSTEM_TOOL_NAMES = new Set([
@@ -472,13 +532,35 @@ function ChatTab() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(() => normalizeCachedMessages(cached.messages));
   const [output, setOutput] = useState<AgentRunOutput | null>(cached.output ?? null);
+  const [trace, setTrace] = useState<ConversationTrace | null>(null);
   const [error, setError] = useState("");
   const [retryMessage, setRetryMessage] = useState(cached.retryMessage ?? "");
   const [selectedTurnId, setSelectedTurnId] = useState(cached.selectedTurnId ?? "");
+  const [selectedLlmCallId, setSelectedLlmCallId] = useState(cached.selectedLlmCallId ?? "");
   const [loading, setLoading] = useState(false);
   const selectedUserMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId && item.role === "用户") : undefined;
   const visibleOutput = selectedUserMessage ? selectedUserMessage.turnOutput ?? null : output;
   const workspaceView = describeWorkspaceView(visibleOutput);
+  const traceSegments = trace?.contextSegments ?? [];
+  const llmCalls = (trace?.llmCalls ?? []).slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const inspectedMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId) : undefined;
+  const inspectedOutput = inspectedMessage?.role === "鐢ㄦ埛" ? inspectedMessage.turnOutput ?? output : output;
+  const inspectedLlmCallId = selectedLlmCallId || inspectedMessage?.inspectLlmCallId || inspectedOutput?.contextSegments?.[0]?.llmCallId || llmCalls.at(-1)?.id || "";
+  const inspectedLlmCall = llmCalls.find((call) => call.id === inspectedLlmCallId);
+  const inspectedLlmSegments = inspectedLlmCallId ? segmentsForLlmCall(traceSegments, inspectedLlmCallId) : [];
+  const inspectedContextSegments = inspectedLlmSegments.length > 0 ? inspectedLlmSegments : (inspectedOutput?.contextSegments ?? []);
+
+  async function loadConversationTrace(targetConversationId = conversationId): Promise<ConversationTrace | null> {
+    if (!targetConversationId.trim()) return null;
+    try {
+      const params = new URLSearchParams({ actorId: userId, actorRole: userRole });
+      const loaded = await api<ConversationTrace>(`/api/conversations/${encodeURIComponent(targetConversationId)}/trace?${params.toString()}`);
+      setTrace(loaded);
+      return loaded;
+    } catch {
+      return null;
+    }
+  }
 
   useEffect(() => {
     api<AgentConfig>("/api/agents/default-agent")
@@ -493,8 +575,13 @@ function ChatTab() {
   }, []);
 
   useEffect(() => {
-    saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, agentDraft: agent ?? undefined });
-  }, [userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, agent]);
+    if (!conversationId || (!output && messages.length === 0)) return;
+    void loadConversationTrace(conversationId);
+  }, [conversationId, userId, userRole]);
+
+  useEffect(() => {
+    saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined });
+  }, [userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agent]);
 
   async function saveAgent() {
     if (!agent) return;
@@ -621,8 +708,14 @@ function ChatTab() {
           const payload = JSON.parse(line.slice(5).trim()) as any;
           if (payload.type === "start") {
             const startOutput = { ...payload.output, assistantMessage: "" } as AgentRunOutput;
+            const startLlmCallId = startOutput.contextSegments[0]?.llmCallId ?? "";
             setOutput(startOutput);
-            setMessages((items) => items.map((item) => item.id === userMessageId ? { ...item, turnOutput: startOutput } : item));
+            setSelectedLlmCallId(startLlmCallId);
+            setMessages((items) => items.map((item) => item.id === userMessageId
+              ? { ...item, turnOutput: startOutput, inspectLlmCallId: startLlmCallId }
+              : item.id === assistantMessageId
+                ? { ...item, inspectLlmCallId: startLlmCallId }
+                : item));
           }
           if (payload.type === "delta") {
             for (const char of Array.from(payload.text)) {
@@ -639,10 +732,15 @@ function ChatTab() {
           if (payload.type === "done") {
             setRetryMessage("");
             setOutput(payload.output);
-            setMessages((items) => items.map((item) => item.id === userMessageId ? { ...item, turnOutput: payload.output } : item));
+            const loadedTrace = await loadConversationTrace(payload.output.conversationId);
+            const calls = (loadedTrace?.llmCalls ?? []).slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+            const firstCallId = calls[0]?.id ?? payload.output.contextSegments[0]?.llmCallId ?? "";
+            const finalCallId = calls.at(-1)?.id ?? firstCallId;
+            setSelectedLlmCallId(finalCallId);
+            setMessages((items) => items.map((item) => item.id === userMessageId ? { ...item, turnOutput: payload.output, inspectLlmCallId: firstCallId } : item));
             setMessages((items) => {
               return items.map((item) => item.id === assistantMessageId
-                ? { ...item, content: payload.output.assistantMessage, streaming: false }
+                ? { ...item, content: payload.output.assistantMessage, streaming: false, inspectLlmCallId: finalCallId }
                 : item);
             });
           }
@@ -687,9 +785,11 @@ function ChatTab() {
     localStorage.removeItem(CACHE_KEY);
     setMessages([]);
     setOutput(null);
+    setTrace(null);
     setError("");
     setRetryMessage("");
     setSelectedTurnId("");
+    setSelectedLlmCallId("");
     setApiKey("");
     setConversationId(`conv-${Date.now()}`);
   }
@@ -703,9 +803,11 @@ function ChatTab() {
     setMessage("");
     setMessages([]);
     setOutput(null);
+    setTrace(null);
     setError("");
     setRetryMessage("");
     setSelectedTurnId("");
+    setSelectedLlmCallId("");
   }
 
   return (
@@ -743,17 +845,26 @@ function ChatTab() {
           <button onClick={() => void clearConversation()} disabled={loading || (messages.length === 0 && !output && !error)}>清空当前会话</button>
         </div>
         <div className="message-list">
-          {messages.map((item, index) => (
+          {messages.map((item, index) => {
+            const inferredLlmCallId = inferMessageLlmCallId(item, index, llmCalls, traceSegments);
+            const clickable = Boolean(inferredLlmCallId || item.turnOutput);
+            return (
             <article
               key={item.id ?? `${item.role}-${index}`}
-              className={`message ${item.role === "用户" ? "user clickable" : item.role === "运行过程" ? "process" : item.role === "工作空间" ? "workspace" : "assistant"} ${item.failed ? "failed" : ""} ${selectedTurnId === item.id ? "selected" : ""}`}
-              role={item.role === "用户" ? "button" : undefined}
-              tabIndex={item.role === "用户" ? 0 : undefined}
-              onClick={() => item.role === "用户" && setSelectedTurnId(item.id)}
-              onKeyDown={(event) => {
-                if (item.role === "用户" && (event.key === "Enter" || event.key === " ")) setSelectedTurnId(item.id);
+              className={`message ${item.role === "用户" ? "user" : item.role === "运行过程" ? "process" : item.role === "工作空间" ? "workspace" : "assistant"} ${clickable ? "clickable" : ""} ${item.failed ? "failed" : ""} ${selectedTurnId === item.id ? "selected" : ""}`}
+              role={clickable ? "button" : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              onClick={() => {
+                if (!clickable) return;
+                setSelectedTurnId(item.id);
+                setSelectedLlmCallId(inferredLlmCallId);
               }}
-              title={item.role === "用户" ? "查看这轮对话的上下文窗口堆栈" : undefined}
+              onKeyDown={(event) => {
+                if (!clickable || (event.key !== "Enter" && event.key !== " ")) return;
+                setSelectedTurnId(item.id);
+                setSelectedLlmCallId(inferredLlmCallId);
+              }}
+              title={clickable ? "查看这条消息关联的 LLM 上下文窗口堆栈" : undefined}
             >
               {item.role === "运行过程" ? (
                 <details className="process-details">
@@ -774,7 +885,8 @@ function ChatTab() {
                 <button className="inline-action" disabled={loading} onClick={() => sendMessage(item.requestText)}>重试</button>
               )}
             </article>
-          ))}
+            );
+          })}
           {messages.length === 0 && <div className="empty">发送一条消息，右侧会展示本轮上下文窗口和工作空间轨迹。</div>}
         </div>
         {error && (
@@ -797,17 +909,18 @@ function ChatTab() {
       <aside className="panel context-panel">
         <h2>正在查看</h2>
         <div className="turn-badge">
-          {selectedUserMessage ? (
+          {inspectedMessage ? (
             <>
-              <strong>用户消息</strong>
-              <span>{selectedUserMessage.content}</span>
+              <strong>{messageRoleLabel(inspectedMessage)}</strong>
+              <span>{inspectedMessage.content || processMessageSummary(inspectedMessage)}</span>
             </>
           ) : (
             <>
               <strong>最新一轮</strong>
-          <span>未选择历史用户消息</span>
+              <span>未选择具体消息</span>
             </>
           )}
+          {inspectedLlmCall && <small>LLM 调用：{inspectedLlmCall.id}</small>}
         </div>
         <h2>当前查看工作空间</h2>
         <div className="workspace-badge">
@@ -824,10 +937,30 @@ function ChatTab() {
             </details>
           ))}
         </div>
+        <h2>LLM 调用检查点</h2>
+        <div className="llm-checkpoints">
+          {llmCalls.length === 0 && <div className="empty">暂无已保存的 LLM 调用。发送消息后会在这里按真实请求列出。</div>}
+          {llmCalls.map((call, index) => {
+            const segments = segmentsForLlmCall(traceSegments, call.id);
+            return (
+              <button
+                key={call.id}
+                className={inspectedLlmCallId === call.id ? "active" : ""}
+                onClick={() => {
+                  setSelectedLlmCallId(call.id);
+                  setSelectedTurnId("");
+                }}
+              >
+                <strong>{llmCallLabel(call, segments, index)}</strong>
+                <span>{call.createdAt}</span>
+              </button>
+            );
+          })}
+        </div>
         <h2>上下文窗口堆栈</h2>
-        {selectedUserMessage && !selectedUserMessage.turnOutput
-          ? <div className="empty">这条消息还没有保存上下文快照。</div>
-          : <ContextStack segments={visibleOutput?.contextSegments ?? []} />}
+        {inspectedMessage && !inspectedContextSegments.length
+          ? <div className="empty">这条消息还没有匹配到已保存的 LLM 上下文快照。</div>
+          : <ContextStack segments={inspectedContextSegments} />}
         <h2>本轮记忆写入</h2>
         <MemoryWriteStack memories={visibleOutput?.memoryWrites ?? []} />
       </aside>
@@ -1102,14 +1235,6 @@ function statusClass(status: LLMCallSnapshot["status"]): string {
   if (status === "completed") return "success";
   if (status === "failed") return "danger";
   return "pending";
-}
-
-function parseJsonText(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
 }
 
 function shortText(value: string, maxLength = 220): string {

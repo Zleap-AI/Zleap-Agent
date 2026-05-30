@@ -262,6 +262,12 @@ textarea {
   box-shadow: 0 0 0 2px rgba(25, 103, 210, 0.16);
 }
 
+.message.process.clickable .process-details summary,
+.message.workspace.clickable,
+.message.assistant.clickable {
+  cursor: pointer;
+}
+
 .message.assistant {
   background: #ffffff;
 }
@@ -348,6 +354,40 @@ textarea {
   color: #24313d;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.llm-checkpoints {
+  display: grid;
+  gap: 8px;
+}
+
+.llm-checkpoints button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #24313d;
+  text-align: left;
+  cursor: pointer;
+}
+
+.llm-checkpoints button:hover,
+.llm-checkpoints button:focus-visible,
+.llm-checkpoints button.active {
+  border-color: #1967d2;
+  box-shadow: 0 0 0 2px rgba(25, 103, 210, 0.12);
+}
+
+.llm-checkpoints strong {
+  font-size: 13px;
+}
+
+.llm-checkpoints span {
+  font-size: 12px;
+  color: #7b8792;
 }
 
 .message.failed {

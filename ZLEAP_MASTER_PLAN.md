@@ -20,6 +20,7 @@
   - Chat errors must offer a retry action for the failed user message.
   - The Chat page must support clearing only the current conversation while preserving cached settings and API key.
   - Each user chat message should keep the context stack snapshot for that turn; clicking a user message shows that historical context stack in the right panel.
+  - The Chat right panel must also expose every saved LLM call in the current conversation as an inspectable checkpoint. Clicking any chat message or checkpoint should show the context stack grouped by that exact `llmCallId`, including follow-up calls after function/tool execution, so workspace switching can be verified from the real prompt window.
   - Chat composer keyboard behavior: Enter sends the message; Ctrl+Enter inserts a newline.
   - The Chat timeline is user-task-first: ordinary users should experience one continuous conversation, not a forced workspace/debug mental model. Workspace switches and function-call/tool execution must appear as compact collapsible process blocks inside the same conversation stream, with simple summaries such as entering a capability workspace or running several function calls; detailed workspace ids, tool names, arguments/results, and runtime evidence live inside the expanded details and Logs/Context panels.
   - `工作空间` manages workspaces first, then registers tools inside the selected workspace. The UI must not present tools as a global shared pool that users merely pick from.
@@ -346,6 +347,7 @@
   - Failed chat requests can be retried.
   - Clearing the current conversation resets messages, trace, and conversation id without clearing saved LLM settings or API key.
   - Clicking a previous user message switches the right context panel to that turn's saved context stack.
+  - Clicking assistant messages, workspace process messages, function-call/result process blocks, or an LLM checkpoint switches the right context panel to the associated saved LLM call context stack.
   - Chat composer sends on Enter and inserts a newline on Ctrl+Enter.
   - Chat right panel shows memory records written by the selected/latest turn.
   - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact tool result messages returned into the model loop.
