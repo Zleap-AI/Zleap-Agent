@@ -29,6 +29,7 @@ packages/
     SQL store
     SQLite FTS recall
     memory extraction
+    prompt projection for impression/result-event/process-event/skill
 
   tools/
     tool interface
@@ -46,6 +47,7 @@ packages/
     chat interface
     workspace view
     memory inspector
+    context overview and raw final_messages log toggle
 ```
 
 也可以先用单仓单包实现 MVP，等概念稳定后再拆包。
@@ -81,7 +83,7 @@ interface AgentRuntime {
 
 - 构造 workspace context。
 - 绑定 workspace tools。
-- 召回 event 和 skill。
+- 召回 projected memory：固定 impression、result event timeline、相关 process event、workspace skill。
 - 执行模型循环。
 - 生成 workspace result。
 
@@ -313,6 +315,7 @@ MVP 可以暂时简化：
 - skill 写入和查询。
 - impression 写入和查询。
 - 实现 SQLite FTS + relation/version 召回，并保证按 memoryType、userId、agentId、workspaceId 分区去重。
+- 实现 prompt projection：impression 固定最新 20 条，result event 约 50 条，process event 少量相关召回，skill 按 workspace 策略召回；原始 `final_messages` 只作为日志查看。
 
 ### Stage 5: Hook System
 

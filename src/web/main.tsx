@@ -670,8 +670,32 @@ function ConceptIntroTab() {
 
       <section className="concept-section">
         <div className="section-heading">
-          <span>上下文契约</span>
-          <h2>每一次 LLM 调用都是可检查的窗口</h2>
+          <span>记忆召回</span>
+          <h2>长对话靠投影延续，不靠原文回灌</h2>
+        </div>
+        <div className="memory-triad">
+          <article>
+            <strong>原始近邻</strong>
+            <span>最近 20 条本地记录</span>
+            <p>保留当前任务最需要的细节；更早的长对话不直接回灌原文，避免把上下文窗口重新撑满。</p>
+          </article>
+          <article>
+            <strong>事件投影</strong>
+            <span>50 条结果 + 相关过程</span>
+            <p>结果事件提供旧任务时间线；过程事件只按当前任务相关性召回少量片段，并只注入摘要投影。</p>
+          </article>
+          <article>
+            <strong>稳定印象</strong>
+            <span>固定最新 20 条</span>
+            <p>Impression 不按 query 筛选；它是对人和 agent 自我的稳定认知，天然有上限。</p>
+          </article>
+        </div>
+      </section>
+
+      <section className="concept-section">
+        <div className="section-heading">
+          <span>上下文概览</span>
+          <h2>模型真实收到什么，UI 额外展示什么</h2>
         </div>
         <div className="context-stack-visual">
           {[
@@ -681,8 +705,7 @@ function ConceptIntroTab() {
             ["memory", "impression 固定 20 条、结果事件时间线、相关过程事件、skill 分区投影"],
             ["history", "同 workspace 持续本地记录、任务包、完成结果、近期工具证据"],
             ["user", "干净用户消息"],
-            ["tool_result", "后续调用收到的工具结果"],
-            ["final_messages", "真实发送给 provider 的 messages 快照"]
+            ["tool_result", "后续调用收到的工具结果"]
           ].map(([name, desc], index) => (
             <div className="context-layer" key={name}>
               <b>{index + 1}</b>
@@ -691,6 +714,9 @@ function ConceptIntroTab() {
             </div>
           ))}
         </div>
+        <p className="concept-note">
+          Final Messages 是 UI/trace 里的调试快照，用来查看最终发给 provider 的 messages；它不是新的上下文层，也不会被再次塞回 LLM。
+        </p>
       </section>
 
       <section className="concept-section">
@@ -779,6 +805,7 @@ function ChatTab() {
   const [retryMessage, setRetryMessage] = useState(cached.retryMessage ?? "");
   const [selectedTurnId, setSelectedTurnId] = useState(cached.selectedTurnId ?? "");
   const [selectedLlmCallId, setSelectedLlmCallId] = useState(cached.selectedLlmCallId ?? "");
+  const [showRawContextLogs, setShowRawContextLogs] = useState(false);
   const [loading, setLoading] = useState(false);
   const selectedUserMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId && item.role === "用户") : undefined;
   const visibleOutput = selectedUserMessage ? selectedUserMessage.turnOutput ?? null : output;
@@ -792,6 +819,8 @@ function ChatTab() {
   const inspectedLlmSegments = inspectedLlmCallId ? segmentsForLlmCall(traceSegments, inspectedLlmCallId) : [];
   const inspectedRawContextSegments = inspectedLlmSegments.length > 0 ? inspectedLlmSegments : (inspectedOutput?.contextSegments ?? []);
   const inspectedContextSegments = segmentsWithToolSnapshot(inspectedRawContextSegments, inspectedLlmCall);
+  const visibleContextSegments = inspectedContextSegments.filter((segment) => segment.segmentType !== "final_messages");
+  const rawContextLogSegments = inspectedContextSegments.filter((segment) => segment.segmentType === "final_messages");
 
   async function loadConversationTrace(targetConversationId = conversationId): Promise<ConversationTrace | null> {
     if (!targetConversationId.trim()) return null;
@@ -1155,10 +1184,22 @@ function ChatTab() {
           <strong>{workspaceView.primary}</strong>
           {workspaceView.detail && <span>{workspaceView.detail}</span>}
         </div>
-        <h2>上下文窗口堆栈</h2>
-        {inspectedMessage && !inspectedContextSegments.length
+        <div className="context-stack-heading">
+          <h2>上下文窗口堆栈</h2>
+          {rawContextLogSegments.length > 0 && (
+            <button className="subtle-button" onClick={() => setShowRawContextLogs((value) => !value)}>
+              {showRawContextLogs ? "隐藏原始日志" : "显示原始日志"}
+            </button>
+          )}
+        </div>
+        {inspectedMessage && !visibleContextSegments.length
           ? <div className="empty">这条消息还没有匹配到已保存的 LLM 上下文快照。</div>
-          : <ContextStack segments={inspectedContextSegments} />}
+          : <ContextStack segments={visibleContextSegments} />}
+        {showRawContextLogs && rawContextLogSegments.length > 0 && (
+          <div className="raw-context-log">
+            <ContextStack segments={rawContextLogSegments} />
+          </div>
+        )}
         <h2>本轮记忆写入</h2>
         <MemoryWriteStack memories={visibleOutput?.memoryWrites ?? []} />
       </aside>
@@ -1583,7 +1624,7 @@ function contextSegmentLabel(segment: ContextSegment): string {
   if (segment.segmentType === "history") return "本地对话片段";
   if (segment.segmentType === "user") return "干净用户消息";
   if (segment.segmentType === "tool_result") return "工具结果";
-  if (segment.segmentType === "final_messages") return "最终 LLM Messages";
+  if (segment.segmentType === "final_messages") return "原始 LLM Messages 日志";
   return segment.title;
 }
 

@@ -634,6 +634,34 @@ textarea {
   gap: 8px;
 }
 
+.context-stack-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.context-stack-heading h2 {
+  margin: 0;
+}
+
+.subtle-button {
+  border-color: transparent;
+  background: transparent;
+  color: #5c6975;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.subtle-button:hover {
+  background: #eef2f6;
+}
+
+.raw-context-log {
+  margin-top: 8px;
+  opacity: 0.92;
+}
+
 .context-substack {
   display: grid;
   gap: 8px;
@@ -1044,6 +1072,12 @@ td button {
 
 .section-heading h2 {
   font-size: 22px;
+}
+
+.concept-note {
+  margin-top: 14px;
+  color: #4a5662;
+  line-height: 1.65;
 }
 
 .compare-grid,

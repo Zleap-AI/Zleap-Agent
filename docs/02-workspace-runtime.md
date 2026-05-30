@@ -2,7 +2,7 @@
 
 ## 2026-05-31 update: workspace context category
 
-In context display and prompt assembly, workspace information is one top-level category. It contains the active workspace description, instructions, tool instructions, manifest, memory policy, and current callable tool definitions. Only the main workspace includes the available workspace manifest list inside this workspace contract. Child workspaces do not receive sibling workspace lists.
+In context display and prompt assembly, workspace information is one top-level category. It contains the active workspace description, manifest, memory policy, and current callable tool definitions. Main and child workspaces may both see the available workspace manifest list as a shared capability map, but only main receives `enterWorkspace`; child workspaces can only suggest sibling handoff through `exitWorkspace.suggestedNextSteps`.
 
 ## 2026-05-31 update: workspace-first tool registration and MCP execution
 
@@ -64,7 +64,6 @@ workspace 是 Zleap 中最重要的运行时边界。
 
 ```text
 Workspace = Tools
-          + Tool Usage Instructions
           + Event Memory
           + Skill Memory
           + Workspace-local Context
@@ -77,6 +76,8 @@ Workspace = Tools
 - 当前 workspace 内有哪些相关事件记忆。
 - 当前 workspace 内有哪些可复用技能经验。
 - 当前 workspace 的对话上下文如何组织。
+
+进入 workspace 时，runtime 召回的是可注入的 memory 投影视图，不是原始 memory 表 dump。Impression 固定取最新 20 条；event 分为 result timeline 和相关 process event；原始工具输出、完整 metadata 和 provider `final_messages` 快照留在 trace/debug 日志里。
 
 ## 为什么需要 workspace
 

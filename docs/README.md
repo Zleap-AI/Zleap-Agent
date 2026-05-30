@@ -29,7 +29,6 @@ Agent = LLM
 
 ```text
 Workspace = Tools
-          + Tool Usage Instructions
           + Event Memory
           + Skill Memory
           + Workspace-local Context
@@ -107,3 +106,5 @@ Stable Agent Identity = LLM
 8. memory 不是独立 workspace；memory tools 由 runtime 挂载到每个 workspace。
 9. main workspace 通过 runtime 注入的 manifest 了解所有 workspace，不通过 `listWorkspaces` 工具发现。
 10. 代码负责身份、scope、权限、工具可见性和持久化边界；模型只在当前暴露的边界内做选择。
+11. 上下文只注入真实需要的投影视图：impression 固定最新 20 条，旧对话通过约 50 条 result event 和少量相关 process event 承接，原始明细留在日志和数据库。
+12. `final_messages` 是原始 provider payload 日志，不是上下文堆栈的一层；Web UI 应通过“显示原始日志”查看它。

@@ -364,6 +364,8 @@ event/skill 的召回开关由当前 active workspace 的 `memoryPolicyJson` 控
 
 Impression recall 不做 query 选择性筛选，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 表达对人和 agent 自我的稳定认知，预期数量有自然上限，不像 event log 一样无限增长。
 
+`final_messages` 不属于 memory，也不属于 prompt context 的一层。它只是原始 LLM 请求日志，用于在 Web UI 中核对最终 provider payload；memory 召回逻辑不能从这个日志反向再注入上下文。
+
 ## Memory 写入权限
 
 ### Impression 写入权限

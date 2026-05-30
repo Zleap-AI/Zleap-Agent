@@ -46,6 +46,8 @@ Zleap 的核心假设是：
 - 控制任务在不同能力空间之间如何流转。
 - 控制经验如何沉淀，如何被未来任务复用。
 
+这也决定了 memory 的处理方式：长对话不能靠把原始历史反复塞回上下文解决。最近的少量本地对话保留细节，较早内容沉淀为 result/process event；注入模型时使用 compact projection，原始证据留在日志、workspace session 和数据库里。`final_messages` 也是调试日志，不是模型需要再次阅读的上下文。
+
 ## Agent 的定义
 
 在 Zleap 中，agent 可以被定义为：

@@ -86,6 +86,8 @@ anonymous:{sessionId}
 | Skill Memory | 否 | 是 | 是 | workspace 经验，需脱敏 |
 | Tool Call Log | 是 | 是 | 默认否 | 审计和调试用 |
 
+上下文注入也必须遵守这张隔离矩阵。Impression 固定召回当前 user / agent scope 的最新有效记录；event 只召回当前 user + active workspace 的 result/process 投影视图；skill 只召回 active workspace 的共享脱敏经验。原始 `final_messages` provider payload 是调试日志，不参与跨用户或跨 workspace memory 召回。
+
 ## Creator 与普通用户
 
 框架需要区分 agent creator 和普通 user。

@@ -109,11 +109,14 @@ load:
   user impression
   agent self impression
   workspace instructions
-  event memory scoped by userId + workspaceId
+  result event memory scoped by userId + workspaceId
+  relevant process event memory scoped by userId + workspaceId
   skill memory scoped by workspaceId
 ```
 
 The memory partitions recalled here become the authoritative `WorkspaceSession.localContext` for the next LLM call in that workspace. Later prompt assembly must reuse this persisted local context rather than recalling memory again with a different query, so trace/debug UI and final LLM messages stay consistent.
+
+Recall uses the long-conversation projection strategy: latest 20 impression projections are loaded without query filtering; result events provide an older outcome timeline; process events are searched by current task relevance; skill memory remains workspace-scoped. `final_messages` is only a raw provider-payload log for inspection and must not become an input to hooks or later prompt assembly.
 
 ## afterWorkspaceEnter
 

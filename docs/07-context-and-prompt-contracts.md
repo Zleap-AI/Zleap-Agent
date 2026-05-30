@@ -10,7 +10,7 @@ Context stack should be clear to inspect in the Web UI. The top-level categories
 3. memory
 4. history
 5. user
-6. tool_result / final_messages for follow-up debug
+6. tool_result for follow-up calls
 ```
 
 Second-level sections live inside those categories:
@@ -25,6 +25,8 @@ Second-level sections live inside those categories:
 
 The synthetic tool results follow the same simplified structure: `runtime_context.memory` mirrors the `memory` category, and `runtime_context.local_conversation` mirrors the `history` category. The model still receives a clean final user message.
 
+`final_messages` is not a real context stack category. It is a raw trace/debug snapshot of the exact messages payload sent to the provider after prompt assembly. The Chat UI should hide it from the normal stack and expose it only through a subtle raw-log control such as `显示原始日志`.
+
 ## 2026-05-30 更新：子 workspace 上下文交付契约
 
 子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`。
@@ -33,7 +35,7 @@ main workspace 可以看到的返回内容是 `status`、`summary`、`artifacts`
 
 子 workspace 内部保留的内容包括原始工具输出、完整 tool call 参数和结果、召回的 event/skill、局部 scratch/evidence、审计日志和 memory 提取证据。这些内容进入 trace/debug UI，而不是默认进入 main workspace 的 prompt。这样 main workspace 得到的是可决策的交付物，不会被子 workspace 的全部执行噪声污染。
 
-完整 workspace registry 只属于 main workspace 的编排视野。子 workspace 不接收 sibling workspace 清单，只接收自己的 active manifest；如果它判断需要其他 workspace，应该把这个判断写进 `suggestedNextSteps`，由 main workspace 决定下一次切换。
+完整 workspace registry 是跨 workspace 共享的能力地图。main 和子 workspace 都可以知道有哪些 sibling workspace 存在；区别是只有 main 拥有 `enterWorkspace` 调度权。子 workspace 如果判断需要其他 workspace，应该把这个判断写进 `suggestedNextSteps`，由 main workspace 决定下一次切换。
 
 `running` 只能表示一个 `WorkspaceSession` 仍在执行中。它不能作为 `exitWorkspace` 的交付状态；runtime 必须拒绝这种退出请求，并把失败作为 tool result 记录在当前子 workspace 里。
 

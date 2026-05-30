@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:33 +08:00
+
+Purpose:
+- Clarify memory handling in the concept guide and keep raw provider payload logs out of the normal context stack.
+
+Changed:
+- Added a dedicated memory-recall explanation to the `概念介绍` tab: recent raw context, result/process event projections, fixed impression recall, and why long conversations do not re-inject raw source data.
+- Renamed the concept guide's context section to `上下文概览` and removed `final_messages` from the normal context stack illustration.
+- Updated the Chat right context panel so `final_messages` is hidden from the stack and appears only behind a subtle `显示原始日志` toggle beside the stack title.
+- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, and all files under `docs/` to state that `final_messages` is a raw provider-payload log, not a context layer, and to restate the current memory recall/injection strategy.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 07:25 +08:00
 
 Purpose:
