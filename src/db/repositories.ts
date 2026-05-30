@@ -1139,7 +1139,7 @@ export class Repositories {
     return this.getApprovalRequest(id);
   }
 
-  getTrace(conversationId: string, actorId: string, actorRole: UserRole): { sessions: WorkspaceSession[]; llmCalls: LLMCallSnapshot[]; contextSegments: ContextSegment[]; toolCalls: ToolCallLog[]; auditLogs: AuditLog[]; approvalRequests: ApprovalRequest[] } {
+  getTrace(conversationId: string, actorId: string, actorRole: UserRole): { sessions: WorkspaceSession[]; llmCalls: LLMCallSnapshot[]; contextSegments: ContextSegment[]; toolCalls: ToolCallLog[]; auditLogs: AuditLog[]; approvalRequests: ApprovalRequest[]; memoryWrites: MemoryRow[] } {
     if (!actorId || (actorRole !== "user" && actorRole !== "creator")) {
       throw new Error("Conversation trace requires explicit actor identity.");
     }
@@ -1165,8 +1165,26 @@ export class Repositories {
       contextSegments: this.db.prepare("SELECT * FROM context_segments WHERE conversationId = ? ORDER BY sortOrder").all(conversationId) as ContextSegment[],
       toolCalls: this.listToolCalls(conversationId, toolLogUserId),
       auditLogs: this.listAuditLogs({ conversationId }),
-      approvalRequests: this.listApprovalRequests({ conversationId, actorId, actorRole })
+      approvalRequests: this.listApprovalRequests({ conversationId, actorId, actorRole }),
+      memoryWrites: this.listConversationMemoryWrites(conversationId, actorId, actorRole)
     };
+  }
+
+  private listConversationMemoryWrites(conversationId: string, actorId: string, actorRole: UserRole): MemoryRow[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM memories
+      WHERE deletedAt IS NULL
+        AND metadataJson LIKE ?
+      ORDER BY createdAt DESC
+      LIMIT 100
+    `).all(`%"conversationId":"${conversationId}"%`) as MemoryRow[];
+    if (actorRole === "creator") return rows;
+    return rows.filter((memory) => {
+      if (memory.memoryType === "event") return memory.userId === actorId;
+      if (memory.memoryType === "skill") return Boolean(memory.workspaceId) && !memory.userId;
+      if (memory.memoryType === "impression") return Boolean(memory.userId) && memory.userId === actorId && !memory.agentId;
+      return false;
+    });
   }
 
   listAuditLogs(filters: { conversationId?: string; limit?: number } = {}): AuditLog[] {

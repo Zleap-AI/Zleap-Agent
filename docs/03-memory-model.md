@@ -106,6 +106,24 @@ agent self impression 记录 agent 对自己的长期身份认知。
 - 只有 agent 创建者可以授权 agent 写入。
 - 修改 self impression 应该有审计记录。
 
+scope 判断必须显式，而不是靠“没有 userId”猜测：
+
+```text
+User Impression:
+  memoryType = impression
+  userId 有值
+  agentId 为空
+  workspaceId 为空
+
+Agent Self Impression:
+  memoryType = impression
+  agentId 有值
+  userId 为空
+  workspaceId 为空
+```
+
+如果一条 impression 同时没有 userId 和 agentId，或者同时有 userId 与 agentId，都是无效/歧义 scope。系统提示词也必须明确告诉模型：用户偏好、用户身份、用户称呼写 `writeUserImpression`；agent 自己的名字、身份、职责、长期原则只有 creator 明确授权时才写 `writeAgentSelfImpression`。
+
 ## Event Memory
 
 event 是对事情的记忆。
@@ -415,7 +433,7 @@ Zleap 的 memory 系统要解决的不是“无限记住”，而是“在正确
 
 ## 2026-05-30 更新：记忆工具与 workspace 边界
 
-记忆不再作为独立 `Memory Workspace` 存在。`searchMemory`、`writeUserImpression`、`writeEventMemory`、`writeSkillMemory`、`updateMemory` 和 `deleteMemory` 挂载在每个 workspace 中。
+记忆不再作为独立 `Memory Workspace` 存在。模型可见的 memory 工具只包括 `searchMemory`、`writeUserImpression`、`writeAgentSelfImpression` 和 `writeSkillMemory`，并挂载在每个 workspace 中。`writeEventMemory`、`updateMemory` 和 `deleteMemory` 不是模型可调用工具。
 
 运行时模型调用这些工具时，event/skill 记忆必须被当前 active workspace 约束：在 `file` workspace 中不能搜索、写入、更新或删除 CLI 的 event/skill 记忆。user impression 和 agent self impression 仍然是跨 workspace 的身份层记忆，但写入和管理继续受 userId/creator policy 限制。
 

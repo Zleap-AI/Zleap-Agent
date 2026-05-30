@@ -228,6 +228,8 @@ Skill 有两种生成路径：
 - User impression 的 userId、agent self impression 的 agentId 也由 runtime 绑定或 creator policy 控制。
 - 跨 workspace 的筛选、人工编辑、删除和调试属于 Web UI/API 管理层能力，不属于普通 agent runtime。
 
+scope 判断必须显式：user impression 是 `memoryType=impression + userId 有值 + agentId 为空 + workspaceId 为空`；agent self impression 是 `memoryType=impression + agentId 有值 + userId 为空 + workspaceId 为空`。不能把“没有 userId”直接当成 self-impression，因为无 scope 或歧义 scope 本身就是错误状态。
+
 ---
 
 ## 五、多租户隔离设计

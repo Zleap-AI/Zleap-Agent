@@ -27,6 +27,7 @@ type ConversationTrace = {
   auditLogs: AuditLog[];
   approvalRequests: ApprovalRequest[];
   contextSegments: ContextSegment[];
+  memoryWrites: MemoryRow[];
 };
 
 const CACHE_KEY = "zleap.web.state.v2";
@@ -824,6 +825,7 @@ function ChatTab() {
   const inspectedContextSegments = segmentsWithToolSnapshot(inspectedRawContextSegments, inspectedLlmCall);
   const visibleContextSegments = inspectedContextSegments.filter((segment) => segment.segmentType !== "final_messages");
   const rawContextLogSegments = inspectedContextSegments.filter((segment) => segment.segmentType === "final_messages");
+  const visibleMemoryWrites = memoryWritesForVisibleTurn(visibleOutput, trace?.memoryWrites ?? []);
 
   async function loadConversationTrace(targetConversationId = conversationId): Promise<ConversationTrace | null> {
     if (!targetConversationId.trim()) return null;
@@ -1204,7 +1206,7 @@ function ChatTab() {
           </div>
         )}
         <h2>本轮记忆写入</h2>
-        <MemoryWriteStack memories={visibleOutput?.memoryWrites ?? []} />
+        <MemoryWriteStack memories={visibleMemoryWrites} />
       </aside>
     </section>
   );
@@ -1345,9 +1347,21 @@ function MemoryWriteStack({ memories }: { memories: MemoryRow[] }) {
         <details key={memory.id}>
           <summary>
             <span>{memory.title}</span>
-            <small>{memory.memoryType}</small>
+            <small>{memoryScopeLabel(memory)}</small>
           </summary>
-          <pre>{JSON.stringify(memory, null, 2)}</pre>
+          <div className="memory-write-card">
+            <div><span>类型</span><strong>{memory.memoryType}</strong></div>
+            <div><span>Scope</span><strong>{memoryScopeLabel(memory)}</strong></div>
+            <div><span>用户 ID</span><code>{memory.userId ?? "-"}</code></div>
+            <div><span>Agent ID</span><code>{memory.agentId ?? "-"}</code></div>
+            <div><span>工作空间 ID</span><code>{memory.workspaceId ?? "-"}</code></div>
+            <div><span>关系 ID</span><code>{memory.relationId ?? "-"}</code></div>
+            <div className="wide"><span>摘要</span><p>{memory.summary}</p></div>
+          </div>
+          <details>
+            <summary>完整记录</summary>
+            <JsonValueView value={memory} />
+          </details>
         </details>
       ))}
     </div>
@@ -1481,6 +1495,38 @@ function statusClass(status: LLMCallSnapshot["status"]): string {
 
 function shortText(value: string, maxLength = 220): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function memoryMetadata(memory: MemoryRow): Record<string, unknown> {
+  const parsed = parseJsonText(memory.metadataJson || "{}");
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+}
+
+function memoryScopeLabel(memory: MemoryRow): string {
+  if (memory.memoryType === "impression" && memory.agentId && !memory.userId && !memory.workspaceId) return `Agent 自我 · ${memory.agentId}`;
+  if (memory.memoryType === "impression" && memory.userId && !memory.agentId && !memory.workspaceId) return `用户印象 · ${memory.userId}`;
+  if (memory.memoryType === "event" && memory.userId && memory.workspaceId) return `事件 · ${memory.userId} / ${memory.workspaceId}`;
+  if (memory.memoryType === "skill" && memory.workspaceId && !memory.userId) return `工作空间经验 · ${memory.workspaceId}`;
+  return "未识别 scope";
+}
+
+function memoryWritesForVisibleTurn(output: AgentRunOutput | null, traceWrites: MemoryRow[]): MemoryRow[] {
+  const directWrites = output?.memoryWrites ?? [];
+  if (directWrites.length > 0) return directWrites;
+  if (!output || traceWrites.length === 0) return [];
+  const taskIds = new Set(output.workspaceTrace.map((session) => session.taskId));
+  const sessionIds = new Set(output.workspaceTrace.map((session) => session.id));
+  return traceWrites.filter((memory) => {
+    const metadata = memoryMetadata(memory);
+    if (metadata.conversationId !== output.conversationId) return false;
+    const metadataTaskIds = Array.isArray(metadata.taskIds) ? metadata.taskIds.map(String) : [];
+    const metadataSessionIds = Array.isArray(metadata.workspaceSessionIds) ? metadata.workspaceSessionIds.map(String) : [];
+    if (typeof metadata.taskId === "string" && taskIds.has(metadata.taskId)) return true;
+    if (typeof metadata.workspaceSessionId === "string" && sessionIds.has(metadata.workspaceSessionId)) return true;
+    if (metadataTaskIds.some((id) => taskIds.has(id))) return true;
+    if (metadataSessionIds.some((id) => sessionIds.has(id))) return true;
+    return false;
+  });
 }
 
 function logResultText(log: LLMCallSnapshot | undefined): string {
@@ -2508,8 +2554,11 @@ function MemoryTab() {
               <tr>
                 <th>类型</th>
                 <th>标题</th>
+                <th>Scope</th>
                 <th>用户</th>
+                <th>Agent</th>
                 <th>工作空间</th>
+                <th>关系 ID</th>
                 <th>版本</th>
                 <th>操作</th>
               </tr>
@@ -2519,8 +2568,11 @@ function MemoryTab() {
                 <tr key={memory.id}>
                   <td>{memory.memoryType}</td>
                   <td>{memory.title}</td>
+                  <td>{memoryScopeLabel(memory)}</td>
                   <td>{memory.userId ?? ""}</td>
+                  <td>{memory.agentId ?? ""}</td>
                   <td>{memory.workspaceId ?? ""}</td>
+                  <td><code>{memory.relationId ?? ""}</code></td>
                   <td>{memory.version}</td>
                   <td>
                     <button onClick={() => setEditing(memory)} disabled={busy}>编辑</button>
@@ -2552,6 +2604,7 @@ function MemoryTab() {
               <label>摘要<textarea value={editing.summary ?? ""} onChange={(event) => setEditing({ ...editing, summary: event.target.value })} /></label>
               <label>详情<textarea value={editing.detail ?? ""} onChange={(event) => setEditing({ ...editing, detail: event.target.value })} /></label>
               <label>用户 ID<input value={editing.userId ?? ""} onChange={(event) => setEditing({ ...editing, userId: event.target.value || undefined })} /></label>
+              <label>Agent ID<input value={editing.agentId ?? ""} onChange={(event) => setEditing({ ...editing, agentId: event.target.value || undefined })} /></label>
               <label>工作空间 ID<input value={editing.workspaceId ?? ""} onChange={(event) => setEditing({ ...editing, workspaceId: event.target.value || undefined })} /></label>
               <label>关系 ID<input value={editing.relationId ?? ""} onChange={(event) => setEditing({ ...editing, relationId: event.target.value || undefined })} /></label>
               <label>版本<input type="number" value={editing.version ?? 1} onChange={(event) => setEditing({ ...editing, version: Number(event.target.value) })} /></label>

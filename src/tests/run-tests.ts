@@ -1560,11 +1560,13 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("内部运行策略"), true);
   assert.equal(systemMessage.includes("记忆写入协议"), true);
   assert.equal(systemMessage.includes("writeUserImpression"), true);
-  assert.equal(systemMessage.includes("稳定的长期偏好"), true);
+  assert.equal(systemMessage.includes("稳定长期偏好"), true);
+  assert.equal(systemMessage.includes("不要把 agent 自己的名字、身份、职责、人格、能力边界写进 user impression"), true);
   assert.equal(systemMessage.includes("writeSkillMemory"), true);
   assert.equal(systemMessage.includes("生命周期 hook"), true);
   assert.equal(systemMessage.includes("writeEventMemory"), false);
   assert.equal(systemMessage.includes("writeAgentSelfImpression"), true);
+  assert.equal(systemMessage.includes("不要把用户偏好或用户身份写进 agent self impression"), true);
   assert.equal(systemMessage.includes("workspace 是内部能力边界"), true);
   assert.equal(systemMessage.includes("enterWorkspace"), true);
   assert.equal(systemMessage.includes("exitWorkspace"), true);
@@ -2791,6 +2793,7 @@ async function testMemoryToolCallLoop() {
   assert.equal(trace.llmCalls.length, 2);
   assert.equal(trace.llmCalls.every((call) => call.status === "completed"), true);
   assert.equal(trace.auditLogs.some((log) => log.action === "create" && log.resourceId === writtenImpression?.id && log.workspaceId === "main"), true);
+  assert.equal(trace.memoryWrites.some((memory) => memory.id === writtenImpression?.id), true);
 }
 
 async function testImpressionMemoryToolScopeIsCodeBound() {

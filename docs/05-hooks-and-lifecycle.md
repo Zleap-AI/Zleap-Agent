@@ -289,13 +289,11 @@ skill 提取应该更克制。
 ```text
 writeUserImpression
 writeAgentSelfImpression
-writeEventMemory
 writeSkillMemory
 searchMemory
-updateMemory
 ```
 
-但这些工具不是任意可用。
+模型可见的记忆工具面必须保持很小：没有 `writeEventMemory`，也没有模型可调用的 `updateMemory` / `deleteMemory`。事件记忆由生命周期 hook 程序化写入；更新和删除属于 Web UI/API 管理层调试能力。
 
 ### writeUserImpression
 
@@ -308,6 +306,7 @@ updateMemory
 限制：
 
 - 只能写当前 userId。
+- 只记录当前用户的稳定长期偏好、背景、身份、称呼或约束；不要记录 agent 自己的名字、身份、职责或人格。
 - 不应记录敏感信息，除非用户明确要求。
 - runtime 可以把产生这条 impression 的 `activeWorkspaceId`、`workspaceSessionId`、`taskId` 写入 metadata/audit 作为调试证据；这些字段不是 scope，也不能由模型传入。
 
@@ -316,23 +315,13 @@ updateMemory
 适用：
 
 - agent 创建者明确要求 agent 更新自我认知。
+- 只记录 agent 自己的名字、身份、职责边界、长期行为原则或 creator 授权的自我设定；不要记录用户偏好或用户身份。
 
 限制：
 
 - 普通用户不能使用。
+- 必须写到当前 agentId scope，不能由模型传入 agentId。
 - 需要审计。
-
-### writeEventMemory
-
-适用：
-
-- agent 明确知道当前事件非常重要。
-
-限制：
-
-- 默认优先由 hook 写入。
-- agent 请求写入时，runtime 仍要检查。
-- `userId` 和 `workspaceId` 由 runtime 从当前 run / active workspace 注入，模型不能自己传 scope 字段。
 
 ### writeSkillMemory
 

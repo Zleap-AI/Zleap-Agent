@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:43 +08:00
+
+Purpose:
+- Make memory scopes inspectable and prevent user-impression versus agent-self-impression confusion.
+
+Changed:
+- Strengthened the runtime system memory-write protocol so `writeUserImpression` is only for current-user long-term facts and `writeAgentSelfImpression` is only for creator-authorized agent identity/self-knowledge.
+- Added conversation trace memory-write recovery so the Chat right panel can show memory rows associated with the selected run even when the run output cache missed them.
+- Updated the Memory tab table and editor to show `agentId` and `relationId`, plus a readable scope label.
+- Updated the right-panel memory write display to show scope, userId, agentId, workspaceId, relationId, summary, and a structured full-record view.
+- Updated master/concept/memory/lifecycle docs with explicit impression scope rules and removed stale model-callable event/update memory guidance.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that introduced this changelog entry.
+
 ## 2026-05-31 07:38 +08:00
 
 Purpose:

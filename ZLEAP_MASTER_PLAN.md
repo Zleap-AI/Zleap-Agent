@@ -32,6 +32,7 @@
   - `概念介绍` presents the corrected `zleap-agent-framework.md` concepts as a polished Chinese visual guide with diagrams for workspace routing, memory layers, long-conversation memory recall/context injection, context overview, lifecycle hooks, principles, and implementation modules.
   - Log panels must support clearing the current visible log view without treating audit data deletion as an ordinary UI action.
   - The Memory editor must expose `metadataJson`, show policy/save/delete errors directly, validate JSON before save, and provide policy-aware creation templates for impression/event/skill records.
+  - The Memory table must show scope-critical identifiers directly: userId, agentId, workspaceId, relationId, and a human-readable scope label. Agent self impression is not inferred from "missing userId"; it is specifically `memoryType=impression`, `agentId` set, `userId` empty, and `workspaceId` empty.
   - Browser local storage should remember current UI/session state, including agent settings, LLM base URL/model/API key, conversation id, current messages, and the latest context stack. API keys may be cached only in the user's browser session/storage for convenience; they must never be persisted to SQLite, source files, server logs, or plan/docs.
   - Clearing the current conversation from the Web UI should also request server-side conversation deletion for that conversation's messages, workspace sessions, LLM calls, context segments, tool calls, and approval requests, while preserving audit logs.
 - Runtime:
@@ -321,6 +322,7 @@
   - User impression is not written by `afterAgentTurn` keyword heuristics; it requires an agent-requested memory tool call.
   - Impression prompt recall is not query-selective. Because impressions are bounded identity/context beliefs rather than an unbounded event log, runtime loads up to 20 latest effective user/agent impression records for the current scope every turn, then injects only their compact projected form.
   - The runtime policy prompt explicitly teaches the agent that user impressions are only for stable long-term user information and should be written through `writeUserImpression`.
+  - The runtime policy prompt must sharply distinguish `writeUserImpression` from `writeAgentSelfImpression`: user impression is for the current user's stable preferences/background/identity/constraints, while agent self impression is only for creator-authorized updates to the agent's own name, identity, responsibilities, boundaries, or long-term behavior principles.
   - Runtime-requested impression writes remain cross-workspace identity memories, but their metadata/audit must preserve the code-injected origin workspace/session/task evidence (`activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, `taskIds`) when available, so Web UI trace can show where the agent decided to write the impression without turning `workspaceId` into an impression scope.
   - User impression writes require current-user scope.
   - Impression writes require exactly one scope (`userId` xor `agentId`) and reject workspace-scoped or global impressions.
@@ -370,6 +372,7 @@
   - Workspace save/delete actions must remain visible while the workspace editor scrolls vertically.
   - Workspace tool lists show whether each tool is runtime-bound, MCP-bound, or still a placeholder, and system/runtime tools are visually separated from workspace-registered tools.
   - Memory table supports filter/add/edit/delete.
+  - Memory table shows userId, agentId, workspaceId, relationId, and a readable scope label so user impressions, agent self impressions, event memories, and workspace skills are visually distinguishable.
   - Memory editor supports metadata JSON editing, client-side JSON validation, policy-aware add buttons for event/impression/skill, and visible strategy-layer error feedback.
   - The dedicated `日志` tab shows lifecycle hook/audit logs, tool call logs, tool approval requests, current-conversation LLM request logs, and global recent LLM request logs.
   - The dedicated `日志` tab shows a compact LLM debug summary so endpoint/status/result/timestamp are visible without scrolling through raw request payloads.

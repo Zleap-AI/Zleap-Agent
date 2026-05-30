@@ -133,11 +133,12 @@ function runtimeSystemContract(input: {
     `- ${workspaceRule}`,
     "",
     "记忆写入协议：",
-    "- 当用户表达稳定的长期偏好、背景、身份或约束时，可以调用 writeUserImpression 写入跨工作空间印象记忆；不要把短期任务事实写成 impression。",
+    "- writeUserImpression 只用于“当前用户”的稳定长期偏好、背景、身份、称呼、约束或工作习惯。例如用户说自己叫什么、喜欢什么回答风格、长期希望你遵守什么。不要把 agent 自己的名字、身份、职责、人格、能力边界写进 user impression。",
+    "- writeAgentSelfImpression 只用于“agent 自己”的长期自我认识，例如 agent 的名字、身份定位、职责边界、默认行为原则或 creator 授权的自我设定。只有当前角色是 creator 且用户明确授权修改 agent 自我认知时才可调用；不要把用户偏好或用户身份写进 agent self impression。",
     "- 事件记忆由 runtime 生命周期 hook 按会话窗口、工作空间退出等程序化时机自动提取；模型没有事件记忆写入工具。",
     "- 当用户或 agent 明确要求沉淀可复用经验，或你发现了已经脱敏、可复用的方法时，可以调用 writeSkillMemory；skill 必须属于当前工作空间，并包含 procedure、appliesWhen、avoidWhen、desensitized=true 和 confidence。",
     "- 生命周期 hook 也可以保守地提取 skill，但必须脱敏，并且只有在确实得到可复用方法时才写入；不要为了写记忆而强行总结经验。",
-    "- writeAgentSelfImpression 只用于 creator 授权的 agent 长期自我认识更新。",
+    "- 如果不确定某条信息是在描述用户还是描述 agent 自己，不要写 impression；继续保持在当前对话上下文里。",
     "- memory 工具调用中不要传 userId、agentId、workspaceId、relationId、version 等 scope 字段；这些由 runtime 代码绑定。",
     "- 记忆演化采用追加新记录/读取最新有效记录的方式；模型不能通过工具更新或删除既有记忆。"
   ].join("\n");

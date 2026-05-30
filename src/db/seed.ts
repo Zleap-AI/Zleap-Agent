@@ -242,8 +242,8 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-search-files", "searchFiles", "搜索项目文件名和文本内容。", JSON.stringify(toolSchemas.searchFiles), "medium", now, now);
   insertTool.run("tool-run-command", "runCommand", "运行经过允许的命令行命令。", JSON.stringify(toolSchemas.runCommand), "high", now, now);
   insertTool.run("tool-search-memory", "searchMemory", "使用 SQLite FTS 和作用域过滤搜索记忆。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
-  insertTool.run("tool-write-user-impression", "writeUserImpression", "为当前用户写入长期偏好、长期背景或长期约束。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
-  insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "由 creator 授权后写入 agent 自我认知。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
+  insertTool.run("tool-write-user-impression", "writeUserImpression", "只为当前用户写入长期偏好、背景、身份、称呼或约束；不要记录 agent 自己。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
+  insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
   insertTool.run("tool-write-skill-memory", "writeSkillMemory", "为当前 active workspace 写入脱敏后的可复用经验。", JSON.stringify(toolSchemas.writeSkillMemory), "medium", now, now);
 
   const updateTool = db.prepare("UPDATE tool_definitions SET description = ?, updatedAt = ? WHERE id = ?");
@@ -254,8 +254,8 @@ export function seedDefaults(db: Database.Database): void {
   updateTool.run("搜索项目文件名和文本内容。", now, "tool-search-files");
   updateTool.run("运行经过允许的命令行命令。", now, "tool-run-command");
   updateTool.run("使用 SQLite FTS 和作用域过滤搜索记忆。", now, "tool-search-memory");
-  updateTool.run("为当前用户写入长期偏好、长期背景或长期约束。", now, "tool-write-user-impression");
-  updateTool.run("由 creator 授权后写入 agent 自我认知。", now, "tool-write-agent-self-impression");
+  updateTool.run("只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", now, "tool-write-agent-self-impression");
+  updateTool.run("只为当前用户写入长期偏好、背景、身份、称呼或约束；不要记录 agent 自己。", now, "tool-write-user-impression");
   updateTool.run("为当前 active workspace 写入脱敏后的可复用经验。", now, "tool-write-skill-memory");
 
   const updateToolSchema = db.prepare("UPDATE tool_definitions SET parametersJson = ?, updatedAt = ? WHERE id = ?");
