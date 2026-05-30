@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:56 +08:00
+
+Purpose:
+- Change the Chat context inspector raw-log behavior so `显示原始日志` switches the whole context stack into raw text mode instead of appending a separate raw-log block.
+
+Changed:
+- Updated `src/web/main.tsx` so the context stack uses one displayed segment list: structured mode hides `final_messages`, while raw mode shows the full inspected stack and renders each segment as raw text.
+- Added a raw stack renderer and `raw-json` styling so raw mode displays direct JSON/text rather than structured JSON tables.
+- Updated `ZLEAP_MASTER_PLAN.md`, `docs/07-context-and-prompt-contracts.md`, `docs/README.md`, and `zleap-agent-framework.md` to make the raw-log toggle behavior part of the design contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
+
+Git:
+- Recorded in the Git commit titled `fix: toggle raw context stack`.
+
 ## 2026-05-31 07:50 +08:00
 
 Purpose:

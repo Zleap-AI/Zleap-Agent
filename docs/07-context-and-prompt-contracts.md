@@ -25,7 +25,7 @@ Second-level sections live inside those categories:
 
 The synthetic tool results follow the same simplified structure: `runtime_context.memory` mirrors the `memory` category, and `runtime_context.local_conversation` mirrors the `history` category. The model still receives a clean final user message.
 
-`final_messages` is not a real context stack category. It is a raw trace/debug snapshot of the exact messages payload sent to the provider after prompt assembly. The Chat UI should hide it from the normal stack and expose it only through a subtle raw-log control such as `显示原始日志`.
+`final_messages` is not a real context stack category. It is a raw trace/debug snapshot of the exact messages payload sent to the provider after prompt assembly. The Chat UI should hide it from the normal structured stack. A subtle raw-log control such as `显示原始日志` switches the entire stack into raw text mode; in that mode, the UI may include `final_messages` and should display raw JSON/text directly instead of adding a separate raw-log block or applying JSON table formatting.
 
 The Web UI should render parseable context JSON as structured inspection views, not raw blobs. Arrays of records, especially the callable `tools` snapshot, should become table-like views with readable columns for names, descriptions, schemas, bindings, risk, and workspace metadata. Raw JSON remains useful for provider payload logs and parse failures, but the normal context stack should make runtime partitions easy to verify at a glance.
 

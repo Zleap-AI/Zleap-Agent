@@ -657,11 +657,6 @@ textarea {
   background: #eef2f6;
 }
 
-.raw-context-log {
-  margin-top: 8px;
-  opacity: 0.92;
-}
-
 .context-substack {
   display: grid;
   gap: 8px;
@@ -874,6 +869,10 @@ pre {
   white-space: pre-wrap;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.raw-json {
+  white-space: pre;
 }
 
 .workspace-grid {

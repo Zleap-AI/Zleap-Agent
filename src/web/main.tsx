@@ -823,8 +823,10 @@ function ChatTab() {
   const inspectedLlmSegments = inspectedLlmCallId ? segmentsForLlmCall(traceSegments, inspectedLlmCallId) : [];
   const inspectedRawContextSegments = inspectedLlmSegments.length > 0 ? inspectedLlmSegments : (inspectedOutput?.contextSegments ?? []);
   const inspectedContextSegments = segmentsWithToolSnapshot(inspectedRawContextSegments, inspectedLlmCall);
-  const visibleContextSegments = inspectedContextSegments.filter((segment) => segment.segmentType !== "final_messages");
-  const rawContextLogSegments = inspectedContextSegments.filter((segment) => segment.segmentType === "final_messages");
+  const displayedContextSegments = showRawContextLogs
+    ? inspectedContextSegments
+    : inspectedContextSegments.filter((segment) => segment.segmentType !== "final_messages");
+  const hasRawContextLogs = inspectedContextSegments.some((segment) => segment.segmentType === "final_messages");
   const visibleMemoryWrites = memoryWritesForVisibleTurn(visibleOutput, trace?.memoryWrites ?? []);
 
   async function loadConversationTrace(targetConversationId = conversationId): Promise<ConversationTrace | null> {
@@ -1191,20 +1193,15 @@ function ChatTab() {
         </div>
         <div className="context-stack-heading">
           <h2>上下文窗口堆栈</h2>
-          {rawContextLogSegments.length > 0 && (
+          {hasRawContextLogs && (
             <button className="subtle-button" onClick={() => setShowRawContextLogs((value) => !value)}>
-              {showRawContextLogs ? "隐藏原始日志" : "显示原始日志"}
+              {showRawContextLogs ? "显示结构化视图" : "显示原始日志"}
             </button>
           )}
         </div>
-        {inspectedMessage && !visibleContextSegments.length
+        {inspectedMessage && !displayedContextSegments.length
           ? <div className="empty">这条消息还没有匹配到已保存的 LLM 上下文快照。</div>
-          : <ContextStack segments={visibleContextSegments} />}
-        {showRawContextLogs && rawContextLogSegments.length > 0 && (
-          <div className="raw-context-log">
-            <ContextStack segments={rawContextLogSegments} />
-          </div>
-        )}
+          : <ContextStack segments={displayedContextSegments} raw={showRawContextLogs} />}
         <h2>本轮记忆写入</h2>
         <MemoryWriteStack memories={visibleMemoryWrites} />
       </aside>
@@ -1648,7 +1645,7 @@ function LlmLogPanel({ logs }: { logs: LLMCallSnapshot[] }) {
   );
 }
 
-function ContextStack({ segments }: { segments: ContextSegment[] }) {
+function ContextStack({ segments, raw = false }: { segments: ContextSegment[]; raw?: boolean }) {
   if (segments.length === 0) return <div className="empty">还没有上下文快照。</div>;
   return (
     <div className="stack">
@@ -1658,7 +1655,7 @@ function ContextStack({ segments }: { segments: ContextSegment[] }) {
             <span>{index + 1}. {contextSegmentLabel(segment)}</span>
             <small>{segment.segmentType} · 约 {segment.tokenEstimate} tokens</small>
           </summary>
-          <ContextSegmentContent segment={segment} />
+          {raw ? <RawContextSegmentContent segment={segment} /> : <ContextSegmentContent segment={segment} />}
         </details>
       ))}
     </div>
@@ -1719,6 +1716,10 @@ function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
     return <JsonValueView value={parsed} />;
   }
   return <pre>{segment.content}</pre>;
+}
+
+function RawContextSegmentContent({ segment }: { segment: ContextSegment }) {
+  return <pre className="raw-json">{segment.content}</pre>;
 }
 
 function JsonValueView({ value, depth = 0 }: { value: unknown; depth?: number }) {
