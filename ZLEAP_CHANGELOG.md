@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:38 +08:00
+
+Purpose:
+- Make context stack and JSON-heavy debug views readable enough to verify callable tools and runtime partitions without scanning raw JSON blobs.
+
+Changed:
+- Added a reusable structured JSON viewer for the Web UI.
+- Changed context stack sections to render parsed JSON as field groups, nested lists, and table-like arrays instead of raw `<pre>` dumps.
+- Changed LLM log message/tool/response payload details to use the same structured JSON view, while keeping raw provider logs separated from the normal context stack.
+- Updated the concept guide, master plan, and context contract docs to require readable structured JSON views, especially for the OpenAI-compatible callable `tools` array.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that introduced this changelog entry.
+
 ## 2026-05-31 07:33 +08:00
 
 Purpose:

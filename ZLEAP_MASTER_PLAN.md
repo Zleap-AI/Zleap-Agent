@@ -22,6 +22,7 @@
   - Each user chat message should keep the context stack snapshot for that turn; clicking a user message shows that historical context stack in the right panel.
   - The Chat right panel stays focused on three sections only: current workspace, context stack, and memory writes. It must not duplicate the selected message/turn label already shown in the central timeline, and it must not render raw workspace trace as a normal user-facing sidebar block.
   - Clicking any chat message or process block should show the context stack grouped by that message/block's associated `llmCallId`, including follow-up calls after function/tool execution, so workspace switching can be verified from the real prompt window without a separate LLM checkpoint list in the sidebar.
+  - Context stack JSON must be parsed into readable structured views instead of raw dumps. Callable `tools` arrays should render as table-like rows with tool name, schema/binding/risk metadata, and nested values displayed compactly; raw JSON is only a fallback for unparsable text or raw-log inspection.
   - Chat composer keyboard behavior: Enter sends the message; Ctrl+Enter inserts a newline.
   - The Chat timeline is user-task-first: ordinary users should experience one continuous conversation, not a forced workspace/debug mental model. Workspace switches and function-call/tool execution must appear as compact collapsible process blocks inside the same conversation stream, with simple summaries such as entering a capability workspace or running several function calls; detailed workspace ids, tool names, arguments/results, and runtime evidence live inside the expanded details and Logs/Context panels.
   - `工作空间` manages workspaces first, then registers tools inside the selected workspace. The UI must not present tools as a global shared pool that users merely pick from.
@@ -347,6 +348,7 @@
 - UI:
   - Chinese `对话/工作空间/记忆/日志/概念介绍` tabs render.
   - Chat right panel expands the real context stack, callable tool snapshots, and memory writes while keeping the visible sections limited to current workspace, context stack, and memory writes. Raw provider payload snapshots such as `final_messages` must be hidden behind a subtle `显示原始日志` control beside the context-stack title, not mixed into the normal stack.
+  - Chat right panel renders JSON context payloads as structured tables/field groups. This is especially important for the callable tools snapshot, because users need to verify the actual OpenAI-compatible `tools` array without reading a raw JSON blob.
   - Chat right panel workspace status must distinguish final runtime active workspace from the workspace being inspected for the selected turn. Because child workspaces normally return to `main` after `exitWorkspace`, the UI can highlight the latest non-main workspace involved in that turn, but raw workspace sessions belong in logs/trace rather than the chat sidebar.
   - Streaming assistant text appears incrementally.
   - Child workspace LLM interactions appear in the central conversation timeline as workspace process messages, while the final assistant answer remains a separate user-facing message.

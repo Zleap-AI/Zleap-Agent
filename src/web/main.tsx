@@ -717,6 +717,9 @@ function ConceptIntroTab() {
         <p className="concept-note">
           Final Messages 是 UI/trace 里的调试快照，用来查看最终发给 provider 的 messages；它不是新的上下文层，也不会被再次塞回 LLM。
         </p>
+        <p className="concept-note">
+          可解析的 JSON 会在界面里变成表格或字段视图。特别是 tools 数组，要能直接看清每次调用暴露了哪些 function、参数结构、绑定来源和风险信息。
+        </p>
       </section>
 
       <section className="concept-section">
@@ -1582,15 +1585,15 @@ function LlmLogPanel({ logs }: { logs: LLMCallSnapshot[] }) {
             <div className={`llm-log-diagnostic ${statusClass(log.status)}`}>{logDiagnostic(log)}</div>
             <details>
               <summary>请求 messages</summary>
-              <pre>{JSON.stringify(messages, null, 2)}</pre>
+              <JsonValueView value={messages} />
             </details>
             <details>
               <summary>请求 tools</summary>
-              <pre>{JSON.stringify(tools, null, 2)}</pre>
+              <JsonValueView value={tools} />
             </details>
             <details>
               <summary>返回 / 诊断</summary>
-              <pre>{JSON.stringify(response, null, 2)}</pre>
+              <JsonValueView value={response} />
             </details>
           </details>
         );
@@ -1652,23 +1655,186 @@ function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
   if (
     parsed
     && typeof parsed === "object"
-    && !Array.isArray(parsed)
-    && ["workspace", "tools", "memory", "history"].includes(segment.segmentType)
   ) {
+    if (!Array.isArray(parsed) && ["workspace", "tools", "memory", "history"].includes(segment.segmentType)) {
+      return (
+        <div className="context-substack">
+          {Object.entries(parsed as Record<string, unknown>)
+            .filter(([, value]) => value !== undefined)
+            .map(([key, value]) => (
+              <details key={key} open>
+                <summary>{contextSubsectionLabel(key)}</summary>
+                <JsonValueView value={value} />
+              </details>
+            ))}
+        </div>
+      );
+    }
+    return <JsonValueView value={parsed} />;
+  }
+  return <pre>{segment.content}</pre>;
+}
+
+function JsonValueView({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <div className="json-empty">空数组</div>;
+    if (value.every(isJsonRecord)) {
+      const columns = collectJsonColumns(value, depth > 0 ? 6 : 9);
+      if (columns.length > 0) {
+        return (
+          <div className="json-table-wrap">
+            <table className="json-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  {columns.map((column) => <th key={column}>{jsonFieldLabel(column)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {value.map((row, index) => (
+                  <tr key={index}>
+                    <td>{index + 1}</td>
+                    {columns.map((column) => (
+                      <td key={column}>
+                        <JsonCell value={row[column]} depth={depth + 1} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+    }
     return (
-      <div className="context-substack">
-        {Object.entries(parsed as Record<string, unknown>)
-          .filter(([, value]) => value !== undefined)
-          .map(([key, value]) => (
-            <details key={key} open>
-              <summary>{contextSubsectionLabel(key)}</summary>
-              <pre>{JSON.stringify(value, null, 2)}</pre>
-            </details>
-          ))}
+      <div className="json-list">
+        {value.map((item, index) => (
+          <div className="json-list-row" key={index}>
+            <span className="json-index">{index + 1}</span>
+            <JsonValueView value={item} depth={depth + 1} />
+          </div>
+        ))}
       </div>
     );
   }
-  return <pre>{segment.content}</pre>;
+
+  if (isJsonRecord(value)) {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined);
+    if (entries.length === 0) return <div className="json-empty">空对象</div>;
+    return (
+      <div className={`json-object ${depth > 0 ? "nested" : ""}`}>
+        {entries.map(([key, item]) => (
+          <div className={`json-field ${isJsonScalar(item) ? "" : "wide"}`} key={key}>
+            <span className="json-label">{jsonFieldLabel(key)}</span>
+            <JsonCell value={item} depth={depth + 1} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <span className={`json-scalar ${jsonScalarClass(value)}`}>{formatJsonScalar(value)}</span>;
+}
+
+function JsonCell({ value, depth }: { value: unknown; depth: number }) {
+  if (value === undefined) return <span className="json-muted">-</span>;
+  if (isJsonScalar(value)) return <span className={`json-scalar ${jsonScalarClass(value)}`}>{formatJsonScalar(value)}</span>;
+  if (depth > 3) return <code className="json-compact">{compactJson(value)}</code>;
+  return <JsonValueView value={value} depth={depth} />;
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJsonScalar(value: unknown): boolean {
+  return value === null || ["string", "number", "boolean"].includes(typeof value);
+}
+
+function collectJsonColumns(rows: Record<string, unknown>[], limit: number): string[] {
+  const priority = [
+    "name",
+    "id",
+    "title",
+    "description",
+    "summary",
+    "type",
+    "status",
+    "workspaceId",
+    "riskLevel",
+    "bindingType",
+    "mcpServerId",
+    "mcpToolName",
+    "toolCount"
+  ];
+  const keys = new Set<string>();
+  rows.forEach((row) => {
+    Object.keys(row).forEach((key) => {
+      if (row[key] !== undefined) keys.add(key);
+    });
+  });
+  return [...keys].sort((left, right) => {
+    const leftRank = priority.indexOf(left);
+    const rightRank = priority.indexOf(right);
+    const normalizedLeft = leftRank === -1 ? Number.MAX_SAFE_INTEGER : leftRank;
+    const normalizedRight = rightRank === -1 ? Number.MAX_SAFE_INTEGER : rightRank;
+    if (normalizedLeft !== normalizedRight) return normalizedLeft - normalizedRight;
+    return left.localeCompare(right);
+  }).slice(0, limit);
+}
+
+function jsonFieldLabel(key: string): string {
+  const labels: Record<string, string> = {
+    id: "ID",
+    name: "名称",
+    title: "标题",
+    description: "说明",
+    summary: "摘要",
+    type: "类型",
+    status: "状态",
+    role: "角色",
+    content: "内容",
+    workspaceId: "工作空间",
+    toolCount: "工具数",
+    tools: "工具",
+    parameters: "参数",
+    parametersJson: "参数",
+    inputSchema: "输入结构",
+    function: "函数",
+    binding: "绑定",
+    bindingJson: "绑定",
+    bindingType: "绑定类型",
+    riskLevel: "风险",
+    mcpServerId: "MCP Server",
+    mcpToolName: "MCP 工具名",
+    createdAt: "创建时间",
+    updatedAt: "更新时间",
+    metadata: "元数据",
+    metadataJson: "元数据",
+    relationId: "关系 ID",
+    version: "版本"
+  };
+  return labels[key] ?? key;
+}
+
+function formatJsonScalar(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+function jsonScalarClass(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number") return "number";
+  return "string";
+}
+
+function compactJson(value: unknown): string {
+  const text = JSON.stringify(value);
+  if (!text) return "";
+  return text.length > 220 ? `${text.slice(0, 220)}...` : text;
 }
 
 function WorkspaceTab() {

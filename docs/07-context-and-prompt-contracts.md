@@ -27,6 +27,8 @@ The synthetic tool results follow the same simplified structure: `runtime_contex
 
 `final_messages` is not a real context stack category. It is a raw trace/debug snapshot of the exact messages payload sent to the provider after prompt assembly. The Chat UI should hide it from the normal stack and expose it only through a subtle raw-log control such as `显示原始日志`.
 
+The Web UI should render parseable context JSON as structured inspection views, not raw blobs. Arrays of records, especially the callable `tools` snapshot, should become table-like views with readable columns for names, descriptions, schemas, bindings, risk, and workspace metadata. Raw JSON remains useful for provider payload logs and parse failures, but the normal context stack should make runtime partitions easy to verify at a glance.
+
 ## 2026-05-30 更新：子 workspace 上下文交付契约
 
 子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`。

@@ -677,6 +677,138 @@ textarea {
   background: #fbfcfd;
 }
 
+.json-object {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.json-object.nested {
+  padding: 0;
+  background: transparent;
+}
+
+.json-field {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.32fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 7px 8px;
+  border: 1px solid #e5ebf0;
+  border-radius: 6px;
+  background: #fbfcfd;
+  min-width: 0;
+}
+
+.json-field.wide {
+  grid-template-columns: 1fr;
+}
+
+.json-label {
+  color: #607080;
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.json-scalar {
+  color: #17202a;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.json-scalar.number {
+  color: #8a4b00;
+}
+
+.json-scalar.boolean {
+  color: #0b6b5f;
+}
+
+.json-scalar.null,
+.json-muted {
+  color: #8a96a3;
+}
+
+.json-empty {
+  padding: 10px;
+  color: #7a8794;
+  font-size: 12px;
+}
+
+.json-table-wrap {
+  overflow: auto;
+  padding: 8px;
+  background: #fff;
+}
+
+.json-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: auto;
+}
+
+.json-table th,
+.json-table td {
+  border: 1px solid #e1e7ed;
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: top;
+  min-width: 54px;
+}
+
+.json-table th {
+  background: #f4f7f9;
+  color: #485664;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.json-table td:first-child,
+.json-table th:first-child {
+  width: 34px;
+  color: #7a8794;
+  text-align: right;
+}
+
+.json-list {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+.json-list-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.json-index {
+  color: #7a8794;
+  font-size: 12px;
+  text-align: right;
+  padding-top: 8px;
+}
+
+.json-compact {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: #eef2f6;
+  color: #28323c;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 details {
   border: 1px solid #dce2e8;
   border-radius: 6px;
