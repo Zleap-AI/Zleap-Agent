@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:14 +08:00
+
+Purpose:
+- Remove redundant Workspace editor settings and make the workspace input/output protocol code-owned.
+
+Changed:
+- Replaced the duplicate Workspace `描述`/`工作空间说明` fields with one visible `工作空间说明` field.
+- Removed user-facing Workspace `输入类型`, `输出类型`, and `工具使用说明` fields from the Web UI.
+- Normalized workspace saves so code always supplies the fixed input protocol (`user_request`, `workspace_task`), fixed output protocol (`workspace_result`), mirrors the single workspace explanation into runtime instructions, and clears workspace-level tool instructions.
+- Updated `ZLEAP_MASTER_PLAN.md` to record that workspace input/output contracts are uniform and that tool usage guidance belongs to tool definitions.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+
 ## 2026-05-31 06:10 +08:00
 
 Purpose:

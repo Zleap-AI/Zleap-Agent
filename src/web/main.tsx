@@ -139,6 +139,8 @@ const SYSTEM_TOOL_NAMES = new Set([
 ]);
 
 const BUILT_IN_WORKSPACE_IDS = new Set(["main", "file", "cli"]);
+const DEFAULT_WORKSPACE_INPUT_KINDS = ["user_request", "workspace_task"];
+const DEFAULT_WORKSPACE_OUTPUT_KINDS = ["workspace_result"];
 
 function isSystemTool(tool: ToolDefinition): boolean {
   return tool.bindingType === "runtime" || SYSTEM_TOOL_NAMES.has(tool.name);
@@ -203,10 +205,28 @@ function stringifyListText(value: string): string {
 
 function updateWorkspaceListField(
   workspace: WorkspaceDefinition,
-  field: "capabilitiesJson" | "inputKindsJson" | "outputKindsJson",
+  field: "capabilitiesJson",
   value: string
 ): WorkspaceDefinition {
   return { ...workspace, [field]: JSON.stringify(parseListText(value)) };
+}
+
+function normalizeWorkspaceForSave(workspace: WorkspaceDefinition): WorkspaceDefinition {
+  const description = workspace.description.trim();
+  return {
+    ...workspace,
+    description,
+    instructions: description,
+    toolInstructions: "",
+    inputKindsJson: JSON.stringify(DEFAULT_WORKSPACE_INPUT_KINDS),
+    outputKindsJson: JSON.stringify(DEFAULT_WORKSPACE_OUTPUT_KINDS),
+    manifest: {
+      ...workspace.manifest,
+      description,
+      inputKinds: DEFAULT_WORKSPACE_INPUT_KINDS,
+      outputKinds: DEFAULT_WORKSPACE_OUTPUT_KINDS
+    }
+  };
 }
 
 function loadCache(): CachedState {
@@ -1334,11 +1354,12 @@ function WorkspaceTab() {
     setToolError("");
     try {
       const cached = loadCache();
+      const normalized = normalizeWorkspaceForSave(selected);
       const saved = await api<WorkspaceDefinition>(`/api/workspaces/${encodeURIComponent(selected.id)}`, {
         method: "PUT",
         body: JSON.stringify({
-          ...selected,
-          toolIds: selected.tools.map((tool) => tool.id),
+          ...normalized,
+          toolIds: normalized.tools.map((tool) => tool.id),
           actorId: cached.userId ?? "user",
           actorRole: cached.userRole ?? "user"
         })
@@ -1508,8 +1529,8 @@ function WorkspaceTab() {
       name: "新工作空间",
       description: "",
       capabilitiesJson: "[]",
-      inputKindsJson: "[]",
-      outputKindsJson: "[]",
+      inputKindsJson: JSON.stringify(DEFAULT_WORKSPACE_INPUT_KINDS),
+      outputKindsJson: JSON.stringify(DEFAULT_WORKSPACE_OUTPUT_KINDS),
       requiresApproval: 0,
       instructions: "",
       toolInstructions: "",
@@ -1530,8 +1551,8 @@ function WorkspaceTab() {
         name: "",
         description: "",
         capabilities: [],
-        inputKinds: [],
-        outputKinds: [],
+        inputKinds: DEFAULT_WORKSPACE_INPUT_KINDS,
+        outputKinds: DEFAULT_WORKSPACE_OUTPUT_KINDS,
         riskLevel: "low",
         requiresApproval: false
       },
@@ -1629,16 +1650,12 @@ function WorkspaceTab() {
               {isExistingWorkspace && <small>已保存工作空间的 ID 是稳定主键，不能在编辑时修改。</small>}
             </label>
             <label>名称<input value={selected.name} onChange={(event) => setSelected({ ...selected, name: event.target.value })} /></label>
-            <label>描述<textarea value={selected.description} onChange={(event) => setSelected({ ...selected, description: event.target.value })} /></label>
+            <label>工作空间说明<textarea value={selected.description} onChange={(event) => setSelected({ ...selected, description: event.target.value })} /></label>
             <label>能力清单<textarea value={stringifyListText(selected.capabilitiesJson)} onChange={(event) => setSelected(updateWorkspaceListField(selected, "capabilitiesJson", event.target.value))} /></label>
-            <label>输入类型<textarea value={stringifyListText(selected.inputKindsJson)} onChange={(event) => setSelected(updateWorkspaceListField(selected, "inputKindsJson", event.target.value))} /></label>
-            <label>输出类型<textarea value={stringifyListText(selected.outputKindsJson)} onChange={(event) => setSelected(updateWorkspaceListField(selected, "outputKindsJson", event.target.value))} /></label>
             <label className="check-row">
               <input type="checkbox" checked={Boolean(selected.requiresApproval)} onChange={(event) => setSelected({ ...selected, requiresApproval: event.target.checked ? 1 : 0 })} />
               <span>进入或使用该工作空间需要审批</span>
             </label>
-            <label>工作空间说明<textarea value={selected.instructions} onChange={(event) => setSelected({ ...selected, instructions: event.target.value })} /></label>
-            <label>工具使用说明<textarea value={selected.toolInstructions} onChange={(event) => setSelected({ ...selected, toolInstructions: event.target.value })} /></label>
             <label>记忆策略 JSON<textarea value={selected.memoryPolicyJson} onChange={(event) => setSelected({ ...selected, memoryPolicyJson: event.target.value })} /></label>
             <label>
               风险等级
