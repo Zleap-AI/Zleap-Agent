@@ -50,6 +50,7 @@
   - Local conversation history is workspace-scoped. `main` may receive a bounded recent conversation slice for orchestration, but child workspaces must not receive the full global chat history; they rely on `WorkspaceTask`, `WorkspaceLocalContext`, recalled memory, recent local tool evidence, and explicit `WorkspaceResult` summaries.
   - Workspace registry visibility is also scoped: `main` receives the full workspace manifest list as part of its workspace contract, while child workspaces receive only their active workspace contract and must return to `main` instead of choosing sibling workspaces directly.
   - When `enterWorkspace` succeeds, runtime creates a structured child `WorkspaceSession`, switches the active workspace for follow-up LLM calls, rebuilds context with that workspace's contract/memory/tools, and persists a new inspectable LLM call snapshot for the child workspace.
+  - Streaming runtime must emit child-workspace interaction events for the Web UI conversation surface: workspace entry, child workspace LLM text, child tool calls/results, and workspace exit summaries. These events are visible process messages, separate from the final user-facing assistant answer.
   - Child workspaces remain `running` until they call runtime-bound `exitWorkspace` with a structured `WorkspaceResult`; runtime then updates the child `WorkspaceSession`, switches active context back to `main`, rebuilds main context with the returned result, and persists another inspectable LLM call for main integration.
   - `exitWorkspace` is the only normal handoff from child workspace to main. The handoff payload is `WorkspaceResult`: status, summary, artifacts, observations, errors, and suggestedNextSteps. Raw tool outputs, recalled memory, local scratch reasoning, and detailed evidence stay in the child `WorkspaceSession`, `tool_calls`, `audit_logs`, and memory evidence metadata for debugging rather than being flattened into main context.
   - `enterWorkspace`, `askUser`, and `finishTask` are main-only orchestration tools. Even if a workspace configuration accidentally binds them to a child workspace, runtime must hide them from the child callable tool list and reject any child call. Child workspaces express sibling handoff requests or user-input needs only through `WorkspaceResult.suggestedNextSteps` and `status`.
@@ -335,6 +336,7 @@
   - Chat right panel expands context stack and final messages.
   - Chat right panel workspace status must distinguish final runtime active workspace from the workspace being inspected for the selected turn. Because child workspaces normally return to `main` after `exitWorkspace`, the UI should highlight the latest non-main workspace involved in that turn and state when execution has returned to `main`.
   - Streaming assistant text appears incrementally.
+  - Child workspace LLM interactions appear in the central conversation timeline as workspace process messages, with the workspace id and event kind visible, while the final assistant answer remains a separate user-facing message.
   - Markdown in chat messages renders without unsafe HTML injection.
   - Failed chat requests can be retried.
   - Clearing the current conversation resets messages, trace, and conversation id without clearing saved LLM settings or API key.
@@ -358,7 +360,7 @@
   - Legacy cached `https://api.302.ai` hostnames are rewritten through URL parsing before request logging and provider fetch.
   - Streaming Chat Completions parses content deltas and OpenAI-compatible `tool_calls` deltas.
   - Streaming Chat Completions can continue after tool-call deltas by sending tool results back into follow-up streamed LLM requests until a final content answer or the maximum tool-round limit is reached.
-  - Streaming tool-call rounds must not leak intermediate assistant narration to the chat surface; that text is retained only in request logs and trace inspection.
+  - Main-workspace/internal tool-round narration should not be mixed into the final assistant answer. Child-workspace interaction text is different: it is streamed through explicit workspace process events so users can inspect what happened inside the active capability workspace.
   - API key is never persisted server-side. The UI may keep it in browser local storage/session state only because the user explicitly requested refresh survival.
   - Failed provider calls are marked failed in `llm_calls` with a visible diagnostic; successful calls are marked completed with response metadata.
   - Tests may use a fake provider only for protocol verification.

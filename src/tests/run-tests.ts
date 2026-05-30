@@ -813,6 +813,47 @@ class StreamingToolTextLeakLLMClient implements LLMClient {
   }
 }
 
+class StreamingWorkspaceVisibilityLLMClient implements LLMClient {
+  calls = 0;
+
+  async complete(): Promise<ChatCompletionOutput> {
+    throw new Error("complete should not be used in streaming workspace visibility test");
+  }
+
+  async *streamEvents(input: ChatCompletionInput): AsyncGenerator<LLMStreamEvent> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
+      yield { type: "tool_call_delta", index: 0, id: "stream-enter-file", name: "enterWorkspace" };
+      yield {
+        type: "tool_call_delta",
+        index: 0,
+        arguments: JSON.stringify({ workspaceId: "file", objective: "inspect streamed workspace visibility" })
+      };
+      return;
+    }
+    if (this.calls === 2) {
+      assert.equal(input.tools.some((tool) => tool.name === "exitWorkspace"), true);
+      yield { type: "content", text: "file workspace explains its intermediate step" };
+      yield { type: "tool_call_delta", index: 0, id: "stream-exit-file-visible", name: "exitWorkspace" };
+      yield {
+        type: "tool_call_delta",
+        index: 0,
+        arguments: JSON.stringify({
+          status: "completed",
+          summary: "File workspace returned visible intermediate evidence.",
+          artifacts: [],
+          observations: ["The child workspace LLM interaction should be visible in chat."],
+          errors: [],
+          suggestedNextSteps: ["Main should produce the final answer."]
+        })
+      };
+      return;
+    }
+    yield { type: "content", text: "main final answer" };
+  }
+}
+
 class SingleToolRequestLLMClient implements LLMClient {
   calls = 0;
   lastToolResult = "";
@@ -2857,6 +2898,41 @@ async function testStreamingToolRoundTextIsNotLeaked() {
   assert.equal(trace.llmCalls.every((call) => call.normalizedEndpoint === "https://api.302ai.com/v1/chat/completions"), true);
 }
 
+async function testStreamingChildWorkspaceEventsAreVisible() {
+  const repos = createRepos();
+  const fake = new StreamingWorkspaceVisibilityLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  const events = [];
+  for await (const event of runtime.runStream({
+    agentId: "default-agent",
+    userId: "stream-workspace-user",
+    userRole: "creator",
+    conversationId: "conv-stream-workspace-visible",
+    message: "inspect files with visible child workspace messages",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  })) {
+    events.push(event);
+  }
+
+  const workspaceEvents = events.filter((event) => event.type === "workspace");
+  assert.equal(workspaceEvents.some((event) => event.eventKind === "entered" && event.workspaceId === "file"), true);
+  assert.equal(workspaceEvents.some((event) => event.eventKind === "assistant" && event.text.includes("file workspace explains")), true);
+  assert.equal(workspaceEvents.some((event) => event.eventKind === "tool_call" && event.toolNames?.includes("exitWorkspace")), true);
+  assert.equal(workspaceEvents.some((event) => event.eventKind === "exit" && event.status === "completed"), true);
+  const finalText = events.filter((event) => event.type === "delta").map((event) => event.text).join("");
+  assert.equal(finalText, "main final answer");
+  assert.equal(finalText.includes("file workspace explains"), false);
+  const done = events.at(-1);
+  assert.equal(done?.type, "done");
+  if (done?.type === "done") {
+    assert.equal(done.output.workspaceTrace.some((session) => session.workspaceId === "file"), true);
+  }
+}
+
 async function testStreamingMultiStepToolLoop() {
   const repos = createRepos();
   const fake = new StreamingMultiStepToolLoopLLMClient();
@@ -4557,6 +4633,7 @@ async function main() {
   await testToolLoopStopsAtLimit();
   await testStreamingMemoryToolCallLoop();
   await testStreamingToolRoundTextIsNotLeaked();
+  await testStreamingChildWorkspaceEventsAreVisible();
   await testStreamingMultiStepToolLoop();
   await testStreamingToolLoopStopsAtLimit();
   await testWorkspaceEntryApprovalGate();

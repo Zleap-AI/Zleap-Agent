@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRunInput, AgentRunOutput, AgentRunPrepared, ContextSegment, LLMCallSnapshot, LLMMessage, MemoryRow, WorkspaceResult, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunInput, AgentRunOutput, AgentRunPrepared, AgentStreamEvent, ContextSegment, LLMCallSnapshot, LLMMessage, MemoryRow, WorkspaceResult, WorkspaceSession } from "../types";
 import { Repositories } from "../db/repositories";
 import { ContextBuilder, PromptAssembler } from "./context-builder";
 import { AttentionBudgetManager, estimateTokens } from "./attention-budget";
@@ -17,6 +17,22 @@ const MAX_TOOL_ROUNDS = 4;
 
 function summarizeAssistantMessage(value: string, maxLength = 500): string {
   const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+function summarizeToolResultForChat(content: string, maxLength = 700): string {
+  let text = content;
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (parsed && typeof parsed === "object" && "error" in parsed && typeof (parsed as { error?: unknown }).error === "string") {
+      text = `失败：${(parsed as { error: string }).error}`;
+    } else {
+      text = JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    text = content;
+  }
+  const normalized = text.trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
 }
 
@@ -96,7 +112,7 @@ export class AgentRuntime {
     };
   }
 
-  async *runStream(input: AgentRunInput): AsyncGenerator<{ type: "start"; output: Omit<AgentRunOutput, "assistantMessage"> } | { type: "delta"; text: string } | { type: "done"; output: AgentRunOutput }> {
+  async *runStream(input: AgentRunInput): AsyncGenerator<AgentStreamEvent> {
     const prepared = this.prepare(input);
     yield {
       type: "start",
@@ -139,6 +155,7 @@ export class AgentRuntime {
             if (event.type === "tool_call_delta") this.mergeToolCallDelta(toolCallDeltas, event);
           }
           const toolCalls = this.materializeToolCalls(toolCallDeltas);
+          const activeWorkspaceBeforeTools = prepared.activeWorkspaceId;
           this.repos.markLlmCallCompleted(currentLlmCallId, {
             streamed: true,
             returnedTextLength: roundText.length,
@@ -149,6 +166,15 @@ export class AgentRuntime {
 
           if (toolCalls.length === 0) {
             if (prepared.activeWorkspaceId !== "main") {
+              if (roundText.trim()) {
+                yield {
+                  type: "workspace",
+                  workspaceId: prepared.activeWorkspaceId,
+                  eventKind: "assistant",
+                  title: `${prepared.activeWorkspaceId} 工作空间 LLM`,
+                  text: roundText
+                };
+              }
               const exitRequest = this.requireChildWorkspaceExit(input, prepared, messages, {
                 role: "assistant",
                 content: roundText || null
@@ -251,10 +277,60 @@ export class AgentRuntime {
             content: roundText || null,
             tool_calls: toolCalls
           };
+          if (activeWorkspaceBeforeTools !== "main" && roundText.trim()) {
+            yield {
+              type: "workspace",
+              workspaceId: activeWorkspaceBeforeTools,
+              eventKind: "assistant",
+              title: `${activeWorkspaceBeforeTools} 工作空间 LLM`,
+              text: roundText
+            };
+          }
+          if (activeWorkspaceBeforeTools !== "main" && toolCalls.length > 0) {
+            yield {
+              type: "workspace",
+              workspaceId: activeWorkspaceBeforeTools,
+              eventKind: "tool_call",
+              title: `${activeWorkspaceBeforeTools} 工具调用`,
+              text: `调用工具：${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}`,
+              toolNames: toolCalls.map((toolCall) => toolCall.function.name)
+            };
+          }
           const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
           memoryWrites.push(...toolExecution.memoryWrites);
+          if (activeWorkspaceBeforeTools !== "main" && toolExecution.toolMessages.length > 0) {
+            yield {
+              type: "workspace",
+              workspaceId: activeWorkspaceBeforeTools,
+              eventKind: "tool_result",
+              title: `${activeWorkspaceBeforeTools} 工具结果`,
+              text: toolExecution.toolMessages
+                .map((message) => `${message.name ?? "tool"}：${summarizeToolResultForChat(message.content ?? "")}`)
+                .join("\n\n")
+            };
+          }
           const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
             ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, assistantToolMessage, toolExecution.toolMessages);
+          if (toolExecution.enteredWorkspaceSession) {
+            yield {
+              type: "workspace",
+              workspaceId: toolExecution.enteredWorkspaceSession.workspaceId,
+              eventKind: "entered",
+              title: `进入 ${toolExecution.enteredWorkspaceSession.workspaceId} 工作空间`,
+              text: toolExecution.enteredWorkspaceSession.objective,
+              status: toolExecution.enteredWorkspaceSession.status
+            };
+          }
+          if (toolExecution.exitedWorkspaceSession) {
+            yield {
+              type: "workspace",
+              workspaceId: toolExecution.exitedWorkspaceSession.workspaceId,
+              eventKind: "exit",
+              title: `${toolExecution.exitedWorkspaceSession.workspaceId} 工作空间返回 main`,
+              text: toolExecution.exitedWorkspaceSession.summary,
+              status: toolExecution.exitedWorkspaceSession.status
+            };
+          }
           messages = transition?.messages ?? [...messages, assistantToolMessage, ...toolExecution.toolMessages];
           if (toolExecution.terminalAssistantMessage) {
             assistantMessage = toolExecution.terminalAssistantMessage;

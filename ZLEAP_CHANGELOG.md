@@ -2,6 +2,28 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 05:27 +08:00
+
+Purpose:
+- Show child workspace LLM interactions in the central Chat conversation, instead of hiding them only in trace/log views.
+- Keep final assistant replies separate from workspace process messages, so user-facing answers stay clean while workspace execution remains visible.
+
+Changed:
+- Extended streaming runtime events with a `workspace` event type for workspace entry, child workspace assistant text, child tool calls/results, and workspace exit summaries.
+- Updated Chat UI message rendering to insert workspace process messages before the final assistant placeholder and style them separately from user/assistant messages.
+- Added a streaming child-workspace visibility test that proves file workspace LLM text and tool/exit events are emitted while the final answer remains separate.
+- Updated `ZLEAP_MASTER_PLAN.md` to make child workspace process visibility part of the runtime/UI contract and clarify that this replaces the older hidden-only streaming policy for child workspace interactions.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- In-app browser reload at `http://localhost:4173/` confirmed the refreshed Chat UI includes the workspace-aware conversation surface.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 05:22 +08:00
 
 Purpose:

@@ -77,6 +77,15 @@ export type AgentRunPrepared = Omit<AgentRunOutput, "assistantMessage"> & {
 export type AgentStreamEvent =
   | { type: "start"; output: Omit<AgentRunOutput, "assistantMessage"> }
   | { type: "delta"; text: string }
+  | {
+      type: "workspace";
+      workspaceId: string;
+      eventKind: "entered" | "assistant" | "tool_call" | "tool_result" | "exit";
+      title: string;
+      text: string;
+      status?: WorkspaceStatus;
+      toolNames?: string[];
+    }
   | { type: "done"; output: AgentRunOutput }
   | { type: "error"; error: string };
 

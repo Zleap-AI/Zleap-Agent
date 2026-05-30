@@ -8,6 +8,8 @@ type ChatMessage = {
   id: string;
   role: string;
   content: string;
+  workspaceId?: string;
+  eventKind?: string;
   streaming?: boolean;
   failed?: boolean;
   requestText?: string;
@@ -89,6 +91,11 @@ function describeWorkspaceView(output: AgentRunOutput | null): { primary: string
       : `状态：${statusText}`,
     involved
   };
+}
+
+function messageRoleLabel(item: ChatMessage): string {
+  if (item.role === "工作空间" && item.workspaceId) return `${item.workspaceId} 工作空间`;
+  return item.role;
 }
 
 const SYSTEM_TOOL_NAMES = new Set([
@@ -465,6 +472,53 @@ function ChatTab() {
     if (effectiveBaseUrl !== baseUrl) setBaseUrl(effectiveBaseUrl);
 
     try {
+      const insertBeforeAssistant = (items: ChatMessage[], item: ChatMessage): ChatMessage[] => {
+        const index = items.findIndex((candidate) => candidate.id === assistantMessageId);
+        if (index < 0) return [...items, item];
+        const next = [...items];
+        next.splice(index, 0, item);
+        return next;
+      };
+
+      const appendWorkspaceMessage = async (payload: {
+        workspaceId: string;
+        eventKind: string;
+        title: string;
+        text: string;
+        status?: string;
+        toolNames?: string[];
+      }) => {
+        const workspaceMessageId = createLocalId(`workspace-${payload.workspaceId}`);
+        const baseContent = payload.text.trim()
+          ? `**${payload.title}**\n\n${payload.text}`
+          : `**${payload.title}**`;
+        if (payload.eventKind !== "assistant") {
+          setMessages((items) => insertBeforeAssistant(items, {
+            id: workspaceMessageId,
+            role: "工作空间",
+            workspaceId: payload.workspaceId,
+            eventKind: payload.eventKind,
+            content: baseContent
+          }));
+          return;
+        }
+        setMessages((items) => insertBeforeAssistant(items, {
+          id: workspaceMessageId,
+          role: "工作空间",
+          workspaceId: payload.workspaceId,
+          eventKind: payload.eventKind,
+          content: "",
+          streaming: true
+        }));
+        let streamed = "";
+        for (const char of Array.from(baseContent)) {
+          streamed += char;
+          setMessages((items) => items.map((item) => item.id === workspaceMessageId ? { ...item, content: streamed, streaming: true } : item));
+          await sleep(8);
+        }
+        setMessages((items) => items.map((item) => item.id === workspaceMessageId ? { ...item, content: baseContent, streaming: false } : item));
+      };
+
       const response = await fetch("/api/agent/run/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -508,6 +562,9 @@ function ChatTab() {
               });
               await sleep(16);
             }
+          }
+          if (payload.type === "workspace") {
+            await appendWorkspaceMessage(payload);
           }
           if (payload.type === "done") {
             setRetryMessage("");
@@ -619,7 +676,7 @@ function ChatTab() {
           {messages.map((item, index) => (
             <article
               key={item.id ?? `${item.role}-${index}`}
-              className={`message ${item.role === "用户" ? "user clickable" : "assistant"} ${item.failed ? "failed" : ""} ${selectedTurnId === item.id ? "selected" : ""}`}
+              className={`message ${item.role === "用户" ? "user clickable" : item.role === "工作空间" ? "workspace" : "assistant"} ${item.failed ? "failed" : ""} ${selectedTurnId === item.id ? "selected" : ""}`}
               role={item.role === "用户" ? "button" : undefined}
               tabIndex={item.role === "用户" ? 0 : undefined}
               onClick={() => item.role === "用户" && setSelectedTurnId(item.id)}
@@ -628,7 +685,7 @@ function ChatTab() {
               }}
               title={item.role === "用户" ? "查看这轮对话的上下文窗口堆栈" : undefined}
             >
-              <span>{item.role}{item.streaming ? " · 正在生成" : ""}</span>
+              <span>{messageRoleLabel(item)}{item.streaming ? " · 正在生成" : ""}</span>
               <MarkdownMessage content={item.content} />
               {item.failed && item.requestText && (
                 <button className="inline-action" disabled={loading} onClick={() => sendMessage(item.requestText)}>重试</button>

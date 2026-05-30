@@ -255,6 +255,18 @@ textarea {
   background: #ffffff;
 }
 
+.message.workspace {
+  max-width: 88%;
+  margin-left: 28px;
+  background: #f4f8fb;
+  border-color: #b8d4ea;
+}
+
+.message.workspace > span {
+  color: #25658f;
+  font-weight: 700;
+}
+
 .message.failed {
   border-color: #f5b5b0;
   background: #fff7f7;
