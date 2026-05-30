@@ -20,6 +20,28 @@ Git:
 - Recorded by the Git commit that introduced this changelog entry.
 - No remote repository is currently configured, so push cannot be performed yet.
 
+## 2026-05-31 04:31 +08:00
+
+Purpose:
+- Move lifecycle hook logs, tool call logs, approval requests, and LLM request logs out of the Chat context inspector into a dedicated top-level log area, so the Chat right panel stays focused on workspace state and context stack inspection.
+
+Changed:
+- Added a fourth top-level Web UI tab: `日志`.
+- Added `LogsTab` in `src/web/main.tsx` with current conversation trace loading, global recent LLM request loading, compact LLM debug summary, lifecycle log panel, tool call log panel, approval request panel, and LLM request log panels.
+- Added clear actions for the whole visible log view and for each log section. These clear the current UI view rather than deleting persisted audit/debug records.
+- Removed lifecycle, tool call, approval, and LLM log sections from the Chat right panel.
+- Updated `src/web/styles.css` for the new log page layout.
+- Updated `ZLEAP_MASTER_PLAN.md` so the dedicated `日志` tab is part of the project UI contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Browser verification could not complete because the local server process did not remain reachable at `http://localhost:4173/` after background startup attempts in this environment.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 04:25 +08:00
 
 Purpose:

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceSession } from "../types";
 import "./styles.css";
 
-type Tab = "chat" | "workspace" | "memory";
+type Tab = "chat" | "workspace" | "memory" | "logs";
 type ChatMessage = {
   id: string;
   role: string;
@@ -301,9 +301,9 @@ function App() {
           <p>工作空间优先的智能体调试控制台</p>
         </div>
         <nav className="tabs" aria-label="主导航">
-          {(["chat", "workspace", "memory"] as Tab[]).map((item) => (
+          {(["chat", "workspace", "memory", "logs"] as Tab[]).map((item) => (
             <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
-              {item === "chat" ? "对话" : item === "workspace" ? "工作空间" : "记忆"}
+              {item === "chat" ? "对话" : item === "workspace" ? "工作空间" : item === "memory" ? "记忆" : "日志"}
             </button>
           ))}
         </nav>
@@ -311,6 +311,7 @@ function App() {
       {tab === "chat" && <ChatTab />}
       {tab === "workspace" && <WorkspaceTab />}
       {tab === "memory" && <MemoryTab />}
+      {tab === "logs" && <LogsTab />}
     </main>
   );
 }
@@ -327,11 +328,6 @@ function ChatTab() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(() => normalizeCachedMessages(cached.messages));
   const [output, setOutput] = useState<AgentRunOutput | null>(cached.output ?? null);
-  const [llmLogs, setLlmLogs] = useState<LLMCallSnapshot[]>([]);
-  const [globalLlmLogs, setGlobalLlmLogs] = useState<LLMCallSnapshot[]>([]);
-  const [toolLogs, setToolLogs] = useState<ToolCallLog[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const [error, setError] = useState("");
   const [retryMessage, setRetryMessage] = useState(cached.retryMessage ?? "");
   const [selectedTurnId, setSelectedTurnId] = useState(cached.selectedTurnId ?? "");
@@ -354,26 +350,6 @@ function ChatTab() {
   useEffect(() => {
     saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, agentDraft: agent ?? undefined });
   }, [userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, agent]);
-
-  async function loadConversationTrace() {
-    const params = new URLSearchParams({ actorId: userId, actorRole: userRole });
-    const trace = await api<ConversationTrace>(`/api/conversations/${encodeURIComponent(conversationId)}/trace?${params.toString()}`);
-    setLlmLogs(trace.llmCalls);
-    setToolLogs(trace.toolCalls ?? []);
-    setAuditLogs(trace.auditLogs ?? []);
-    setApprovalRequests(trace.approvalRequests ?? []);
-  }
-
-  async function loadGlobalLlmLogs() {
-    const params = new URLSearchParams({ limit: "100", actorId: userId, actorRole: userRole });
-    const data = await api<{ llmCalls: LLMCallSnapshot[] }>(`/api/llm-calls?${params.toString()}`);
-    setGlobalLlmLogs(data.llmCalls);
-  }
-
-  useEffect(() => {
-    loadConversationTrace().catch(() => setLlmLogs([]));
-    loadGlobalLlmLogs().catch(() => setGlobalLlmLogs([]));
-  }, [conversationId, userId, userRole]);
 
   async function saveAgent() {
     if (!agent) return;
@@ -487,8 +463,6 @@ function ChatTab() {
           : item);
       });
     } finally {
-      loadConversationTrace().catch(() => undefined);
-      loadGlobalLlmLogs().catch(() => undefined);
       setLoading(false);
     }
   }
@@ -514,12 +488,7 @@ function ChatTab() {
   function clearLocalCache() {
     localStorage.removeItem(CACHE_KEY);
     setMessages([]);
-      setOutput(null);
-      setLlmLogs([]);
-      setGlobalLlmLogs([]);
-      setToolLogs([]);
-      setAuditLogs([]);
-      setApprovalRequests([]);
+    setOutput(null);
     setError("");
     setRetryMessage("");
     setSelectedTurnId("");
@@ -536,10 +505,6 @@ function ChatTab() {
     setMessage("");
     setMessages([]);
     setOutput(null);
-    setLlmLogs([]);
-    setToolLogs([]);
-    setAuditLogs([]);
-    setApprovalRequests([]);
     setError("");
     setRetryMessage("");
     setSelectedTurnId("");
@@ -629,18 +594,10 @@ function ChatTab() {
           ) : (
             <>
               <strong>最新一轮</strong>
-              <span>未选择历史用户消息</span>
+          <span>未选择历史用户消息</span>
             </>
           )}
         </div>
-        <LlmDebugSummary
-          conversationLogs={llmLogs}
-          globalLogs={globalLlmLogs}
-          onRefresh={() => {
-            loadConversationTrace().catch(() => undefined);
-            loadGlobalLlmLogs().catch(() => undefined);
-          }}
-        />
         <h2>当前工作空间</h2>
         <div className="workspace-badge">{visibleOutput?.activeWorkspaceId ?? "暂无"}</div>
         <h2>工作空间轨迹</h2>
@@ -658,30 +615,134 @@ function ChatTab() {
           : <ContextStack segments={visibleOutput?.contextSegments ?? []} />}
         <h2>本轮记忆写入</h2>
         <MemoryWriteStack memories={visibleOutput?.memoryWrites ?? []} />
-        <h2>工具调用日志</h2>
-        <ToolLogPanel logs={toolLogs} />
-        <h2>工具审批请求</h2>
-        <ApprovalPanel
-          requests={approvalRequests}
-          canResolve={userRole === "creator"}
-          onResolve={async (approvalId, status) => {
-            await api(`/api/approvals/${approvalId}/resolve`, {
-              method: "POST",
-              body: JSON.stringify({ status, actorId: userId, actorRole: userRole })
-            });
-            await loadConversationTrace();
-          }}
-        />
-        <h2>生命周期 Hook 日志</h2>
-        <AuditLogPanel logs={auditLogs} />
-        <div className="section-heading">
-          <h2>LLM 请求日志</h2>
-          <button onClick={() => { loadConversationTrace().catch(() => undefined); loadGlobalLlmLogs().catch(() => undefined); }}>刷新日志</button>
-        </div>
-        <LlmLogPanel logs={llmLogs} />
-        <h2>全局最近 LLM 请求日志</h2>
-        <LlmLogPanel logs={globalLlmLogs} />
       </aside>
+    </section>
+  );
+}
+
+function LogsTab() {
+  const cached = loadCache();
+  const [userId, setUserId] = useState(cached.userId ?? "user");
+  const [userRole, setUserRole] = useState<"user" | "creator">(cached.userRole ?? "user");
+  const [conversationId, setConversationId] = useState(cached.conversationId ?? "");
+  const [llmLogs, setLlmLogs] = useState<LLMCallSnapshot[]>([]);
+  const [globalLlmLogs, setGlobalLlmLogs] = useState<LLMCallSnapshot[]>([]);
+  const [toolLogs, setToolLogs] = useState<ToolCallLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function loadLogs() {
+    setLoading(true);
+    setError("");
+    try {
+      if (conversationId.trim()) {
+        const traceParams = new URLSearchParams({ actorId: userId, actorRole: userRole });
+        const trace = await api<ConversationTrace>(`/api/conversations/${encodeURIComponent(conversationId.trim())}/trace?${traceParams.toString()}`);
+        setLlmLogs(trace.llmCalls);
+        setToolLogs(trace.toolCalls ?? []);
+        setAuditLogs(trace.auditLogs ?? []);
+        setApprovalRequests(trace.approvalRequests ?? []);
+      } else {
+        setLlmLogs([]);
+        setToolLogs([]);
+        setAuditLogs([]);
+        setApprovalRequests([]);
+      }
+      const globalParams = new URLSearchParams({ limit: "100", actorId: userId, actorRole: userRole });
+      const global = await api<{ llmCalls: LLMCallSnapshot[] }>(`/api/llm-calls?${globalParams.toString()}`);
+      setGlobalLlmLogs(global.llmCalls);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function clearLogView() {
+    setLlmLogs([]);
+    setGlobalLlmLogs([]);
+    setToolLogs([]);
+    setAuditLogs([]);
+    setApprovalRequests([]);
+    setError("");
+  }
+
+  useEffect(() => {
+    void loadLogs();
+  }, []);
+
+  return (
+    <section className="logs-page">
+      <aside className="panel logs-control-panel">
+        <h2>日志范围</h2>
+        <label>用户 ID<input value={userId} onChange={(event) => setUserId(event.target.value)} /></label>
+        <label>
+          角色
+          <select value={userRole} onChange={(event) => setUserRole(event.target.value as "user" | "creator")}>
+            <option value="user">普通用户</option>
+            <option value="creator">创建者</option>
+          </select>
+        </label>
+        <label>会话 ID<input value={conversationId} onChange={(event) => setConversationId(event.target.value)} placeholder="留空时只看全局 LLM 请求" /></label>
+        <button className="primary" onClick={() => void loadLogs()} disabled={loading}>{loading ? "加载中" : "刷新日志"}</button>
+        <button onClick={clearLogView} disabled={loading}>清空当前日志视图</button>
+        {error && <div className="error inline-error"><span>{error}</span></div>}
+      </aside>
+
+      <section className="logs-main">
+        <LlmDebugSummary
+          conversationLogs={llmLogs}
+          globalLogs={globalLlmLogs}
+          onRefresh={() => void loadLogs()}
+        />
+        <section className="panel logs-panel">
+          <div className="section-heading">
+            <h2>生命周期护持日志</h2>
+            <button onClick={() => setAuditLogs([])}>清空</button>
+          </div>
+          <AuditLogPanel logs={auditLogs} />
+        </section>
+        <section className="panel logs-panel">
+          <div className="section-heading">
+            <h2>工具调用日志</h2>
+            <button onClick={() => setToolLogs([])}>清空</button>
+          </div>
+          <ToolLogPanel logs={toolLogs} />
+        </section>
+        <section className="panel logs-panel">
+          <div className="section-heading">
+            <h2>工具审批请求</h2>
+            <button onClick={() => setApprovalRequests([])}>清空</button>
+          </div>
+          <ApprovalPanel
+            requests={approvalRequests}
+            canResolve={userRole === "creator"}
+            onResolve={async (approvalId, status) => {
+              await api(`/api/approvals/${approvalId}/resolve`, {
+                method: "POST",
+                body: JSON.stringify({ status, actorId: userId, actorRole: userRole })
+              });
+              await loadLogs();
+            }}
+          />
+        </section>
+        <section className="panel logs-panel">
+          <div className="section-heading">
+            <h2>当前会话 LLM 请求日志</h2>
+            <button onClick={() => setLlmLogs([])}>清空</button>
+          </div>
+          <LlmLogPanel logs={llmLogs} />
+        </section>
+        <section className="panel logs-panel">
+          <div className="section-heading">
+            <h2>全局最近 LLM 请求日志</h2>
+            <button onClick={() => setGlobalLlmLogs([])}>清空</button>
+          </div>
+          <LlmLogPanel logs={globalLlmLogs} />
+        </section>
+      </section>
     </section>
   );
 }

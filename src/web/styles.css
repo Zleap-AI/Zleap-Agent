@@ -657,6 +657,50 @@ pre {
   overflow: hidden;
 }
 
+.logs-page {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+  height: calc(100vh - 76px);
+  overflow: hidden;
+}
+
+.logs-control-panel {
+  padding: 14px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.logs-control-panel h2 {
+  font-size: 13px;
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  color: #5c6975;
+}
+
+.logs-control-panel button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.logs-main {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.logs-panel {
+  padding: 12px;
+}
+
+.inline-error {
+  margin: 12px 0 0;
+}
+
 .memory-toolbar {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) 180px auto auto auto auto;
@@ -712,7 +756,8 @@ td button {
 @media (max-width: 1100px) {
   .chat-grid,
   .workspace-grid,
-  .memory-layout {
+  .memory-layout,
+  .logs-page {
     grid-template-columns: 1fr;
   }
 

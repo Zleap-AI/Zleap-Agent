@@ -13,7 +13,7 @@
 
 - Web UI:
   - The visible interface must use Chinese by default.
-  - Top-level tabs: `对话`, `工作空间`, and `记忆`.
+  - Top-level tabs: `对话`, `工作空间`, `记忆`, and `日志`.
   - `对话` uses three columns: agent/LLM/prompt configuration, chatbot conversation, and workspace/context stack inspection.
   - Assistant responses must support streaming output with a character-by-character typing feel.
   - Chat messages render Markdown for common assistant output such as headings, lists, quotes, links, inline code, and fenced code blocks.
@@ -23,6 +23,8 @@
   - Chat composer keyboard behavior: Enter sends the message; Ctrl+Enter inserts a newline.
   - `工作空间` manages workspaces. A workspace is tools plus tool instructions.
   - `记忆` is a database-like table with filtering, create, edit, and delete.
+  - `日志` is the dedicated trace inspection area for lifecycle hook logs, tool call logs, approval requests, current-conversation LLM request logs, and global recent LLM request logs.
+  - Log panels must support clearing the current visible log view without treating audit data deletion as an ordinary UI action.
   - The Memory editor must expose `metadataJson`, show policy/save/delete errors directly, validate JSON before save, and provide policy-aware creation templates for impression/event/skill records.
   - Browser local storage should remember current UI/session state, including agent settings, LLM base URL/model/API key, conversation id, current messages, and the latest context stack. API keys may be cached only in the user's browser session/storage for convenience; they must never be persisted to SQLite, source files, server logs, or plan/docs.
   - Clearing the current conversation from the Web UI should also request server-side conversation deletion for that conversation's messages, workspace sessions, LLM calls, context segments, tool calls, and approval requests, while preserving audit logs.
@@ -333,11 +335,7 @@
   - Clearing the current conversation resets messages, trace, and conversation id without clearing saved LLM settings or API key.
   - Clicking a previous user message switches the right context panel to that turn's saved context stack.
   - Chat composer sends on Enter and inserts a newline on Ctrl+Enter.
-  - Chat right panel shows all LLM request logs for the current conversation, including whether each request returned or failed.
-  - Chat right panel shows global recent LLM request logs across conversations for connectivity debugging.
-  - Chat right panel shows a compact LLM debug summary near the top so endpoint/status/result/timestamp are visible without scrolling through the full context stack.
   - Chat right panel shows memory records written by the selected/latest turn.
-  - Chat right panel shows tool call logs, including memory tool arguments and results.
   - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact tool result messages returned into the model loop.
   - Browser refresh restores cached settings, API key, messages, and latest context stack.
   - Workspace creation assigns only registered tools.
@@ -345,8 +343,10 @@
   - Workspace tool lists show whether each tool is runtime-bound, MCP-bound, or still a placeholder.
   - Memory table supports filter/add/edit/delete.
   - Memory editor supports metadata JSON editing, client-side JSON validation, policy-aware add buttons for event/impression/skill, and visible strategy-layer error feedback.
-  - Chat right panel shows lifecycle hook/audit logs for the current conversation.
-  - Chat right panel shows tool approval requests and lets only a creator approve or reject pending requests for debugging the approval lifecycle.
+  - The dedicated `日志` tab shows lifecycle hook/audit logs, tool call logs, tool approval requests, current-conversation LLM request logs, and global recent LLM request logs.
+  - The dedicated `日志` tab shows a compact LLM debug summary so endpoint/status/result/timestamp are visible without scrolling through raw request payloads.
+  - The dedicated `日志` tab lets only a creator approve or reject pending requests for debugging the approval lifecycle.
+  - The dedicated `日志` tab supports clearing each visible log section and clearing the whole current log view.
 - LLM:
   - 302AI request uses normalized `/v1/chat/completions` on `https://api.302ai.com`.
   - Legacy cached `https://api.302.ai` hostnames are rewritten through URL parsing before request logging and provider fetch.
