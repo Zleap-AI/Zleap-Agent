@@ -133,6 +133,10 @@ export class Repositories {
     `).run(conversationId, agentId, userId, conversationId, now, now);
   }
 
+  getConversation(conversationId: string): { id: string; agentId: string; userId: string } | undefined {
+    return this.db.prepare("SELECT id, agentId, userId FROM conversations WHERE id = ?").get(conversationId) as { id: string; agentId: string; userId: string } | undefined;
+  }
+
   addMessage(conversationId: string, role: string, content: string, raw: unknown = {}): void {
     this.db.prepare(`
       INSERT INTO messages (id, conversationId, role, content, rawJson, createdAt)
@@ -156,6 +160,40 @@ export class Repositories {
       ORDER BY createdAt DESC
       LIMIT ?
     `).all(conversationId, limit).reverse() as StoredMessage[];
+  }
+
+  countMessages(conversationId: string): number {
+    return (this.db.prepare("SELECT COUNT(*) AS count FROM messages WHERE conversationId = ?").get(conversationId) as { count: number }).count;
+  }
+
+  listMessagesWindow(conversationId: string, offset: number, limit: number): StoredMessage[] {
+    return this.db.prepare(`
+      SELECT id, conversationId, role, content, rawJson, createdAt FROM messages
+      WHERE conversationId = ?
+      ORDER BY createdAt ASC
+      LIMIT ? OFFSET ?
+    `).all(conversationId, limit, offset) as StoredMessage[];
+  }
+
+  listMessagesInRange(conversationId: string, startAt: string, endAt: string, limit = 100): StoredMessage[] {
+    return this.db.prepare(`
+      SELECT id, conversationId, role, content, rawJson, createdAt FROM messages
+      WHERE conversationId = ?
+        AND createdAt >= ?
+        AND createdAt <= ?
+      ORDER BY createdAt ASC, rowid ASC
+      LIMIT ?
+    `).all(conversationId, startAt, endAt, limit) as StoredMessage[];
+  }
+
+  listMessagesBefore(conversationId: string, beforeAt: string, limit = 1): StoredMessage[] {
+    return this.db.prepare(`
+      SELECT id, conversationId, role, content, rawJson, createdAt FROM messages
+      WHERE conversationId = ?
+        AND createdAt <= ?
+      ORDER BY createdAt DESC, rowid DESC
+      LIMIT ?
+    `).all(conversationId, beforeAt, limit).reverse() as StoredMessage[];
   }
 
   deleteConversation(conversationId: string, actorId: string, actorRole: UserRole, deleteReason = "manual conversation delete"): void {
@@ -195,58 +233,66 @@ export class Repositories {
     return normalizeWorkspace(row, this.listToolsForWorkspace(id));
   }
 
-  upsertWorkspace(input: Omit<WorkspaceDefinition, "tools" | "createdAt" | "updatedAt"> & { toolIds: string[]; actorId?: string; actorRole?: UserRole }): WorkspaceDefinition {
-    const actorId = input.actorId ?? input.createdBy ?? "creator";
-    const actorRole = input.actorRole ?? "creator";
+  upsertWorkspace(input: Omit<WorkspaceDefinition, "tools" | "createdAt" | "updatedAt"> & { toolIds: string[]; actorId: string; actorRole: UserRole }): WorkspaceDefinition {
+    const actorId = input.actorId;
+    const actorRole = input.actorRole;
     if (actorRole !== "creator") throw new Error("Workspace creation and editing requires creator role.");
     const now = nowIso();
     const memoryPolicyJson = input.memoryPolicyJson ?? JSON.stringify(input.memoryPolicy ?? defaultMemoryPolicy);
-    this.db.prepare(`
-      INSERT INTO workspaces
-        (id, name, description, capabilitiesJson, inputKindsJson, outputKindsJson, requiresApproval, instructions, toolInstructions, memoryPolicyJson, riskLevel, createdBy, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        description = excluded.description,
-        capabilitiesJson = excluded.capabilitiesJson,
-        inputKindsJson = excluded.inputKindsJson,
-        outputKindsJson = excluded.outputKindsJson,
-        requiresApproval = excluded.requiresApproval,
-        instructions = excluded.instructions,
-        toolInstructions = excluded.toolInstructions,
-        memoryPolicyJson = excluded.memoryPolicyJson,
-        riskLevel = excluded.riskLevel,
-        updatedAt = excluded.updatedAt
-    `).run(
-      input.id,
-      input.name,
-      input.description,
-      input.capabilitiesJson ?? "[]",
-      input.inputKindsJson ?? "[]",
-      input.outputKindsJson ?? "[]",
-      Number(input.requiresApproval ?? 0),
-      input.instructions,
-      input.toolInstructions,
-      memoryPolicyJson,
-      input.riskLevel,
-      input.createdBy ?? actorId,
-      now,
-      now
-    );
     const effectiveToolIds = Array.from(new Set([...input.toolIds, ...builtInMemoryToolIds]));
-    this.db.prepare("DELETE FROM workspace_tools WHERE workspaceId = ?").run(input.id);
-    const link = this.db.prepare("INSERT INTO workspace_tools (workspaceId, toolId, createdAt) VALUES (?, ?, ?)");
-    for (const toolId of effectiveToolIds) link.run(input.id, toolId, now);
-    this.audit(actorId, actorRole, "workspace_upsert", "workspace", input.id, {
-      workspaceId: input.id,
-      toolIds: effectiveToolIds,
-      requiresApproval: Number(input.requiresApproval ?? 0),
-      riskLevel: input.riskLevel
-    });
+    const registeredToolIds = new Set(this.listTools().map((tool) => tool.id));
+    const missingToolIds = effectiveToolIds.filter((toolId) => !registeredToolIds.has(toolId));
+    if (missingToolIds.length > 0) {
+      throw new Error(`Workspace can only bind registered tools. Unknown toolId(s): ${missingToolIds.join(", ")}`);
+    }
+
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO workspaces
+          (id, name, description, capabilitiesJson, inputKindsJson, outputKindsJson, requiresApproval, instructions, toolInstructions, memoryPolicyJson, riskLevel, createdBy, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          description = excluded.description,
+          capabilitiesJson = excluded.capabilitiesJson,
+          inputKindsJson = excluded.inputKindsJson,
+          outputKindsJson = excluded.outputKindsJson,
+          requiresApproval = excluded.requiresApproval,
+          instructions = excluded.instructions,
+          toolInstructions = excluded.toolInstructions,
+          memoryPolicyJson = excluded.memoryPolicyJson,
+          riskLevel = excluded.riskLevel,
+          updatedAt = excluded.updatedAt
+      `).run(
+        input.id,
+        input.name,
+        input.description,
+        input.capabilitiesJson ?? "[]",
+        input.inputKindsJson ?? "[]",
+        input.outputKindsJson ?? "[]",
+        Number(input.requiresApproval ?? 0),
+        input.instructions,
+        input.toolInstructions,
+        memoryPolicyJson,
+        input.riskLevel,
+        input.createdBy ?? actorId,
+        now,
+        now
+      );
+      this.db.prepare("DELETE FROM workspace_tools WHERE workspaceId = ?").run(input.id);
+      const link = this.db.prepare("INSERT INTO workspace_tools (workspaceId, toolId, createdAt) VALUES (?, ?, ?)");
+      for (const toolId of effectiveToolIds) link.run(input.id, toolId, now);
+      this.audit(actorId, actorRole, "workspace_upsert", "workspace", input.id, {
+        workspaceId: input.id,
+        toolIds: effectiveToolIds,
+        requiresApproval: Number(input.requiresApproval ?? 0),
+        riskLevel: input.riskLevel
+      });
+    })();
     return this.getWorkspace(input.id);
   }
 
-  deleteWorkspace(id: string, actorId = "creator", actorRole: UserRole = "creator", deleteReason = "manual workspace delete"): void {
+  deleteWorkspace(id: string, actorId: string, actorRole: UserRole, deleteReason = "manual workspace delete"): void {
     if (actorRole !== "creator") throw new Error("Workspace deletion requires creator role.");
     if (["main", "file", "cli"].includes(id)) throw new Error(`Built-in workspace cannot be deleted: ${id}`);
     const workspace = this.getWorkspace(id);
@@ -309,13 +355,25 @@ export class Repositories {
     return this.db.prepare(`SELECT m.* FROM memories m WHERE ${clauses.join(" AND ")} ORDER BY m.updatedAt DESC LIMIT 200`).all(...params) as MemoryRow[];
   }
 
-  recallMemories(input: { userId: string; workspaceId: string; query: string; agentId?: string }): MemoryRow[] {
+  recallMemories(input: {
+    userId: string;
+    workspaceId: string;
+    query: string;
+    agentId?: string;
+    impressionLimit?: number;
+    eventLimit?: number;
+    skillLimit?: number;
+  }): MemoryRow[] {
     const ftsQuery = buildFtsQuery(input.query);
     const relationLatest = `
       NOT EXISTS (
         SELECT 1 FROM memories newer
         WHERE newer.relationId = m.relationId
           AND newer.relationId IS NOT NULL
+          AND newer.memoryType = m.memoryType
+          AND COALESCE(newer.userId, '') = COALESCE(m.userId, '')
+          AND COALESCE(newer.agentId, '') = COALESCE(m.agentId, '')
+          AND COALESCE(newer.workspaceId, '') = COALESCE(m.workspaceId, '')
           AND newer.deletedAt IS NULL
           AND newer.version > m.version
       )
@@ -323,7 +381,10 @@ export class Repositories {
     const textClause = ftsQuery
       ? "AND m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)"
       : "";
-    const recallPartition = (whereSql: string, params: unknown[], limit = 8): MemoryRow[] => this.db.prepare(`
+    const recallPartition = (whereSql: string, params: unknown[], limit = 8): MemoryRow[] => {
+      const safeLimit = Math.max(0, Math.floor(limit));
+      if (safeLimit <= 0) return [];
+      return this.db.prepare(`
       SELECT m.* FROM memories m
       WHERE m.deletedAt IS NULL
         AND ${relationLatest}
@@ -331,7 +392,8 @@ export class Repositories {
         ${textClause}
       ORDER BY m.updatedAt DESC
       LIMIT ?
-    `).all(...params, ...(ftsQuery ? [ftsQuery] : []), limit) as MemoryRow[];
+    `).all(...params, ...(ftsQuery ? [ftsQuery] : []), safeLimit) as MemoryRow[];
+    };
 
     const impressions = recallPartition(`
       m.memoryType = 'impression'
@@ -339,14 +401,16 @@ export class Repositories {
         (m.userId = ? AND m.agentId IS NULL)
         OR (m.userId IS NULL AND m.agentId = ?)
       )
-    `, [input.userId, input.agentId ?? ""]);
+    `, [input.userId, input.agentId ?? ""], input.impressionLimit ?? 8);
     const events = recallPartition(
       "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ?",
-      [input.userId, input.workspaceId]
+      [input.userId, input.workspaceId],
+      input.eventLimit ?? 8
     );
     const skills = recallPartition(
       "m.memoryType = 'skill' AND m.workspaceId = ?",
-      [input.workspaceId]
+      [input.workspaceId],
+      input.skillLimit ?? 8
     );
 
     return [...impressions, ...events, ...skills];
@@ -355,16 +419,52 @@ export class Repositories {
   createMemory(input: Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail">, actorId: string, actorRole: UserRole): MemoryRow {
     const now = nowIso();
     const id = input.id ?? createId("mem");
+    const metadata = parseJson<Record<string, unknown>>(input.metadataJson ?? "{}", {});
+    const metadataConversationId = typeof metadata.conversationId === "string" ? metadata.conversationId.trim() : "";
+    if (actorRole !== "creator" && metadataConversationId) {
+      const conversation = this.getConversation(metadataConversationId);
+      if (!conversation || conversation.userId !== actorId) {
+        this.audit(actorId, actorRole, "memory_create_rejected", "memory", id, {
+          memoryType: input.memoryType,
+          userId: input.userId,
+          workspaceId: input.workspaceId,
+          reason: "Memory metadata.conversationId must belong to the writing actor."
+        });
+        throw new Error("Memory metadata.conversationId must belong to the writing actor.");
+      }
+    }
     this.db.prepare(`
       INSERT INTO memories
         (id, memoryType, userId, agentId, workspaceId, relationId, version, title, summary, detail, metadataJson, createdAt, updatedAt)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, input.memoryType, input.userId ?? null, input.agentId ?? null, input.workspaceId ?? null, input.relationId ?? null, input.version ?? 1, input.title, input.summary, input.detail, input.metadataJson ?? "{}", now, now);
-    this.audit(actorId, actorRole, "create", "memory", id, { memoryType: input.memoryType });
+    this.audit(actorId, actorRole, "create", "memory", id, {
+      memoryType: input.memoryType,
+      userId: input.userId,
+      agentId: input.agentId,
+      workspaceId: input.workspaceId ?? (typeof metadata.activeWorkspaceId === "string" ? metadata.activeWorkspaceId : undefined),
+      relationId: input.relationId,
+      version: input.version ?? 1,
+      conversationId: typeof metadata.conversationId === "string" ? metadata.conversationId : undefined,
+      source: typeof metadata.source === "string" ? metadata.source : undefined
+    });
     return this.getMemory(id);
   }
 
-  getMemoryByRelation(memoryType: string, relationId: string): MemoryRow | undefined {
+  getMemoryByRelation(memoryType: string, relationId: string, scope?: { userId?: string | null; agentId?: string | null; workspaceId?: string | null }): MemoryRow | undefined {
+    if (scope) {
+      return this.db.prepare(`
+        SELECT * FROM memories
+        WHERE memoryType = ?
+          AND relationId = ?
+          AND deletedAt IS NULL
+          AND COALESCE(userId, '') = COALESCE(?, '')
+          AND COALESCE(agentId, '') = COALESCE(?, '')
+          AND COALESCE(workspaceId, '') = COALESCE(?, '')
+        ORDER BY version DESC
+        LIMIT 1
+      `).get(memoryType, relationId, scope.userId ?? null, scope.agentId ?? null, scope.workspaceId ?? null) as MemoryRow | undefined;
+    }
     return this.db.prepare(`
       SELECT * FROM memories
       WHERE memoryType = ? AND relationId = ? AND deletedAt IS NULL
@@ -416,6 +516,17 @@ export class Repositories {
   }
 
   saveWorkspaceSession(session: WorkspaceSession): void {
+    const conversation = this.db.prepare("SELECT userId FROM conversations WHERE id = ?").get(session.conversationId) as { userId: string } | undefined;
+    if (conversation && conversation.userId !== session.userId) {
+      this.audit(session.userId, "system", "workspace_session_write_rejected", "workspace_session", session.id, {
+        conversationId: session.conversationId,
+        ownerUserId: conversation.userId,
+        workspaceId: session.workspaceId,
+        taskId: session.taskId,
+        reason: "Workspace session userId does not match conversation owner."
+      });
+      throw new Error("Workspace session userId does not match conversation owner.");
+    }
     this.db.prepare(`
       INSERT INTO workspace_sessions
         (id, conversationId, userId, workspaceId, taskId, status, objective, summary, taskJson, resultJson, localContextJson, observationsJson, errorsJson, startedAt, completedAt)
@@ -503,8 +614,10 @@ export class Repositories {
     `).all(...params) as ToolCallLog[];
   }
 
-  listWorkspaceSessions(conversationId: string): WorkspaceSession[] {
-    const rows = this.db.prepare("SELECT * FROM workspace_sessions WHERE conversationId = ? ORDER BY startedAt").all(conversationId) as Array<any>;
+  listWorkspaceSessions(conversationId: string, userId?: string): WorkspaceSession[] {
+    const userFilter = userId ? "AND userId = ?" : "";
+    const params = userId ? [conversationId, userId] : [conversationId];
+    const rows = this.db.prepare(`SELECT * FROM workspace_sessions WHERE conversationId = ? ${userFilter} ORDER BY startedAt`).all(...params) as Array<any>;
     return rows.map((row) => ({
       id: row.id,
       conversationId: row.conversationId,
@@ -633,6 +746,19 @@ export class Repositories {
     reason: string;
     metadata?: unknown;
   }): ApprovalRequest {
+    if (input.conversationId) {
+      const conversation = this.db.prepare("SELECT userId FROM conversations WHERE id = ?").get(input.conversationId) as { userId: string } | undefined;
+      if (conversation && conversation.userId !== input.userId) {
+        this.audit(input.userId, "system", "approval_request_write_rejected", "approval", undefined, {
+          conversationId: input.conversationId,
+          ownerUserId: conversation.userId,
+          workspaceId: input.workspaceId,
+          toolName: input.toolName,
+          reason: "Approval request userId does not match conversation owner."
+        });
+        throw new Error("Approval request userId does not match conversation owner.");
+      }
+    }
     const row: ApprovalRequest = {
       id: createId("approval"),
       userId: input.userId,
@@ -731,8 +857,17 @@ export class Repositories {
     return this.getApprovalRequest(id);
   }
 
-  getTrace(conversationId: string, actorId = "creator", actorRole: UserRole = "creator"): { sessions: WorkspaceSession[]; llmCalls: LLMCallSnapshot[]; contextSegments: ContextSegment[]; toolCalls: ToolCallLog[]; auditLogs: AuditLog[]; approvalRequests: ApprovalRequest[] } {
+  getTrace(conversationId: string, actorId: string, actorRole: UserRole): { sessions: WorkspaceSession[]; llmCalls: LLMCallSnapshot[]; contextSegments: ContextSegment[]; toolCalls: ToolCallLog[]; auditLogs: AuditLog[]; approvalRequests: ApprovalRequest[] } {
+    if (!actorId || (actorRole !== "user" && actorRole !== "creator")) {
+      throw new Error("Conversation trace requires explicit actor identity.");
+    }
     const conversation = this.db.prepare("SELECT id, userId, agentId FROM conversations WHERE id = ?").get(conversationId) as { id: string; userId: string; agentId: string } | undefined;
+    if (!conversation && actorRole !== "creator") {
+      this.audit(actorId, actorRole, "trace_read_rejected", "conversation", conversationId, {
+        reason: "Conversation trace requires creator role when the conversation record no longer exists."
+      });
+      throw new Error("Conversation trace requires creator role when the conversation record no longer exists.");
+    }
     if (conversation && actorRole !== "creator" && conversation.userId !== actorId) {
       this.audit(actorId, actorRole, "trace_read_rejected", "conversation", conversationId, {
         ownerUserId: conversation.userId,
@@ -743,12 +878,12 @@ export class Repositories {
     }
     const toolLogUserId = actorRole === "creator" ? undefined : actorId;
     return {
-      sessions: this.listWorkspaceSessions(conversationId),
+      sessions: this.listWorkspaceSessions(conversationId, toolLogUserId),
       llmCalls: this.db.prepare("SELECT * FROM llm_calls WHERE conversationId = ? ORDER BY createdAt DESC").all(conversationId) as LLMCallSnapshot[],
       contextSegments: this.db.prepare("SELECT * FROM context_segments WHERE conversationId = ? ORDER BY sortOrder").all(conversationId) as ContextSegment[],
       toolCalls: this.listToolCalls(conversationId, toolLogUserId),
       auditLogs: this.listAuditLogs({ conversationId }),
-      approvalRequests: this.listApprovalRequests({ conversationId })
+      approvalRequests: this.listApprovalRequests({ conversationId, actorId, actorRole })
     };
   }
 

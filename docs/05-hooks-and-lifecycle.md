@@ -113,6 +113,8 @@ load:
   skill memory scoped by workspaceId
 ```
 
+The memory partitions recalled here become the authoritative `WorkspaceSession.localContext` for the next LLM call in that workspace. Later prompt assembly must reuse this persisted local context rather than recalling memory again with a different query, so trace/debug UI and final LLM messages stay consistent.
+
 ## afterWorkspaceEnter
 
 进入 workspace 后运行。
@@ -172,6 +174,16 @@ tool 调用后运行。
 - 触发 skill candidate extraction。
 - 将结果返回 main workspace。
 
+### 2026-05-31 update: single exit hook execution
+
+`afterWorkspaceExit` is tied to one successful `exitWorkspace` function call. If a model emits `exitWorkspace` together with additional tool calls in the same assistant message, runtime must not run exit lifecycle work more than once for the committed workspace session. This prevents duplicated `skill_usage_recorded` counters, duplicated `hook.afterWorkspaceExit` audit logs, and repeated exit-hook memory extraction for the same handoff.
+
+If `exitWorkspace` succeeds and later tool calls appear in the same assistant tool-call batch, those later child workspace calls are post-exit calls. Runtime should log them as failed trace records, but it must not execute them or mutate the already committed `WorkspaceResult` / local tool evidence.
+
+### 2026-05-31 update: session-scoped exit evidence
+
+Workspace-exit event extraction must keep evidence tied to the committed child `WorkspaceSession`. It may include the user message that created the task, messages created during the session interval, exact `workspaceSessionId`/`taskId` tool calls, and legacy unbound tool calls from the same interval. It must not attach older same-workspace messages or tool calls from another session.
+
 ## afterConversationWindow
 
 这是一个自动触发的 hook。
@@ -192,6 +204,22 @@ tool 调用后运行。
 - 维护 relationId。
 - 判断是否需要提炼 skill。
 
+### 2026-05-31 update: absolute conversation windows
+
+Conversation-window event extraction must use the full stored message count and absolute message-window indexes. It must not derive window numbers from a bounded recent-history slice. If a conversation has 520 stored messages and the window size is 20, runtime must be able to generate `window:26` process/result events with exactly messages 501-520 as evidence.
+
+### 2026-05-31 update: trusted memory trace links
+
+`metadataJson.conversationId` is a trace-linking field. Non-creator memory writes may only use a conversation id that already exists and belongs to the writing actor. If a memory write is rejected because the metadata points at another user's conversation, the rejection audit must not include that forged conversation id, otherwise the Web UI trace for the other user would be polluted by the failed attempt.
+
+Direct Memory Web UI/API create/update/delete requests may also carry an operation-level `conversationId` for trace linking. That request field is not trusted input for ordinary users: it must resolve to one of the actor's existing conversations before any memory mutation or operation audit is written. Runtime tool calls do not use this external request field; they use the current run's code-bound `conversationId`.
+
+### 2026-05-30 更新：自动 memory 写入审计身份
+
+conversation-window event extraction 写入的是当前用户在当前 workspace 里的 event memory，因此落库时必须沿用当前 run 的 userId 和 userRole 做 policy 检查，不能伪装成 creator 手动写入。hook 本身的生命周期记录仍然以 system action 写入 audit log。
+
+memory `create` audit 必须尽量携带 `conversationId`、`workspaceId`、`relationId`、`source`、`userId`、`agentId` 和版本信息。这样 Web UI trace 才能把一条 memory row 精确连回产生它的对话窗口、workspace session 或 memory tool call。
+
 ## Event Extraction
 
 event 提取主要由程序 hook 自动触发。
@@ -209,7 +237,7 @@ event 提取主要由程序 hook 自动触发。
 - process event。
 - result event。
 - relationId。
-- embedding。
+- SQLite FTS 文本索引。
 - 是否建议提取 skill。
 
 流程：
@@ -218,12 +246,11 @@ event 提取主要由程序 hook 自动触发。
 1. 收集 workspace session 过程。
 2. 判断是否有值得保存的事情。
 3. 生成 process event 和 result event。
-4. 对 event 做 embedding。
+4. 更新 SQLite FTS 文本索引。
 5. 在 userId + workspaceId 内召回相似 event。
-6. 决定 relationId。
-7. 写入 SQL。
-8. 写入 vector store。
-9. 触发 skill 判断。
+6. 在同一 scope 分区内决定 relationId/version。
+7. 写入 SQLite。
+8. 触发 skill 判断。
 ```
 
 ## Skill Extraction
@@ -279,6 +306,7 @@ updateMemory
 
 - 只能写当前 userId。
 - 不应记录敏感信息，除非用户明确要求。
+- runtime 可以把产生这条 impression 的 `activeWorkspaceId`、`workspaceSessionId`、`taskId` 写入 metadata/audit 作为调试证据；这些字段不是 scope，也不能由模型传入。
 
 ### writeAgentSelfImpression
 
@@ -301,6 +329,7 @@ updateMemory
 
 - 默认优先由 hook 写入。
 - agent 请求写入时，runtime 仍要检查。
+- `userId` 和 `workspaceId` 由 runtime 从当前 run / active workspace 注入，模型不能自己传 scope 字段。
 
 ### writeSkillMemory
 
@@ -308,12 +337,16 @@ updateMemory
 
 - 用户要求总结经验。
 - agent 发现某个方法论可以复用。
+- 触发文本只用于提炼经验内容，不用于选择 workspace。
 
 限制：
 
 - 需要脱敏。
-- 需要绑定 workspace。
+- 需要绑定 workspace，且 workspace 只能由 runtime 从当前 active workspace 注入。
+- 不允许根据自然语言关键词猜测另一个 workspace。
 - 应保存 evidence event。
+
+Runtime-requested `writeSkillMemory` must also preserve trace evidence from code-bound runtime state. When available, metadata includes `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`, so the Web UI can connect the shared skill to the exact workspace execution that requested it. The model cannot supply or override these ids.
 
 ## Workspace Lifecycle 示例
 
@@ -347,4 +380,3 @@ updateMemory
 3. event 以事实为主，skill 以方法为主。
 4. hook 自动化常规记忆生成，agent 工具用于主动记忆。
 5. 所有写入都经过 userid、workspaceId 和权限检查。
-

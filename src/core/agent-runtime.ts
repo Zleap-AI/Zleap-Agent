@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRunInput, AgentRunOutput, AgentRunPrepared, ContextSegment, LLMCallSnapshot, LLMMessage, MemoryRow, WorkspaceDefinition, WorkspaceResult, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunInput, AgentRunOutput, AgentRunPrepared, ContextSegment, LLMCallSnapshot, LLMMessage, MemoryRow, WorkspaceResult, WorkspaceSession } from "../types";
 import { Repositories } from "../db/repositories";
 import { ContextBuilder, PromptAssembler } from "./context-builder";
 import { AttentionBudgetManager, estimateTokens } from "./attention-budget";
@@ -8,11 +8,17 @@ import { WorkspaceRuntime } from "./workspace-runtime";
 import { MemoryService } from "./memory-service";
 import { PolicyEngine } from "./policy-engine";
 import { HookManager } from "./hook-manager";
+import type { ToolExecutionResult } from "./tool-registry";
 import { ToolRegistry } from "./tool-registry";
 
 type LLMToolCall = NonNullable<LLMMessage["tool_calls"]>[number];
 type ToolCallAccumulator = Partial<LLMToolCall> & { function: { name: string; arguments: string } };
 const MAX_TOOL_ROUNDS = 4;
+
+function summarizeAssistantMessage(value: string, maxLength = 500): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
 
 export class AgentRuntime {
   private readonly contextBuilder = new ContextBuilder();
@@ -57,6 +63,7 @@ export class AgentRuntime {
     completion = loopResult.completion;
 
     const assistantMessage = completion.message.content ?? "我已经处理了这一步，但没有生成可展示的文字结果。";
+    this.commitMainAssistantResponse(prepared, assistantMessage, { source: "directAssistantMessage" });
     this.repos.addMessage(input.conversationId, "assistant", assistantMessage, completion.raw);
     const memoryWrites = [
       ...loopResult.memoryWrites,
@@ -141,7 +148,17 @@ export class AgentRuntime {
           });
 
           if (toolCalls.length === 0) {
+            if (prepared.activeWorkspaceId !== "main") {
+              const exitRequest = this.requireChildWorkspaceExit(input, prepared, messages, {
+                role: "assistant",
+                content: roundText || null
+              }, { streamed: true, toolLoopRound: round });
+              messages = exitRequest.messages;
+              currentLlmCallId = exitRequest.llmCallId;
+              continue;
+            }
             assistantMessage = roundText;
+            this.commitMainAssistantResponse(prepared, assistantMessage, { source: "streamedDirectAssistantMessage" });
             if (assistantMessage) yield { type: "delta", text: assistantMessage };
             this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true });
             const hookWrites = this.memoryService.afterAgentTurn({
@@ -166,13 +183,19 @@ export class AgentRuntime {
               output: {
                 conversationId: prepared.conversationId,
                 assistantMessage,
-                activeWorkspaceId: prepared.activeWorkspaceId,
-                workspaceTrace: prepared.workspaceTrace,
-                contextSegments: prepared.contextSegments,
-                finalMessages: messages,
-                memoryWrites: [...memoryWrites, ...hookWrites]
-              }
-            };
+              activeWorkspaceId: prepared.activeWorkspaceId,
+              workspaceTrace: prepared.workspaceTrace,
+              contextSegments: prepared.contextSegments,
+              finalMessages: [
+                ...messages,
+                {
+                  role: "assistant",
+                  content: assistantMessage
+                }
+              ],
+              memoryWrites: [...memoryWrites, ...hookWrites]
+            }
+          };
             return;
           }
 
@@ -185,6 +208,9 @@ export class AgentRuntime {
               streamed: true
             });
             assistantMessage = "\u6211\u5df2\u7ecf\u5b8c\u6210\u4e86\u5f53\u524d\u5141\u8bb8\u7684\u8fde\u7eed\u64cd\u4f5c\u8f6e\u6b21\u3002\u8bf7\u786e\u8ba4\u4e0b\u4e00\u6b65\u8981\u7ee7\u7eed\u6267\u884c\u54ea\u4e00\u90e8\u5206\u3002";
+            if (prepared.activeWorkspaceId === "main") {
+              this.commitMainAssistantResponse(prepared, assistantMessage, { source: "streamedToolLoopLimit", stoppedBy: "maxToolRounds" });
+            }
             yield { type: "delta", text: assistantMessage };
             this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true, stoppedBy: "maxToolRounds" });
             const hookWrites = this.memoryService.afterAgentTurn({
@@ -230,7 +256,91 @@ export class AgentRuntime {
           const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
             ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, assistantToolMessage, toolExecution.toolMessages);
           messages = transition?.messages ?? [...messages, assistantToolMessage, ...toolExecution.toolMessages];
+          if (toolExecution.terminalAssistantMessage) {
+            assistantMessage = toolExecution.terminalAssistantMessage;
+            yield { type: "delta", text: assistantMessage };
+            this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true, terminalToolResult: true });
+            const hookWrites = this.memoryService.afterAgentTurn({
+              run: input,
+              activeWorkspaceId: prepared.activeWorkspaceId,
+              assistantMessage
+            });
+            this.hookManager.record({
+              hook: "afterAgentTurn",
+              actorId: input.userId,
+              actorRole: input.userRole,
+              metadata: {
+                conversationId: input.conversationId,
+                workspaceId: prepared.activeWorkspaceId,
+                llmCallId: currentLlmCallId,
+                streamed: true,
+                terminalToolResult: true,
+                memoryWriteCount: memoryWrites.length + hookWrites.length
+              }
+            });
+            yield {
+              type: "done",
+              output: {
+                conversationId: prepared.conversationId,
+                assistantMessage,
+                activeWorkspaceId: prepared.activeWorkspaceId,
+                workspaceTrace: prepared.workspaceTrace,
+                contextSegments: prepared.contextSegments,
+                finalMessages: messages,
+                memoryWrites: [...memoryWrites, ...hookWrites]
+              }
+            };
+            return;
+          }
           currentLlmCallId = transition?.llmCallId ?? this.saveFollowUpLlmCall(input, prepared, messages, toolExecution.toolMessages);
+        }
+        if (prepared.activeWorkspaceId !== "main") {
+          this.repos.audit(input.userId, "system", "workspace_exit_missing", "conversation", input.conversationId, {
+            conversationId: input.conversationId,
+            workspaceId: prepared.activeWorkspaceId,
+            maxToolRounds: MAX_TOOL_ROUNDS,
+            streamed: true
+          });
+          assistantMessage = "当前步骤还没有形成可靠的可交付结果。请确认是否继续推进，或补充下一步要求。";
+          yield { type: "delta", text: assistantMessage };
+          this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true, stoppedBy: "missingWorkspaceExit" });
+          const hookWrites = this.memoryService.afterAgentTurn({
+            run: input,
+            activeWorkspaceId: prepared.activeWorkspaceId,
+            assistantMessage
+          });
+          this.hookManager.record({
+            hook: "afterAgentTurn",
+            actorId: input.userId,
+            actorRole: input.userRole,
+            metadata: {
+              conversationId: input.conversationId,
+              workspaceId: prepared.activeWorkspaceId,
+              llmCallId: currentLlmCallId,
+              streamed: true,
+              memoryWriteCount: memoryWrites.length + hookWrites.length,
+              stoppedBy: "missingWorkspaceExit"
+            }
+          });
+          yield {
+            type: "done",
+            output: {
+              conversationId: prepared.conversationId,
+              assistantMessage,
+              activeWorkspaceId: prepared.activeWorkspaceId,
+              workspaceTrace: prepared.workspaceTrace,
+              contextSegments: prepared.contextSegments,
+              finalMessages: [
+                ...messages,
+                {
+                  role: "assistant",
+                  content: assistantMessage
+                }
+              ],
+              memoryWrites: [...memoryWrites, ...hookWrites]
+            }
+          };
+          return;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -262,6 +372,7 @@ export class AgentRuntime {
       }
     }
 
+    this.commitMainAssistantResponse(prepared, assistantMessage, { source: "chunkStreamAssistantMessage" });
     this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true });
     const memoryWrites = this.memoryService.afterAgentTurn({
       run: input,
@@ -367,13 +478,11 @@ export class AgentRuntime {
   } {
     const workspace = this.repos.getWorkspace(input.workspaceId);
     const workspaceRegistry = this.repos.listWorkspaces();
-    const recalledMemories = this.repos.recallMemories({
-      userId: input.input.userId,
-      agentId: input.agent.id,
-      workspaceId: input.workspaceId,
-      query: input.input.message
-    });
-    const memories = this.applyWorkspaceMemoryPolicy(workspace, recalledMemories);
+    const memories = [
+      ...input.activeSession.localContext.recalledImpressions,
+      ...input.activeSession.localContext.recalledEventMemories,
+      ...input.activeSession.localContext.recalledSkillMemories
+    ];
     const history = this.selectLocalHistory(input.input.conversationId, input.workspaceId);
     const callableTools = this.toolRegistry.getCallableTools(input.workspaceId);
     const toolsJson = JSON.stringify(callableTools, null, 2);
@@ -467,18 +576,6 @@ export class AgentRuntime {
       .filter((toolCall) => toolCall.function.name);
   }
 
-  private applyWorkspaceMemoryPolicy(workspace: WorkspaceDefinition, memories: MemoryRow[]): MemoryRow[] {
-    const policy = workspace.memoryPolicy;
-    const impressions = memories.filter((memory) => memory.memoryType === "impression");
-    const events = policy.eventRecallEnabled
-      ? memories.filter((memory) => memory.memoryType === "event").slice(0, Math.max(0, policy.maxEventMemories))
-      : [];
-    const skills = policy.skillRecallEnabled
-      ? memories.filter((memory) => memory.memoryType === "skill").slice(0, Math.max(0, policy.maxSkillMemories))
-      : [];
-    return [...impressions, ...events, ...skills];
-  }
-
   private selectLocalHistory(conversationId: string, workspaceId: string): Array<{ role: string; content: string }> {
     if (workspaceId !== "main") return [];
     return this.repos.listMessages(conversationId, 12).map((message) => ({
@@ -487,14 +584,18 @@ export class AgentRuntime {
     }));
   }
 
-  private executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): { toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession } {
+  private executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): { toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string } {
     const memoryWrites: MemoryRow[] = [];
     const toolMessages: LLMMessage[] = [];
     let enteredWorkspaceSession: WorkspaceSession | undefined;
     let exitedWorkspaceSession: WorkspaceSession | undefined;
+    let terminalAssistantMessage: string | undefined;
+    let workspaceExitedInBatch = false;
     for (const toolCall of toolCalls) {
       const toolName = toolCall.function.name;
       const activeSession = this.findActiveWorkspaceSession(prepared);
+      let justExitedWorkspaceSession: WorkspaceSession | undefined;
+      const rejectAfterExit = workspaceExitedInBatch && prepared.activeWorkspaceId !== "main";
       this.hookManager.record({
         hook: "beforeToolCall",
         actorId: input.userId,
@@ -508,18 +609,37 @@ export class AgentRuntime {
           toolName
         }
       });
-      const result = this.toolRegistry.execute({
-        run: input,
-        activeWorkspaceId: prepared.activeWorkspaceId,
-        activeWorkspaceSession: activeSession,
-        callableTools: prepared.callableTools,
-        toolName,
-        argumentsJson: toolCall.function.arguments
-      });
+      const result: ToolExecutionResult = rejectAfterExit
+        ? {
+          ok: false,
+          status: "failed",
+          result: {
+            error: "The active child workspace already exited earlier in this assistant tool-call batch. Later same-batch child tool calls are rejected and not executed.",
+            toolName,
+            workspaceId: prepared.activeWorkspaceId,
+            workspaceSessionId: activeSession?.id ?? null,
+            taskId: activeSession?.taskId ?? null
+          }
+        }
+        : this.toolRegistry.execute({
+          run: input,
+          activeWorkspaceId: prepared.activeWorkspaceId,
+          activeWorkspaceSession: activeSession,
+          callableTools: prepared.callableTools,
+          toolName,
+          argumentsJson: toolCall.function.arguments
+        });
       if (result.memory) memoryWrites.push(result.memory);
       if (result.workspaceSession) enteredWorkspaceSession = result.workspaceSession;
       if (result.exitedWorkspaceResult) {
-        exitedWorkspaceSession = this.applyExitWorkspaceResult(prepared, result.exitedWorkspaceResult);
+        justExitedWorkspaceSession = this.applyExitWorkspaceResult(prepared, result.exitedWorkspaceResult);
+        exitedWorkspaceSession = justExitedWorkspaceSession;
+      }
+      if (result.mainWorkspaceResult) {
+        this.applyMainWorkspaceResult(prepared, result.mainWorkspaceResult);
+      }
+      if (result.terminalAssistantMessage) {
+        terminalAssistantMessage = result.terminalAssistantMessage;
       }
       const savedToolCall = this.repos.saveToolCall({
         conversationId: input.conversationId,
@@ -532,7 +652,7 @@ export class AgentRuntime {
         resultJson: JSON.stringify(result.result),
         status: result.status
       });
-      this.recordToolCallInActiveWorkspaceSession(prepared, savedToolCall);
+      if (!rejectAfterExit) this.recordToolCallInActiveWorkspaceSession(prepared, savedToolCall);
       this.hookManager.record({
         hook: "afterToolCall",
         actorId: input.userId,
@@ -549,11 +669,12 @@ export class AgentRuntime {
           status: result.status
         }
       });
-      if (exitedWorkspaceSession) {
+      if (justExitedWorkspaceSession) {
         memoryWrites.push(...this.memoryService.afterWorkspaceExit({
           run: input,
-          session: exitedWorkspaceSession
+          session: justExitedWorkspaceSession
         }));
+        workspaceExitedInBatch = true;
       }
       toolMessages.push({
         role: "tool",
@@ -562,7 +683,7 @@ export class AgentRuntime {
         content: JSON.stringify(result.result)
       });
     }
-    return { toolMessages, memoryWrites, enteredWorkspaceSession, exitedWorkspaceSession };
+    return { toolMessages, memoryWrites, enteredWorkspaceSession, exitedWorkspaceSession, terminalAssistantMessage };
   }
 
   private findActiveWorkspaceSession(prepared: AgentRunPrepared): WorkspaceSession | undefined {
@@ -617,6 +738,61 @@ export class AgentRuntime {
       status: session.status
     });
     return session;
+  }
+
+  private applyMainWorkspaceResult(prepared: AgentRunPrepared, result: Partial<WorkspaceResult>): WorkspaceSession | undefined {
+    const session = prepared.workspaceTrace.find((item) => item.workspaceId === "main");
+    if (!session) return undefined;
+    const nextResult: WorkspaceResult = {
+      taskId: session.taskId,
+      workspaceId: "main",
+      status: result.status ?? session.result.status,
+      summary: result.summary ?? session.result.summary,
+      artifacts: result.artifacts ?? session.result.artifacts,
+      observations: result.observations ?? session.result.observations,
+      errors: result.errors ?? session.result.errors,
+      suggestedNextSteps: result.suggestedNextSteps ?? session.result.suggestedNextSteps
+    };
+    session.status = nextResult.status;
+    session.summary = nextResult.summary;
+    session.result = nextResult;
+    session.observations = nextResult.observations;
+    session.errors = nextResult.errors;
+    session.completedAt = nowIso();
+    this.repos.updateWorkspaceSessionLocalContext(session);
+    this.repos.audit(session.userId, "system", "main_workspace_result_committed", "workspace_session", session.id, {
+      conversationId: session.conversationId,
+      workspaceId: "main",
+      taskId: session.taskId,
+      status: session.status
+    });
+    return session;
+  }
+
+  private commitMainAssistantResponse(prepared: AgentRunPrepared, assistantMessage: string, metadata: Record<string, unknown> = {}): WorkspaceSession | undefined {
+    if (prepared.activeWorkspaceId !== "main") return undefined;
+    const session = prepared.workspaceTrace.find((item) => item.workspaceId === "main");
+    if (!session || session.status !== "running") return undefined;
+    const committed = this.applyMainWorkspaceResult(prepared, {
+      status: "completed",
+      summary: summarizeAssistantMessage(assistantMessage) || "Main workspace produced a final user-facing response.",
+      observations: [
+        ...session.result.observations,
+        "Main workspace produced a final user-facing response."
+      ],
+      suggestedNextSteps: []
+    });
+    if (committed) {
+      this.repos.audit(session.userId, "system", "main_workspace_direct_response_committed", "workspace_session", session.id, {
+        conversationId: session.conversationId,
+        workspaceId: "main",
+        taskId: session.taskId,
+        status: committed.status,
+        assistantTextLength: assistantMessage.length,
+        ...metadata
+      });
+    }
+    return committed;
   }
 
   private applyWorkspaceTransition(
@@ -755,13 +931,56 @@ export class AgentRuntime {
 
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round += 1) {
       const toolCalls = completion.message.tool_calls ?? [];
-      if (toolCalls.length === 0) return { completion, memoryWrites, finalMessages: messages };
+      if (toolCalls.length === 0) {
+        if (prepared.activeWorkspaceId !== "main") {
+          const exitRequest = this.requireChildWorkspaceExit(input, prepared, messages, completion.message, { toolLoopRound: round });
+          messages = exitRequest.messages;
+          try {
+            completion = await this.llmClient.complete({
+              baseUrl: prepared.llm.baseUrl,
+              apiKey: prepared.llm.apiKey,
+              model: prepared.llm.model,
+              messages,
+              tools: prepared.callableTools,
+              temperature: prepared.llm.temperature
+            });
+            this.repos.markLlmCallCompleted(exitRequest.llmCallId, {
+              ...(completion.raw && typeof completion.raw === "object" ? completion.raw as Record<string, unknown> : { raw: completion.raw }),
+              toolLoopRound: round,
+              afterRequiredWorkspaceExit: true
+            });
+            continue;
+          } catch (error) {
+            const errorText = error instanceof Error ? error.message : String(error);
+            this.repos.markLlmCallFailed(exitRequest.llmCallId, errorText);
+            throw error;
+          }
+        }
+        return { completion, memoryWrites, finalMessages: messages };
+      }
 
       const toolExecution = this.executeToolCalls(input, prepared, toolCalls);
       memoryWrites.push(...toolExecution.memoryWrites);
       const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, completion.message, toolExecution.toolMessages)
         ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, completion.message, toolExecution.toolMessages);
       messages = transition?.messages ?? [...messages, completion.message, ...toolExecution.toolMessages];
+      if (toolExecution.terminalAssistantMessage) {
+        const terminalMessage: LLMMessage = {
+          role: "assistant",
+          content: toolExecution.terminalAssistantMessage
+        };
+        return {
+          completion: {
+            message: terminalMessage,
+            raw: {
+              terminalToolResult: true,
+              activeWorkspaceId: prepared.activeWorkspaceId
+            }
+          },
+          memoryWrites,
+          finalMessages: [...messages, terminalMessage]
+        };
+      }
       const llmCallId = transition?.llmCallId ?? this.saveFollowUpLlmCall(input, prepared, messages, toolExecution.toolMessages);
 
       try {
@@ -799,7 +1018,53 @@ export class AgentRuntime {
         raw: { stoppedBy: "maxToolRounds", maxToolRounds: MAX_TOOL_ROUNDS }
       };
     }
+    if (prepared.activeWorkspaceId !== "main") {
+      this.repos.audit(input.userId, "system", "workspace_exit_missing", "conversation", input.conversationId, {
+        conversationId: input.conversationId,
+        workspaceId: prepared.activeWorkspaceId,
+        maxToolRounds: MAX_TOOL_ROUNDS,
+        lastAssistantTextLength: completion.message.content?.length ?? 0
+      });
+      completion = {
+        message: {
+          role: "assistant",
+          content: "当前步骤还没有形成可靠的可交付结果。请确认是否继续推进，或补充下一步要求。"
+        },
+        raw: { stoppedBy: "missingWorkspaceExit", maxToolRounds: MAX_TOOL_ROUNDS }
+      };
+    }
 
     return { completion, memoryWrites, finalMessages: messages };
+  }
+
+  private requireChildWorkspaceExit(
+    input: AgentRunInput,
+    prepared: AgentRunPrepared,
+    messages: LLMMessage[],
+    assistantMessage: LLMMessage,
+    metadata: Record<string, unknown> = {}
+  ): { llmCallId: string; messages: LLMMessage[] } {
+    const session = this.findActiveWorkspaceSession(prepared);
+    const reminder: LLMMessage = {
+      role: "system",
+      content: [
+        `The active workspace is ${prepared.activeWorkspaceId}.`,
+        "A child workspace cannot produce the final user-facing answer directly.",
+        "Return a structured WorkspaceResult by calling exitWorkspace with status, summary, artifacts, observations, errors, and suggestedNextSteps.",
+        "Keep raw local evidence in the workspace session; main workspace will integrate the returned result."
+      ].join("\n")
+    };
+    const nextMessages = [...messages, assistantMessage, reminder];
+    const llmCallId = this.saveFollowUpLlmCall(input, prepared, nextMessages);
+    this.repos.audit(input.userId, "system", "workspace_exit_required", "workspace_session", session?.id, {
+      conversationId: input.conversationId,
+      workspaceId: prepared.activeWorkspaceId,
+      workspaceSessionId: session?.id,
+      taskId: session?.taskId,
+      llmCallId,
+      assistantTextLength: assistantMessage.content?.length ?? 0,
+      ...metadata
+    });
+    return { llmCallId, messages: nextMessages };
   }
 }

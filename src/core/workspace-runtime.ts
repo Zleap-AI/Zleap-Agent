@@ -3,6 +3,17 @@ import { createId, nowIso } from "./id";
 import { Repositories } from "../db/repositories";
 
 export class WorkspaceRuntime {
+  private readonly universalRuntimeMemoryToolNames = new Set([
+    "searchMemory",
+    "writeUserImpression",
+    "writeAgentSelfImpression",
+    "writeEventMemory",
+    "writeSkillMemory",
+    "updateMemory",
+    "deleteMemory"
+  ]);
+  private readonly mainOnlyToolNames = new Set(["enterWorkspace", "askUser", "finishTask"]);
+
   constructor(private readonly repos: Repositories) {}
 
   run(input: { run: AgentRunInput; workspaceId: string; objective: string }): WorkspaceSession {
@@ -72,8 +83,11 @@ export class WorkspaceRuntime {
       userId: run.userId,
       agentId: run.agentId,
       workspaceId: workspace.id,
-      query: `${task.objective}\n${task.relevantUserRequest}`
+      query: `${task.objective}\n${task.relevantUserRequest}`,
+      eventLimit: workspace.memoryPolicy.eventRecallEnabled ? workspace.memoryPolicy.maxEventMemories : 0,
+      skillLimit: workspace.memoryPolicy.skillRecallEnabled ? workspace.memoryPolicy.maxSkillMemories : 0
     }));
+    const availableTools = this.visibleToolDefinitions(workspace);
     return {
       workspaceManifest: workspace.manifest,
       memoryPolicy: workspace.memoryPolicy,
@@ -81,7 +95,7 @@ export class WorkspaceRuntime {
       recalledImpressions: recalled.filter((memory) => memory.memoryType === "impression"),
       recalledEventMemories: recalled.filter((memory) => memory.memoryType === "event"),
       recalledSkillMemories: recalled.filter((memory) => memory.memoryType === "skill"),
-      availableTools: workspace.tools.map((tool) => ({
+      availableTools: availableTools.map((tool) => ({
         id: tool.id,
         name: tool.name,
         description: tool.description,
@@ -92,6 +106,28 @@ export class WorkspaceRuntime {
       })),
       recentToolCalls: []
     };
+  }
+
+  private visibleToolDefinitions(workspace: WorkspaceDefinition) {
+    const toolMap = new Map(
+      workspace.tools
+        .filter((tool) => this.isToolVisibleInWorkspace(tool.name, workspace.id))
+        .map((tool) => [tool.name, tool])
+    );
+    for (const tool of this.repos.listTools()) {
+      const universalMemoryTool = this.universalRuntimeMemoryToolNames.has(tool.name);
+      const childExitTool = workspace.id !== "main" && tool.name === "exitWorkspace";
+      if ((universalMemoryTool || childExitTool) && !toolMap.has(tool.name)) {
+        toolMap.set(tool.name, tool);
+      }
+    }
+    return Array.from(toolMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private isToolVisibleInWorkspace(toolName: string, workspaceId: string): boolean {
+    if (this.mainOnlyToolNames.has(toolName)) return workspaceId === "main";
+    if (toolName === "exitWorkspace") return workspaceId !== "main";
+    return true;
   }
 
   private applyWorkspaceMemoryPolicy(workspace: WorkspaceDefinition, memories: MemoryRow[]): MemoryRow[] {
@@ -111,9 +147,9 @@ export class WorkspaceRuntime {
     return {
       taskId: task.taskId,
       workspaceId: task.workspaceId,
-      status: task.workspaceId === "main" ? "completed" : "running",
+      status: "running",
       summary: task.workspaceId === "main"
-        ? `${task.workspaceId} workspace accepted structured task: ${task.objective}`
+        ? `${task.workspaceId} workspace is orchestrating structured task: ${task.objective}`
         : `${task.workspaceId} workspace is running structured task: ${task.objective}`,
       artifacts: [],
       observations: [

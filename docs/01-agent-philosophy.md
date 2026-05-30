@@ -149,6 +149,8 @@ Memory Tools
   - 跨 workspace 的记忆调试和维护属于 Web UI/API 的策略层能力，不属于模型普通 tool use
 ```
 
+首版实现只包含 `main`、`file`、`cli`。Browser workspace 保留为未来可以通过 workspace manifest/MCP 工具绑定扩展的例子，不属于当前默认工作空间集合。
+
 每次只让模型进入它当前真正需要的能力空间。
 
 ## 主 workspace 的定位
@@ -190,7 +192,7 @@ Memory Tools
   - 可用工具：读文件、写文件、搜索文件、解析文件。
   - 记忆：某类文件处理经验、项目结构经验、格式转换经验。
 
-- Browser workspace
+- Browser workspace（未来扩展）
   - 可用工具：打开网页、点击、输入、截图、检查 DOM。
   - 记忆：页面测试经验、交互验证经验、常见前端问题。
 

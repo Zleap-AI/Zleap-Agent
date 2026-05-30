@@ -8,7 +8,7 @@ Zleap Agent Framework 的最终目标是：
 2. runtime 支持 workspace 编排和切换。
 3. runtime 支持 impression、event、skill 三类 memory。
 4. runtime 原生支持 userid 多租户隔离。
-5. 提供一组基础 workspace，例如 main、cli、file、memory。
+5. 提供一组基础 workspace，例如 main、cli、file；memory 不是独立 workspace，而是挂载到每个 workspace 的工具能力。
 6. 提供一个基于该框架的 Web UI，可以实际体验 agent。
 
 ## 技术方向
@@ -27,7 +27,7 @@ packages/
   memory/
     memory interfaces
     SQL store
-    vector store
+    SQLite FTS recall
     memory extraction
 
   tools/
@@ -100,7 +100,7 @@ interface WorkspaceRuntime {
 职责：
 
 - 注册内置 workspace。
-- 注册用户创建的 workspace。
+- 注册 creator/operator 创建的 workspace。
 - 提供 main workspace 可见的 manifest。
 - 根据 workspaceId 获取完整配置。
 
@@ -143,7 +143,7 @@ interface ToolRegistry {
 - impression 读写。
 - event 读写。
 - skill 读写。
-- vector recall。
+- SQLite FTS recall。
 - relationId 维护。
 - memory 权限检查。
 
@@ -253,7 +253,7 @@ type WorkspaceMemoryPolicy = {
 4. cli workspace。
 5. memory service 的接口和 SQLite 实现。
 6. event memory 支持 SQL 存储。
-7. vector store 先用抽象接口，可用内存 mock 或 sqlite-vss 替代。
+7. recall 第一版使用 SQLite FTS + relation/version，不引入 mock vector 或真实 vector store。
 8. skill memory 支持手动写入和检索。
 9. Web UI 支持：
    - 聊天。
@@ -312,7 +312,7 @@ MVP 可以暂时简化：
 - event 写入和查询。
 - skill 写入和查询。
 - impression 写入和查询。
-- 先实现简单关键词或 mock embedding 召回，再接真实 vector。
+- 实现 SQLite FTS + relation/version 召回，并保证按 memoryType、userId、agentId、workspaceId 分区去重。
 
 ### Stage 5: Hook System
 
@@ -334,14 +334,13 @@ MVP 可以暂时简化：
 - memory inspector。
 - skill inspector。
 
-### Stage 7: Real Vector and Production Hardening
+### Stage 7: Production Hardening
 
 目标：
 
-- 接入真实 embedding。
-- 接入真实 vector store。
+- 视产品需要再评估 embedding/vector store；除非 `ZLEAP_MASTER_PLAN.md` 更新，否则它不是首版目标。
 - 完善权限和审计。
-- 支持用户自定义 workspace。
+- 支持 creator/operator 自定义 workspace。
 - 支持 workspace package/manifest。
 
 ## Web UI 体验目标
@@ -359,45 +358,56 @@ Web UI 不应该只是普通聊天框。
 7. 用户可以查看和管理自己的 impression。
 8. 创建者可以查看和管理 workspace 与 shared skill。
 
-推荐界面结构：
+当前 Web UI 结构以三栏 + 三 tab 为准：
 
 ```text
-Left Sidebar:
-  - Workspace list
-  - Active workspace
+Top Tabs:
+  - 对话
+  - 工作空间
+  - 记忆
 
-Main Panel:
-  - Chat
-  - Workspace execution trace
+Chat:
+  Left Panel:
+    - agent/LLM/prompt settings
+  Center Panel:
+    - streaming Markdown chat
+    - retry / clear current conversation
+  Right Panel:
+    - active workspace
+    - context stack
+    - LLM logs
+    - tool/memory/audit trace
 
-Right Panel:
-  - Recalled memories
-  - Tool calls
-  - Generated events
-  - Skill candidates
+Workspace:
+  - workspace manifests
+  - registered tools
+  - MCP/runtime/placeholder binding status
+
+Memory:
+  - database-like memory table
+  - filter/add/edit/delete
+  - policy and trace diagnostics
 ```
 
-## Open Questions
+## 已确认决策
 
-这些问题需要在写代码前进一步确认：
+这些问题已经由当前 master plan 固化，旧问题不再作为阻塞项：
 
-1. agent self impression 的 creator 如何识别？
-2. 用户创建 workspace 后，是全局可见还是仅自己可见？
-3. skill 是否需要审核后才能进入共享池？
-4. event memory 的保留周期是永久、按用户设置，还是按 workspace 设置？
-5. 主 workspace 是否允许直接回答简单问题，还是所有任务都必须显式进入 workspace？
-6. MVP 是否先接真实 LLM provider，还是先做 mock runtime 验证流程？
-7. Web UI 是用 Next.js、Vite React，还是更轻量的单页应用？
+1. agent self impression 需要 creator role。
+2. workspace 创建/编辑/删除是 creator/operator 级能力安装操作，普通模型 tool call 不能做。
+3. shared skill 由 workspace policy、质量门槛、脱敏和 creator/API 管理边界控制。
+4. event memory 首版永久保留，删除走 soft delete 和 audit；后续保留周期需先更新 master plan。
+5. main workspace 可以直接回答简单问题，也可以通过 `askUser`/`finishTask` 终止当前轮；不是所有任务都必须进入子 workspace。
+6. 产品路径使用真实 OpenAI-compatible LLM；测试可以 fake provider。
+7. Web UI 使用 React + Vite + TypeScript。
 
 ## 当前建议
 
-建议下一步先由你确认这些文档中的概念是否符合你的理念，尤其是：
+后续工程实现应持续对齐这些固定边界：
 
 - workspace 不是子 agent。
 - main workspace 只负责编排。
 - impression/event/skill 的边界。
-- event 的 SQL + vector 双存储和 relationId 最新版本机制。
+- event 的 SQLite FTS + relation/version 最新版本机制。
 - skill 跨用户共享但 workspace 隔离。
 - TypeScript MVP 的范围。
-
-确认之后，再进入工程实现。

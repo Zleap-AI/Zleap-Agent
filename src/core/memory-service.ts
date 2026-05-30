@@ -34,8 +34,10 @@ function numberFromMetadata(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
 
+const skillTriggerPattern = /(?:请|帮我|请帮我)?(?:总结(?:一下)?经验|沉淀(?:一下)?经验|记成经验|生成经验|写入经验|保存经验|提炼(?:一下)?经验|经验记忆|把(?:这个|这条)?经验(?:记下来|保存下来|沉淀下来)|skill memory|write skill|save skill|lesson learned)[:：]?\s*/i;
+
 function isSkillTrigger(message: string, assistantMessage: string): boolean {
-  return /(总结经验|沉淀经验|记成经验|生成经验|写入经验|skill memory|write skill|save skill|lesson learned)/i.test(`${message}\n${assistantMessage}`);
+  return skillTriggerPattern.test(`${message}\n${assistantMessage}`);
 }
 
 function skillSeedFromTrigger(message: string, assistantMessage: string, workspaceId: string): {
@@ -47,8 +49,7 @@ function skillSeedFromTrigger(message: string, assistantMessage: string, workspa
   avoidWhen: string[];
 } {
   const combined = `${message}\n${assistantMessage}`.trim();
-  const triggerPattern = /(请)?(总结经验|沉淀经验|记成经验|生成经验|写入经验|skill memory|write skill|save skill|lesson learned)[:：]?\s*/i;
-  const rawSeed = message.replace(triggerPattern, "").trim() || assistantMessage.replace(triggerPattern, "").trim() || combined;
+  const rawSeed = message.replace(skillTriggerPattern, "").trim() || assistantMessage.replace(skillTriggerPattern, "").trim() || combined;
   const normalized = truncate(rawSeed.replace(/\s+/g, " "), 360);
   const titleSeed = normalized
     .replace(/[。.!！?？].*$/, "")
@@ -79,14 +80,6 @@ function skillSeedFromTrigger(message: string, assistantMessage: string, workspa
       "最近事件证据显示这条经验已经失败或过时。"
     ]
   };
-}
-
-function skillWorkspaceFor(message: string, fallback: string): string {
-  const lower = message.toLowerCase();
-  if (/(command|terminal|shell|npm|node|test|命令|终端|测试)/i.test(lower)) return "cli";
-  if (/(file|code|search|read|write|文件|代码|搜索)/i.test(lower)) return "file";
-  if (/(browser|page|ui|dom|screenshot|浏览器|页面|截图)/i.test(lower)) return "browser";
-  return fallback;
 }
 
 function skillSeedFromEventBatch(workspaceId: string, processMemory: MemoryRow, resultMemory: MemoryRow): {
@@ -183,7 +176,15 @@ export class MemoryService {
     const resultRelationId = `event:${input.run.userId}:${input.session.workspaceId}:session:${input.session.taskId}:result`;
     const writes: MemoryRow[] = [];
 
-    if (!this.repos.getMemoryByRelation("event", processRelationId)) {
+    const eventRelationScope = this.memoryRelationScope({
+      memoryType: "event",
+      userId: input.run.userId,
+      workspaceId: input.session.workspaceId,
+      title: "",
+      summary: "",
+      detail: ""
+    });
+    if (!this.repos.getMemoryByRelation("event", processRelationId, eventRelationScope)) {
       const processMemory = this.createOrSkip({
         memoryType: "event",
         userId: input.run.userId,
@@ -215,7 +216,7 @@ export class MemoryService {
       if (processMemory) writes.push(processMemory);
     }
 
-    if (!this.repos.getMemoryByRelation("event", resultRelationId)) {
+    if (!this.repos.getMemoryByRelation("event", resultRelationId, eventRelationScope)) {
       const resultMemory = this.createOrSkip({
         memoryType: "event",
         userId: input.run.userId,
@@ -309,10 +310,16 @@ export class MemoryService {
     actorId: string;
     actorRole: UserRole;
     memory: MemoryWriteInput;
+    conversationId?: string;
   }): MemoryRow {
+    const conversationId = this.checkedApiConversationId(input.actorId, input.actorRole, input.conversationId);
+    if (input.memory.memoryType === "skill" && input.actorRole !== "creator") {
+      throw new Error("Direct shared skill memory management requires creator role.");
+    }
     const persisted = this.persistMemory(input.memory, input.actorId, input.actorRole);
     if (!persisted.memory) throw new Error(persisted.reason ?? "Memory create rejected by runtime policy.");
     this.repos.audit(input.actorId, input.actorRole, "memory_api_create", "memory", persisted.memory.id, {
+      conversationId,
       memoryType: persisted.memory.memoryType,
       workspaceId: persisted.memory.workspaceId
     });
@@ -337,7 +344,8 @@ export class MemoryService {
     patch: Partial<MemoryRow>;
     conversationId?: string;
   }): MemoryRow {
-    const result = this.executeUpdateMemoryTool(this.apiRun(input.actorId, input.actorRole, input.conversationId), {
+    const conversationId = this.checkedApiConversationId(input.actorId, input.actorRole, input.conversationId);
+    const result = this.executeUpdateMemoryTool(this.apiRun(input.actorId, input.actorRole, conversationId), {
       id: input.memoryId,
       ...input.patch
     });
@@ -348,7 +356,7 @@ export class MemoryService {
       throw new Error(error);
     }
     this.repos.audit(input.actorId, input.actorRole, "memory_api_update", "memory", result.memory.id, {
-      conversationId: input.conversationId,
+      conversationId,
       memoryType: result.memory.memoryType,
       workspaceId: result.memory.workspaceId,
       updatedFields: Object.keys(input.patch)
@@ -363,7 +371,8 @@ export class MemoryService {
     deleteReason?: string;
     conversationId?: string;
   }): void {
-    const result = this.executeDeleteMemoryTool(this.apiRun(input.actorId, input.actorRole, input.conversationId), {
+    const conversationId = this.checkedApiConversationId(input.actorId, input.actorRole, input.conversationId);
+    const result = this.executeDeleteMemoryTool(this.apiRun(input.actorId, input.actorRole, conversationId), {
       id: input.memoryId,
       deleteReason: input.deleteReason
     });
@@ -374,7 +383,7 @@ export class MemoryService {
       throw new Error(error);
     }
     this.repos.audit(input.actorId, input.actorRole, "memory_api_delete", "memory", input.memoryId, {
-      conversationId: input.conversationId,
+      conversationId,
       deleteReason: input.deleteReason
     });
   }
@@ -407,29 +416,27 @@ export class MemoryService {
     };
 
     if (input.toolName === "searchMemory") {
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
       const memoryType = textArg("memoryType");
-      const workspaceScope = this.resolveRuntimeWorkspaceScope(input.activeWorkspaceId, textArg("workspaceId"));
-      if (!workspaceScope.allowed) return { ok: false, result: { error: workspaceScope.reason } };
+      const memories = this.listMemoryRecords({
+        actorId: input.run.userId,
+        actorRole: "user",
+        filters: {
+          query: textArg("query") || undefined,
+          memoryType: ["impression", "event", "skill"].includes(memoryType) ? memoryType : undefined
+        }
+      }).filter((memory) => this.isVisibleInActiveWorkspace(memory, input.activeWorkspaceId));
       return {
         ok: true,
         result: {
-          memories: this.listMemoryRecords({
-            actorId: input.run.userId,
-            actorRole: input.run.userRole,
-            filters: {
-              query: textArg("query") || undefined,
-              memoryType: ["impression", "event", "skill"].includes(memoryType) ? memoryType : undefined,
-              userId: textArg("userId") || undefined,
-              agentId: textArg("agentId") || undefined,
-              workspaceId: workspaceScope.workspaceId
-            }
-          })
+          memories
         }
       };
     }
 
     if (input.toolName === "updateMemory") {
-      return this.executeUpdateMemoryTool(input.run, args, input.activeWorkspaceId);
+      return this.executeUpdateMemoryTool(input.run, args, input.activeWorkspaceId, true);
     }
 
     if (input.toolName === "deleteMemory") {
@@ -438,35 +445,48 @@ export class MemoryService {
 
     let memory: MemoryWriteInput | undefined;
     if (input.toolName === "writeUserImpression") {
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
+      const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
       memory = {
         ...base,
         memoryType: "impression",
         userId: input.run.userId,
         relationId: `impression:user:${input.run.userId}:${stableId(`${base.title}:${base.summary}`)}`,
-        metadataJson: JSON.stringify({ source: "memoryToolCall", impressionKind: "userImpression", conversationId: input.run.conversationId })
+        metadataJson: JSON.stringify({
+          source: "memoryToolCall",
+          impressionKind: "userImpression",
+          conversationId: input.run.conversationId,
+          activeWorkspaceId: input.activeWorkspaceId,
+          ...runtimeEvidence
+        })
       };
     }
     if (input.toolName === "writeAgentSelfImpression") {
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
+      const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
       memory = {
         ...base,
         memoryType: "impression",
         agentId: input.run.agentId,
         relationId: `impression:agent:${input.run.agentId}:${stableId(`${base.title}:${base.summary}`)}`,
-        metadataJson: JSON.stringify({ source: "memoryToolCall", impressionKind: "agentSelf", conversationId: input.run.conversationId })
+        metadataJson: JSON.stringify({
+          source: "memoryToolCall",
+          impressionKind: "agentSelf",
+          conversationId: input.run.conversationId,
+          activeWorkspaceId: input.activeWorkspaceId,
+          ...runtimeEvidence
+        })
       };
     }
     if (input.toolName === "writeEventMemory") {
-      const workspaceScope = this.resolveRuntimeWorkspaceScope(input.activeWorkspaceId, textArg("workspaceId"));
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
+      const workspaceScope = this.requireActiveWorkspaceScope(input.activeWorkspaceId);
       if (!workspaceScope.allowed) return { ok: false, result: { error: workspaceScope.reason } };
-      const workspaceId = workspaceScope.workspaceId ?? "";
-      const taskEvidence = input.activeTaskId ? {
-        taskId: input.activeTaskId,
-        taskIds: [input.activeTaskId]
-      } : {};
-      const sessionEvidence = input.activeWorkspaceSessionId ? {
-        workspaceSessionId: input.activeWorkspaceSessionId,
-        workspaceSessionIds: [input.activeWorkspaceSessionId]
-      } : {};
+      const workspaceId = workspaceScope.workspaceId;
+      const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
       memory = {
         ...base,
         memoryType: "event",
@@ -478,20 +498,22 @@ export class MemoryService {
           eventKind: "agent_requested",
           conversationId: input.run.conversationId,
           activeWorkspaceId: input.activeWorkspaceId,
-          ...taskEvidence,
-          ...sessionEvidence
+          ...runtimeEvidence
         })
       };
     }
     if (input.toolName === "writeSkillMemory") {
-      const workspaceScope = this.resolveRuntimeWorkspaceScope(input.activeWorkspaceId, textArg("workspaceId"));
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
+      const workspaceScope = this.requireActiveWorkspaceScope(input.activeWorkspaceId);
       if (!workspaceScope.allowed) return { ok: false, result: { error: workspaceScope.reason } };
-      const workspaceId = workspaceScope.workspaceId ?? "";
+      const workspaceId = workspaceScope.workspaceId;
       const procedure = stringArrayArg("procedure");
       const appliesWhen = stringArrayArg("appliesWhen");
       const avoidWhen = stringArrayArg("avoidWhen");
       const evidenceEventIds = stringArrayArg("evidenceEventIds");
       const confidence = Math.max(0, Math.min(1, numberArg("confidence", evidenceEventIds.length > 0 ? 0.7 : 0.5)));
+      const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
       memory = {
         ...base,
         memoryType: "skill",
@@ -501,6 +523,8 @@ export class MemoryService {
           source: "memoryToolCall",
           conversationId: input.run.conversationId,
           requestedBy: "agent",
+          activeWorkspaceId: input.activeWorkspaceId,
+          ...runtimeEvidence,
           desensitized: boolArg("desensitized"),
           evidenceEventIds,
           confidence,
@@ -519,7 +543,7 @@ export class MemoryService {
     if (!memory) return { ok: false, result: { error: `Unsupported memory tool: ${input.toolName}` } };
     if (!memory.title || !memory.summary || !memory.detail) return { ok: false, result: { error: "title, summary, and detail are required." } };
 
-    const existing = memory.relationId ? this.repos.getMemoryByRelation(memory.memoryType, memory.relationId) : undefined;
+    const existing = memory.relationId ? this.repos.getMemoryByRelation(memory.memoryType, memory.relationId, this.memoryRelationScope(memory)) : undefined;
     const persisted = existing
       ? { memory: existing }
       : this.persistMemory(memory, input.run.userId, input.run.userRole);
@@ -527,35 +551,64 @@ export class MemoryService {
     return { ok: true, result: { memory: persisted.memory }, memory: persisted.memory };
   }
 
-  private resolveRuntimeWorkspaceScope(activeWorkspaceId: string | undefined, requestedWorkspaceId: string): { allowed: true; workspaceId?: string } | { allowed: false; reason: string } {
-    const requested = requestedWorkspaceId.trim() || undefined;
-    if (activeWorkspaceId && requested && requested !== activeWorkspaceId) {
-      return {
-        allowed: false,
-        reason: `Workspace memory tools can only target the active workspace (${activeWorkspaceId}).`
-      };
-    }
-    return { allowed: true, workspaceId: activeWorkspaceId ?? requested };
+  private runtimeMemoryEvidence(activeWorkspaceSessionId?: string, activeTaskId?: string): Record<string, unknown> {
+    return {
+      ...(activeTaskId ? { taskId: activeTaskId, taskIds: [activeTaskId] } : {}),
+      ...(activeWorkspaceSessionId ? { workspaceSessionId: activeWorkspaceSessionId, workspaceSessionIds: [activeWorkspaceSessionId] } : {})
+    };
+  }
+
+  private memoryRelationScope(memory: Partial<MemoryRow> & Pick<MemoryRow, "memoryType">): { userId?: string | null; agentId?: string | null; workspaceId?: string | null } {
+    return {
+      userId: memory.userId ?? null,
+      agentId: memory.agentId ?? null,
+      workspaceId: memory.workspaceId ?? null
+    };
+  }
+
+  private rejectRuntimeScopeArguments(args: Record<string, unknown>, names: string[]): string | undefined {
+    const provided = names.filter((name) => Object.prototype.hasOwnProperty.call(args, name));
+    if (provided.length === 0) return undefined;
+    return `Runtime memory scope is code-bound; do not pass ${provided.join(", ")} in function-call arguments.`;
+  }
+
+  private requireActiveWorkspaceScope(activeWorkspaceId: string | undefined): { allowed: true; workspaceId: string } | { allowed: false; reason: string } {
+    if (activeWorkspaceId) return { allowed: true, workspaceId: activeWorkspaceId };
+    return { allowed: false, reason: "Runtime memory writes require an active workspace supplied by runtime." };
+  }
+
+  private isVisibleInActiveWorkspace(memory: MemoryRow, activeWorkspaceId?: string): boolean {
+    if (!activeWorkspaceId) return true;
+    if (memory.memoryType !== "event" && memory.memoryType !== "skill") return true;
+    return memory.workspaceId === activeWorkspaceId;
   }
 
   private maybeWriteConversationWindowEvent(run: AgentRunInput, workspaceId: string): MemoryRow[] {
-    const messages = this.repos.listMessagesDetailed(run.conversationId, 500);
+    const messageCount = this.repos.countMessages(run.conversationId);
     const sessions = this.repos.listWorkspaceSessions(run.conversationId);
     const toolCalls = this.repos.listToolCalls(run.conversationId);
-    const completedWindows = Math.floor(messages.length / this.eventWindowSize);
+    const completedWindows = Math.floor(messageCount / this.eventWindowSize);
     if (completedWindows < 1) return [];
 
     const writes: MemoryRow[] = [];
     for (let windowIndex = 1; windowIndex <= completedWindows; windowIndex += 1) {
       const start = (windowIndex - 1) * this.eventWindowSize;
       const end = windowIndex * this.eventWindowSize;
-      const windowMessages = messages.slice(start, end);
-      if (windowMessages.length < this.eventWindowSize) continue;
-
       const windowRelationScope = `event:${run.userId}:${workspaceId}:${run.conversationId}:window:${windowIndex}`;
       const processRelationId = `${windowRelationScope}:process`;
       const resultRelationId = `${windowRelationScope}:result`;
-      if (this.repos.getMemoryByRelation("event", processRelationId) && this.repos.getMemoryByRelation("event", resultRelationId)) continue;
+      const eventRelationScope = this.memoryRelationScope({
+        memoryType: "event",
+        userId: run.userId,
+        workspaceId,
+        title: "",
+        summary: "",
+        detail: ""
+      });
+      if (this.repos.getMemoryByRelation("event", processRelationId, eventRelationScope) && this.repos.getMemoryByRelation("event", resultRelationId, eventRelationScope)) continue;
+
+      const windowMessages = this.repos.listMessagesWindow(run.conversationId, start, this.eventWindowSize);
+      if (windowMessages.length < this.eventWindowSize) continue;
 
       const firstUser = windowMessages.find((message) => message.role === "user")?.content ?? run.message;
       const lastAssistant = [...windowMessages].reverse().find((message) => message.role === "assistant")?.content ?? "";
@@ -586,7 +639,7 @@ export class MemoryService {
         autoGenerated: true
       };
 
-      if (!this.repos.getMemoryByRelation("event", processRelationId)) {
+      if (!this.repos.getMemoryByRelation("event", processRelationId, eventRelationScope)) {
         const processMemory = this.createOrSkip({
           memoryType: "event",
           userId: run.userId,
@@ -607,11 +660,11 @@ export class MemoryService {
             eventKind: "process",
             outcome: "partial"
           })
-        }, run.userId, "creator");
+        }, run.userId, run.userRole);
         if (processMemory) writes.push(processMemory);
       }
 
-      if (!this.repos.getMemoryByRelation("event", resultRelationId)) {
+      if (!this.repos.getMemoryByRelation("event", resultRelationId, eventRelationScope)) {
         const resultMemory = this.createOrSkip({
           memoryType: "event",
           userId: run.userId,
@@ -632,7 +685,7 @@ export class MemoryService {
             outcome: lastAssistant ? "success" : "partial",
             pairedProcessRelationId: processRelationId
           })
-        }, run.userId, "creator");
+        }, run.userId, run.userRole);
         if (resultMemory) writes.push(resultMemory);
       }
     }
@@ -640,10 +693,23 @@ export class MemoryService {
   }
 
   private workspaceExitEvidence(run: AgentRunInput, session: WorkspaceSession): Record<string, unknown> {
-    const messages = this.repos.listMessagesDetailed(run.conversationId, this.eventWindowSize);
+    const sessionEndAt = session.completedAt ?? session.startedAt;
+    const messages = dedupeById([
+      ...this.repos.listMessagesBefore(run.conversationId, session.startedAt, 1),
+      ...this.repos.listMessagesInRange(run.conversationId, session.startedAt, sessionEndAt, this.eventWindowSize)
+    ]).slice(-this.eventWindowSize);
     const toolCalls = this.repos
       .listToolCalls(run.conversationId)
-      .filter((toolCall) => toolCall.workspaceId === session.workspaceId);
+      .filter((toolCall) =>
+        toolCall.workspaceSessionId === session.id
+        || toolCall.taskId === session.taskId
+        || (
+          toolCall.workspaceId === session.workspaceId
+          && !toolCall.workspaceSessionId
+          && !toolCall.taskId
+          && isTimestampInRange(toolCall.createdAt, session.startedAt, sessionEndAt)
+        )
+      );
     return {
       source: "afterWorkspaceExit",
       conversationId: run.conversationId,
@@ -652,6 +718,10 @@ export class MemoryService {
       workspaceSessionIds: [session.id],
       taskId: session.taskId,
       taskIds: [session.taskId],
+      workspaceSessionStartedAt: session.startedAt,
+      workspaceSessionCompletedAt: session.completedAt,
+      evidenceMessageFrom: messages[0]?.id,
+      evidenceMessageTo: messages.at(-1)?.id,
       evidenceMessageIds: messages.map((message) => message.id),
       toolCallIds: toolCalls.map((toolCall) => toolCall.id),
       status: session.status,
@@ -661,10 +731,10 @@ export class MemoryService {
 
   private maybeWriteSkillMemory(run: AgentRunInput, activeWorkspaceId: string, assistantMessage: string): MemoryRow | undefined {
     if (!isSkillTrigger(run.message, assistantMessage)) return undefined;
-    const workspaceId = skillWorkspaceFor(run.message, activeWorkspaceId);
+    const workspaceId = activeWorkspaceId;
     const seed = skillSeedFromTrigger(run.message, assistantMessage, workspaceId);
     const relationId = `skill:${workspaceId}:${stableId(seed.summary)}`;
-    if (this.repos.getMemoryByRelation("skill", relationId)) return undefined;
+    if (this.repos.getMemoryByRelation("skill", relationId, this.memoryRelationScope({ memoryType: "skill", workspaceId, title: "", summary: "", detail: "" }))) return undefined;
     const evidenceEvents = this.repos.listMemories({
       memoryType: "event",
       userId: run.userId,
@@ -720,7 +790,7 @@ export class MemoryService {
 
     const seed = skillSeedFromEventBatch(workspaceId, processMemory, resultMemory);
     const relationId = `skill:${workspaceId}:event-hook:${stableId(seed.summary)}`;
-    if (this.repos.getMemoryByRelation("skill", relationId)) return undefined;
+    if (this.repos.getMemoryByRelation("skill", relationId, this.memoryRelationScope({ memoryType: "skill", workspaceId, title: "", summary: "", detail: "" }))) return undefined;
 
     const evidenceEventIds = eventMemories.map((memory) => memory.id);
     return this.createOrSkip({
@@ -763,7 +833,7 @@ export class MemoryService {
         reason: decision.reason,
         memoryType: memory.memoryType,
         workspaceId: memory.workspaceId,
-        conversationId: typeof metadata.conversationId === "string" ? metadata.conversationId : undefined
+        conversationId: this.safeAuditConversationId(metadata, actorId, actorRole)
       });
       return { reason: decision.reason };
     }
@@ -776,6 +846,8 @@ export class MemoryService {
     }
     const baseDecision = this.policy.canWriteMemory({ role: actorRole, userId: actorId, memory });
     if (!baseDecision.allowed) return baseDecision;
+    const conversationDecision = this.canUseMetadataConversation(memory, actorId, actorRole);
+    if (!conversationDecision.allowed) return conversationDecision;
 
     if (memory.memoryType !== "event" && memory.memoryType !== "skill") return baseDecision;
     if (!memory.workspaceId) return { allowed: false, reason: `${memory.memoryType} memory requires a target workspace.` };
@@ -804,6 +876,42 @@ export class MemoryService {
       if (!skillEvidenceDecision.allowed) return skillEvidenceDecision;
     }
     return baseDecision;
+  }
+
+  private canUseMetadataConversation(memory: MemoryWriteInput, actorId: string, actorRole: UserRole): PolicyDecision {
+    const metadata = this.parseMetadata(memory.metadataJson ?? "{}");
+    const conversationId = typeof metadata.conversationId === "string" ? metadata.conversationId.trim() : "";
+    if (!conversationId || actorRole === "creator") return { allowed: true };
+    const conversation = this.repos.getConversation(conversationId);
+    if (!conversation) {
+      return { allowed: false, reason: "Memory metadata.conversationId must reference an existing conversation for non-creator writes." };
+    }
+    if (conversation.userId !== actorId) {
+      return { allowed: false, reason: "Memory metadata.conversationId belongs to a different user." };
+    }
+    return { allowed: true };
+  }
+
+  private safeAuditConversationId(metadata: Record<string, unknown>, actorId: string, actorRole: UserRole): string | undefined {
+    const conversationId = typeof metadata.conversationId === "string" ? metadata.conversationId.trim() : "";
+    if (!conversationId) return undefined;
+    if (actorRole === "creator") return conversationId;
+    const conversation = this.repos.getConversation(conversationId);
+    return conversation?.userId === actorId ? conversationId : undefined;
+  }
+
+  private checkedApiConversationId(actorId: string, actorRole: UserRole, conversationId?: string): string | undefined {
+    const trimmed = typeof conversationId === "string" ? conversationId.trim() : "";
+    if (!trimmed) return undefined;
+    if (actorRole === "creator") return trimmed;
+    const conversation = this.repos.getConversation(trimmed);
+    if (!conversation) {
+      throw new Error("Memory API conversationId must reference an existing conversation for non-creator operations.");
+    }
+    if (conversation.userId !== actorId) {
+      throw new Error("Memory API conversationId belongs to a different user.");
+    }
+    return trimmed;
   }
 
   private canWriteEventStructure(memory: MemoryWriteInput): PolicyDecision {
@@ -885,9 +993,13 @@ export class MemoryService {
     return { allowed: true };
   }
 
-  private executeUpdateMemoryTool(run: AgentRunInput, args: Record<string, unknown>, activeWorkspaceId?: string): { ok: boolean; result: unknown; memory?: MemoryRow } {
+  private executeUpdateMemoryTool(run: AgentRunInput, args: Record<string, unknown>, activeWorkspaceId?: string, codeBoundRuntimeScope = false): { ok: boolean; result: unknown; memory?: MemoryRow } {
     const id = typeof args.id === "string" ? args.id : "";
     if (!id) return { ok: false, result: { error: "id is required." } };
+    if (codeBoundRuntimeScope) {
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["memoryType", "userId", "agentId", "workspaceId", "relationId", "version"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
+    }
 
     let current: MemoryRow;
     try {
@@ -932,12 +1044,10 @@ export class MemoryService {
       this.auditMemoryManagementRejected(run, current, "update", nextWorkspaceDecision.reason);
       return { ok: false, result: { error: nextWorkspaceDecision.reason ?? "Memory update rejected by active workspace policy." } };
     }
-    if (nextMemory.memoryType === "event" || nextMemory.memoryType === "skill") {
-      const writeDecision = this.memoryWriteDecision(nextMemory, run.userId, run.userRole);
-      if (!writeDecision.allowed) {
-        this.auditMemoryManagementRejected(run, current, "update", writeDecision.reason);
-        return { ok: false, result: { error: writeDecision.reason ?? "Memory update rejected by runtime policy." } };
-      }
+    const writeDecision = this.memoryWriteDecision(nextMemory, run.userId, run.userRole);
+    if (!writeDecision.allowed) {
+      this.auditMemoryManagementRejected(run, current, "update", writeDecision.reason);
+      return { ok: false, result: { error: writeDecision.reason ?? "Memory update rejected by runtime policy." } };
     }
 
     const updated = this.repos.updateMemory(id, patch, run.userId, run.userRole);
@@ -997,10 +1107,9 @@ export class MemoryService {
 
   private memoryManageDecision(input: { run: AgentRunInput; memory: MemoryRow; action: "update" | "delete" }): PolicyDecision {
     const { run, memory } = input;
+    if (run.userRole === "creator") return { allowed: true };
     if (memory.memoryType === "impression" && memory.agentId) {
-      return run.userRole === "creator"
-        ? { allowed: true }
-        : { allowed: false, reason: "Agent self impression management requires creator role." };
+      return { allowed: false, reason: "Agent self impression management requires creator role." };
     }
     if (memory.memoryType === "impression") {
       return memory.userId === run.userId
@@ -1013,9 +1122,7 @@ export class MemoryService {
         : { allowed: false, reason: "Event memory can only be managed by the current user." };
     }
     if (memory.memoryType === "skill") {
-      return run.userRole === "creator"
-        ? { allowed: true }
-        : { allowed: false, reason: "Shared skill memory management requires creator role." };
+      return { allowed: false, reason: "Shared skill memory management requires creator role." };
     }
     return { allowed: false, reason: `Unsupported memory type: ${memory.memoryType}` };
   }
@@ -1117,6 +1224,10 @@ export class MemoryService {
 function isTimestampInRange(value: string | undefined, start: string, end: string): boolean {
   if (!value || !start || !end) return false;
   return value >= start && value <= end;
+}
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  return Array.from(new Map(items.map((item) => [item.id, item])).values());
 }
 
 function sessionOverlapsRange(session: WorkspaceSession, start: string, end: string): boolean {

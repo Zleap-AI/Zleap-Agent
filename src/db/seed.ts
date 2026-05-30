@@ -76,10 +76,7 @@ const toolSchemas = {
     type: "object",
     properties: {
       query: { type: "string" },
-      memoryType: { type: "string", enum: ["impression", "event", "skill"] },
-      userId: { type: "string" },
-      agentId: { type: "string" },
-      workspaceId: { type: "string" }
+      memoryType: { type: "string", enum: ["impression", "event", "skill"] }
     },
     required: ["query"],
     additionalProperties: false
@@ -107,18 +104,16 @@ const toolSchemas = {
   writeEventMemory: {
     type: "object",
     properties: {
-      workspaceId: { type: "string" },
       title: { type: "string" },
       summary: { type: "string" },
       detail: { type: "string" }
     },
-    required: ["workspaceId", "title", "summary", "detail"],
+    required: ["title", "summary", "detail"],
     additionalProperties: false
   },
   writeSkillMemory: {
     type: "object",
     properties: {
-      workspaceId: { type: "string" },
       title: { type: "string" },
       summary: { type: "string" },
       detail: { type: "string" },
@@ -129,19 +124,13 @@ const toolSchemas = {
       evidenceEventIds: { type: "array", items: { type: "string" } },
       confidence: { type: "number" }
     },
-    required: ["workspaceId", "title", "summary", "detail", "desensitized", "procedure", "appliesWhen", "avoidWhen"],
+    required: ["title", "summary", "detail", "desensitized", "procedure", "appliesWhen", "avoidWhen"],
     additionalProperties: false
   },
   updateMemory: {
     type: "object",
     properties: {
       id: { type: "string" },
-      memoryType: { type: "string", enum: ["impression", "event", "skill"] },
-      userId: { type: "string" },
-      agentId: { type: "string" },
-      workspaceId: { type: "string" },
-      relationId: { type: "string" },
-      version: { type: "number" },
       title: { type: "string" },
       summary: { type: "string" },
       detail: { type: "string" },
@@ -286,8 +275,8 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-search-memory", "searchMemory", "使用 SQLite FTS 和作用域过滤搜索记忆。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
   insertTool.run("tool-write-user-impression", "writeUserImpression", "为当前用户写入长期偏好、长期背景或长期约束。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
   insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "由 creator 授权后写入 agent 自我认知。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
-  insertTool.run("tool-write-event-memory", "writeEventMemory", "为当前用户和指定 workspace 写入重要事件记忆。", JSON.stringify(toolSchemas.writeEventMemory), "medium", now, now);
-  insertTool.run("tool-write-skill-memory", "writeSkillMemory", "为指定 workspace 写入脱敏后的可复用经验。", JSON.stringify(toolSchemas.writeSkillMemory), "medium", now, now);
+  insertTool.run("tool-write-event-memory", "writeEventMemory", "为当前用户和当前 active workspace 写入重要事件记忆。", JSON.stringify(toolSchemas.writeEventMemory), "medium", now, now);
+  insertTool.run("tool-write-skill-memory", "writeSkillMemory", "为当前 active workspace 写入脱敏后的可复用经验。", JSON.stringify(toolSchemas.writeSkillMemory), "medium", now, now);
 
   insertTool.run("tool-update-memory", "updateMemory", "Update a memory record within runtime policy boundaries.", JSON.stringify(toolSchemas.updateMemory), "medium", now, now);
   insertTool.run("tool-delete-memory", "deleteMemory", "Delete a memory record within runtime policy boundaries.", JSON.stringify(toolSchemas.deleteMemory), "medium", now, now);
@@ -302,8 +291,8 @@ export function seedDefaults(db: Database.Database): void {
   updateTool.run("使用 SQLite FTS 和作用域过滤搜索记忆。", now, "tool-search-memory");
   updateTool.run("为当前用户写入长期偏好、长期背景或长期约束。", now, "tool-write-user-impression");
   updateTool.run("由 creator 授权后写入 agent 自我认知。", now, "tool-write-agent-self-impression");
-  updateTool.run("为当前用户和指定 workspace 写入重要事件记忆。", now, "tool-write-event-memory");
-  updateTool.run("为指定 workspace 写入脱敏后的可复用经验。", now, "tool-write-skill-memory");
+  updateTool.run("为当前用户和当前 active workspace 写入重要事件记忆。", now, "tool-write-event-memory");
+  updateTool.run("为当前 active workspace 写入脱敏后的可复用经验。", now, "tool-write-skill-memory");
 
   updateTool.run("Update a memory record within runtime policy boundaries.", now, "tool-update-memory");
   updateTool.run("Delete a memory record within runtime policy boundaries.", now, "tool-delete-memory");
@@ -356,7 +345,7 @@ export function seedDefaults(db: Database.Database): void {
   ];
   const linkMemoryToolToAllWorkspaces = db.prepare(`
     INSERT OR IGNORE INTO workspace_tools (workspaceId, toolId, createdAt)
-    SELECT id, ?, ? FROM workspaces WHERE id <> 'memory'
+    SELECT id, ?, ? FROM workspaces
   `);
   for (const toolId of memoryToolIds) linkMemoryToolToAllWorkspaces.run(toolId, now);
 

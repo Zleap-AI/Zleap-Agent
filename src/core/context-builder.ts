@@ -44,7 +44,7 @@ export class ContextBuilder {
           `Current userId: ${input.run.userId}`,
           `Current role: ${input.run.userRole}`,
           `Active workspace: ${input.workspace.id}`,
-          "Use only tools registered to the active workspace. Memory tools are mounted in every workspace, but event/skill memory operations must target the active workspace; do not pass another workspaceId to search, write, update, or delete event/skill memory. Memory writes and high-risk tool calls are policy-gated.",
+          "Use only tools registered to the active workspace. Memory tools are mounted in every workspace, but event/skill memory scope is code-bound to the active workspace; never pass userId, agentId, or workspaceId as memory tool arguments. Memory writes and high-risk tool calls are policy-gated.",
           [
             "Memory write protocol:",
             "- Call writeUserImpression only when the user expresses a stable long-term preference, background, identity, or constraint. Do not write short-term task facts as impressions.",

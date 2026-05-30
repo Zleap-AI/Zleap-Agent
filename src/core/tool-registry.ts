@@ -11,6 +11,8 @@ export type ToolExecutionResult = {
   memory?: MemoryRow;
   workspaceSession?: WorkspaceSession;
   exitedWorkspaceResult?: Partial<WorkspaceResult>;
+  mainWorkspaceResult?: Partial<WorkspaceResult>;
+  terminalAssistantMessage?: string;
 };
 
 export class ToolRegistry {
@@ -24,6 +26,7 @@ export class ToolRegistry {
     "deleteMemory"
   ]);
   private readonly runtimeOrchestrationToolNames = new Set(["exitWorkspace"]);
+  private readonly mainOnlyToolNames = new Set(["enterWorkspace", "askUser", "finishTask"]);
   private readonly runtimeMemoryToolNames = this.universalRuntimeMemoryToolNames;
 
   constructor(
@@ -34,7 +37,9 @@ export class ToolRegistry {
   ) {}
 
   getCallableTools(workspaceId: string): ToolDefinition[] {
-    const activeTools = this.repos.listToolsForWorkspace(workspaceId);
+    const activeTools = this.repos
+      .listToolsForWorkspace(workspaceId)
+      .filter((tool) => this.isToolVisibleInWorkspace(tool.name, workspaceId));
     const existing = new Set(activeTools.map((tool) => tool.name));
     const runtimeMemoryTools = this.repos.listTools()
       .filter((tool) => this.universalRuntimeMemoryToolNames.has(tool.name) && !existing.has(tool.name));
@@ -60,7 +65,7 @@ export class ToolRegistry {
 
     const registeredToActiveWorkspace = this.repos
       .listToolsForWorkspace(input.activeWorkspaceId)
-      .some((item) => item.name === input.toolName);
+      .some((item) => item.name === input.toolName && this.isToolVisibleInWorkspace(item.name, input.activeWorkspaceId));
     const runtimeTool = this.universalRuntimeMemoryToolNames.has(input.toolName)
       || (input.activeWorkspaceId !== "main" && this.runtimeOrchestrationToolNames.has(input.toolName));
     const decision = this.policy.canUseTool({
@@ -170,6 +175,13 @@ export class ToolRegistry {
     }
 
     if (toolName === "enterWorkspace") {
+      if (activeWorkspaceId !== "main") {
+        return {
+          ok: false,
+          status: "failed",
+          result: { error: "enterWorkspace can only be called from main workspace. Child workspaces must return suggestedNextSteps through exitWorkspace." }
+        };
+      }
       const args = safeJson(argumentsJson) as { workspaceId?: string; objective?: string };
       if (!args.workspaceId) {
         return {
@@ -273,6 +285,13 @@ export class ToolRegistry {
           result: { error: "exitWorkspace can only be called from a child workspace." }
         };
       }
+      if (!activeWorkspaceSession || activeWorkspaceSession.status !== "running") {
+        return {
+          ok: false,
+          status: "failed",
+          result: { error: "exitWorkspace requires the active child workspace session to be running." }
+        };
+      }
       const args = safeJson(argumentsJson) as Partial<WorkspaceResult>;
       const validationError = validateWorkspaceResult(args);
       if (validationError) {
@@ -303,6 +322,13 @@ export class ToolRegistry {
     }
 
     if (toolName === "askUser") {
+      if (activeWorkspaceId !== "main") {
+        return {
+          ok: false,
+          status: "failed",
+          result: { error: "askUser can only be called from main workspace. Child workspaces should return needs_user_input through exitWorkspace." }
+        };
+      }
       const args = safeJson(argumentsJson) as { question?: unknown; reason?: unknown; choices?: unknown };
       const question = typeof args.question === "string" ? args.question.trim() : "";
       if (!question) {
@@ -318,6 +344,19 @@ export class ToolRegistry {
       return {
         ok: true,
         status: "completed",
+        mainWorkspaceResult: {
+          status: "needs_user_input",
+          summary: question,
+          artifacts: [],
+          observations: [
+            typeof args.reason === "string" && args.reason.trim()
+              ? `Need user input: ${args.reason.trim()}`
+              : "Need user input before continuing."
+          ],
+          errors: [],
+          suggestedNextSteps: choices
+        },
+        terminalAssistantMessage: question,
         result: {
           type: "needs_user_input",
           workspaceId: activeWorkspaceId,
@@ -329,6 +368,13 @@ export class ToolRegistry {
     }
 
     if (toolName === "finishTask") {
+      if (activeWorkspaceId !== "main") {
+        return {
+          ok: false,
+          status: "failed",
+          result: { error: "finishTask can only be called from main workspace. Child workspaces must exit to main before a user-facing final answer." }
+        };
+      }
       const args = safeJson(argumentsJson) as { summary?: unknown; response?: unknown; nextSteps?: unknown };
       const summary = typeof args.summary === "string" ? args.summary.trim() : "";
       if (!summary) {
@@ -344,6 +390,19 @@ export class ToolRegistry {
       return {
         ok: true,
         status: "completed",
+        mainWorkspaceResult: {
+          status: "completed",
+          summary,
+          artifacts: [],
+          observations: [
+            typeof args.response === "string" && args.response.trim()
+              ? `Final response prepared: ${args.response.trim()}`
+              : "Final response is ready."
+          ],
+          errors: [],
+          suggestedNextSteps: nextSteps
+        },
+        terminalAssistantMessage: typeof args.response === "string" && args.response.trim() ? args.response.trim() : summary,
         result: {
           type: "final_response_ready",
           workspaceId: activeWorkspaceId,
@@ -362,6 +421,12 @@ export class ToolRegistry {
         toolName
       }
     };
+  }
+
+  private isToolVisibleInWorkspace(toolName: string, workspaceId: string): boolean {
+    if (this.mainOnlyToolNames.has(toolName)) return workspaceId === "main";
+    if (toolName === "exitWorkspace") return workspaceId !== "main";
+    return true;
   }
 
   private hasApprovedRequest(input: { run: AgentRunInput; workspaceId: string; toolName: string; argumentsJson: string }): boolean {

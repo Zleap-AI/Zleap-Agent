@@ -142,14 +142,13 @@ type EventMemory = {
   createdAt: string;
   version: number;
   supersedesId?: string;
-  embeddingRef?: string;
   metadata: Record<string, unknown>;
 };
 ```
 
-## Event 的 SQL + Vector 双存储
+## Event 的 SQLite FTS + Relation/Version 召回
 
-event 需要同时存在 SQL 和向量库里。
+首版 event 存储和召回以 SQLite 为主：结构化字段进入 `memories`，全文检索进入 `memories_fts`，最新版本判断由同一 scope 分区内的 `relationId + version` 决定。
 
 SQL 的作用：
 
@@ -157,38 +156,34 @@ SQL 的作用：
 - 支持 userid、workspaceId、时间、taskId 查询。
 - 支持 version 和 relationId。
 - 支持审计和调试。
+- 支持 SQLite FTS 关键词/全文召回。
 
-Vector 的作用：
-
-- 支持语义召回。
-- 通过相似任务找到相关事件。
+Embedding/vector store 是未来可选增强，不是当前实现依赖。除非 `ZLEAP_MASTER_PLAN.md` 更新，否则 runtime 和测试都应按 SQLite FTS + relation/version 设计。
 
 推荐流程：
 
 ```text
 写入 event:
   1. 从当前对话或 workspace session 中提取新 event。
-  2. 对新 event 生成 embedding。
-  3. 在同一 userId + workspaceId 范围内做向量召回。
-  4. 判断召回结果是否与新 event 表达同一类事情。
-  5. 如果相关，复用或生成 relationId。
-  6. 将新 event 写入 SQL。
-  7. 将新 event 写入 vector store。
+  2. 在同一 userId + workspaceId 范围内按 relationId/version 和 FTS 查询相似记录。
+  3. 判断召回结果是否与新 event 表达同一类事情。
+  4. 如果相关，复用或生成 relationId。
+  5. 将新 event 写入 SQLite，并更新 FTS。
 ```
 
 召回 event:
 
 ```text
 读取 event:
-  1. 用当前任务生成 query embedding。
-  2. 在 userId + workspaceId 范围内向量召回。
+  1. 用当前任务生成 FTS query。
+  2. 在 userId + workspaceId 范围内召回候选。
   3. 从召回结果中读取 relationId。
-  4. 到 SQL 中找到每个 relationId 最新版本的 event。
+  4. 在同一 scope 分区内找到每个 relationId 最新版本的 event。
   5. 按相关度、时间、新旧关系排序。
   6. 注入 workspace context。
 ```
 
-这个设计解决一个常见问题：向量库可能召回旧记忆，但框架最终应该使用最新版本。
+这个设计解决一个常见问题：召回可能命中旧记忆，但框架最终应该使用同一 scope 分区内的最新版本。
 
 ## Relation ID
 
@@ -211,6 +206,10 @@ event-003:
 ```
 
 召回时，即使向量库命中 event-001，也应该通过 relationId 找到 event-003。
+
+latest version 的判断必须先限定同一个记忆分区。也就是说，比较 version 时至少要同时匹配 `memoryType`、`userId`、`agentId` 和 `workspaceId` 这些 scope 字段。其他用户、其他 workspace、其他 agent self scope，或其他 memory type 下的同名 `relationId`，不能隐藏当前分区自己的最新记忆。
+
+同样的规则也适用于直接 relation lookup 和写入去重。runtime 或 repository 判断“这条 relation 是否已经存在”时，不能只按 `memoryType + relationId` 做全局查询，而必须带上完整 scope 分区。否则一个用户、workspace 或 agent self scope 里的同名 relation 会错误阻挡另一个分区的记忆写入或版本演进。
 
 ## Skill Memory
 
@@ -249,7 +248,7 @@ File workspace skill：
 如果同一文件有用户未提交改动，不要覆盖或回滚。
 ```
 
-Browser workspace skill：
+Browser workspace skill（未来扩展）：
 
 ```text
 前端视觉修改完成后，需要至少检查桌面和移动视口。
@@ -274,7 +273,6 @@ type SkillMemory = {
   failureCount: number;
   createdAt: string;
   updatedAt: string;
-  embeddingRef?: string;
   metadata: Record<string, unknown>;
 };
 ```
@@ -290,6 +288,9 @@ skill 有两种生成路径：
 2. agent 主动生成
    - agent 在执行过程中认为某个经验值得沉淀。
    - 或用户明确要求“总结经验”。
+
+主动触发的 skill memory 也必须绑定当前 active workspace。runtime 可以从用户/agent 的触发文本里提炼 title、summary、procedure、appliesWhen 和 avoidWhen，但不能根据文本里的“命令行”“文件”“测试”等关键词猜测另一个 workspace。若经验应属于某个子 workspace，agent 需要先进入该 workspace，或由人工 Memory UI/API 在权限层进行调试维护。
+中文产品表达里的“总结一下经验”“沉淀经验”“提炼经验”“把这个经验记下来”等只作为触发语，不应该原样成为 skill 内容。保存时要去掉触发口令，只保留可复用经验本身。
    - agent 调用 skill 写入工具。
 
 自动生成 skill 的触发频率应该低于 event。
@@ -342,6 +343,8 @@ workspaceId + semantic query
 
 然后注入可用技能。
 
+event/skill 的召回数量由当前 active workspace 的 `memoryPolicyJson` 控制。`maxEventMemories` 和 `maxSkillMemories` 不只是 prompt 裁剪参数，也必须下推到 SQLite FTS / relation-version 召回层；否则 repository 的默认 limit 会让 Web UI 看到的 workspace 策略和模型实际收到的 memory 不一致。
+
 ## Memory 写入权限
 
 ### Impression 写入权限
@@ -384,7 +387,7 @@ Zleap 的 memory 系统要解决的不是“无限记住”，而是“在正确
 
 1. 记忆先分类，再召回。
 2. 召回先过滤租户和 workspace，再做语义匹配。
-3. 同一 relationId 使用最新版本。
+3. 同一 relationId 使用同一 scope 分区内的最新版本。
 4. skill 要少而精。
 5. impression 只保存长期稳定信息。
 6. event 保存事实，skill 保存方法。
@@ -393,6 +396,34 @@ Zleap 的 memory 系统要解决的不是“无限记住”，而是“在正确
 
 记忆不再作为独立 `Memory Workspace` 存在。`searchMemory`、`writeUserImpression`、`writeEventMemory`、`writeSkillMemory`、`updateMemory` 和 `deleteMemory` 挂载在每个 workspace 中。
 
-运行时模型调用这些工具时，event/skill 记忆必须被当前 active workspace 约束：在 `file` workspace 中不能通过传入 `workspaceId: "cli"` 去搜索、写入、更新或删除 CLI 的 event/skill 记忆。user impression 和 agent self impression 仍然是跨 workspace 的身份层记忆，但写入和管理继续受 userId/creator policy 限制。
+运行时模型调用这些工具时，event/skill 记忆必须被当前 active workspace 约束：在 `file` workspace 中不能搜索、写入、更新或删除 CLI 的 event/skill 记忆。user impression 和 agent self impression 仍然是跨 workspace 的身份层记忆，但写入和管理继续受 userId/creator policy 限制。
+
+runtime memory tool 的归属由代码绑定，不由 AI 自己传参决定。function-call schema 不应暴露 `userId`、`agentId`、`workspaceId` 这类 scope 字段；`writeEventMemory` 和 `writeSkillMemory` 的 `workspaceId` 必须来自当前 active workspace，`writeUserImpression` 的 `userId` 必须来自当前 run，`writeAgentSelfImpression` 的 `agentId` 必须来自当前 agent。模型如果幻觉传入这些 scope 字段，runtime 必须拒绝该 tool call。
 
 跨 workspace 的全局调试、筛选、人工编辑和迁移属于 Web UI/API 的 Memory 管理层能力，不属于普通模型 tool use。
+
+### 2026-05-31 update: runtime search is not creator-global debug
+
+`searchMemory` as a runtime function-call tool is still model-controlled, so it must keep the same runtime read boundary even when the current run has `creator` role. It may search the current run user's user impressions/events and shared skills in the active workspace, but it must not expose other users' event/impression records or creator-controlled agent self impressions. Creator-wide inspection remains a direct Memory Web UI/API capability, not a prompt/tool capability.
+
+### 2026-05-31 update: code-bound impression scope
+
+Runtime impression write tools follow the same code-bound scope rule as event and skill tools. `writeUserImpression` receives `userId` only from the current run, and `writeAgentSelfImpression` receives `agentId` only from the current agent. If the model supplies `userId`, `agentId`, or `workspaceId` in either impression tool call, runtime must reject the call instead of ignoring those arguments or treating them as trusted routing hints.
+
+Runtime-requested impression writes are still cross-workspace identity memory, not workspace memory. However, metadata and audit logs should keep the origin execution evidence when available: `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`. These fields explain where the agent decided to write the impression for Web UI debugging; they do not become the memory's scope.
+
+Direct Memory Web UI/API update flows may expose scope fields for creator debugging and migration, but every update must validate the final patched row against the same write policy. It is not enough to check that the actor can edit the original row; the patched result must still be a valid impression/event/skill shape and must not cross user, agent, or workspace boundaries without the required role.
+
+Direct Memory Web UI/API create/update/delete calls may include an operation-level `conversationId` only for trace linking. For ordinary users this id must belong to one of their existing conversations before the operation or audit log is written. This request field is separate from runtime memory tools, where `conversationId` comes only from the current run.
+
+## 2026-05-31 update: absolute event windows
+
+Automatic event memory extraction is based on absolute message windows over the full stored conversation. A bounded recent history slice is only prompt context and must not decide which event window number is being extracted. For example, with a 20-message window, stored messages 501-520 are `window:26`; they must not be mis-labeled as `window:1` or skipped because only the latest 500 messages were loaded.
+
+## 2026-05-31 update: direct skill management vs runtime skill generation
+
+Direct Memory Web UI/API skill creation is a creator-only operation because it edits shared workspace knowledge directly. This debug/maintenance layer may expose broader fields for inspection and migration, but it must still pass the same memory policy and skill quality gates.
+
+Runtime skill generation remains different: an ordinary user or the agent may explicitly trigger reusable experience extraction through the active workspace's `writeSkillMemory` path. In that path, `workspaceId` is injected by runtime code, not supplied by the model, and the write is accepted only when the active workspace memory policy allows skill writes and the candidate is reusable, desensitized, structured, and evidence-safe.
+
+Runtime `writeSkillMemory` also carries trace evidence from runtime state. The persisted metadata should include `activeWorkspaceId`, current `workspaceSessionId`, current `taskId`, and matching `workspaceSessionIds` / `taskIds` arrays when available, so the Web UI can show which workspace execution produced or requested the shared skill. The model still does not provide those ids.

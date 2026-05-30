@@ -1,5 +1,39 @@
 # Multi-tenant Isolation
 
+## 2026-05-31 update: direct memory update policy
+
+Direct Memory Web UI/API updates must validate the patched final row, not only the original row. A user-owned impression cannot be edited into another user's impression, an impression cannot become workspace-scoped or ambiguous, events must still carry valid current-user/workspace structure, and skills must still pass shared-skill quality and desensitization policy before the update is persisted.
+
+Creator actors are allowed to maintain scoped user impression and event records for debugging or migration, but the patched result must still pass the same final-row policy. Ordinary users remain limited to their own user impressions and events.
+
+## 2026-05-31 update: shared skill management boundary
+
+Direct Memory Web UI/API shared skill creation, update, and delete are creator-only management operations. Ordinary users do not directly edit shared workspace knowledge from the debug table/API. They may still cause skill memory to be generated through runtime, but only by asking from inside the active workspace; runtime injects the workspace scope, applies the workspace memory policy, checks reusable/desensitized quality metadata, and records audit evidence.
+
+## 2026-05-31 update: no implicit creator for workspace deletion
+
+Workspace deletion removes a capability boundary and soft-deletes scoped event/skill memory, so it must never be authorized by a default creator identity. Repository and HTTP delete paths must receive actor identity; missing actor identity is treated as an ordinary user request and rejected by creator-only policy.
+
+## 2026-05-31 update: atomic workspace tool binding
+
+Workspace creation and editing are capability installation operations. They must bind only registered tools and must be atomic: if any requested tool id is unknown, the repository rejects the request before mutating the workspace row or workspace-tool links. A failed workspace edit must not leave a half-installed workspace visible to main orchestration.
+
+Like deletion, workspace creation and editing must not infer creator authority from missing actor fields. Repository and HTTP upsert paths must receive explicit actor identity; an omitted actor is treated as non-creator and cannot install or mutate capability boundaries.
+
+## 2026-05-31 update: explicit actor for conversation trace
+
+Conversation trace is sensitive debug data: it can include final LLM messages, context stack segments, tool arguments/results, approval requests, and audit logs. Trace reads must receive explicit actor identity and then enforce owner-or-creator access. Missing actor identity must not default to creator.
+
+Sensitive/debug/admin HTTP endpoints must not silently invent an actor identity. LLM request logs, approval list/resolve, agent update, workspace create/update/delete, direct memory list/create/update/delete, conversation trace, and conversation deletion all require explicit `actorId` and `actorRole`. Missing or invalid actor fields are rejected at the HTTP boundary before repository policy is reached.
+
+If the conversation row has already been deleted, ordinary user ownership can no longer be verified. Any preserved audit-only trace for that deleted conversation is therefore creator-only.
+
+Workspace sessions and approval requests are part of the same tenant-scoped trace surface as tool calls and LLM calls. When a conversation row exists, repository writes must reject a workspace session or approval request whose `userId` does not match the conversation owner. Ordinary trace reads also filter workspace sessions and approval requests to the requesting owner; creators can still inspect all rows for debugging.
+
+Memory metadata can also link rows back into a conversation trace. For non-creator writes, `metadataJson.conversationId` must reference an existing conversation owned by the writing actor before the memory is persisted or before a rejection audit is linked to that conversation. This prevents an ordinary user from polluting another user's Web UI trace by forging a conversation id in memory metadata.
+
+Direct Memory Web UI/API operations have a second trace-linking surface: the request-level `conversationId` used for operation audit logs. For non-creator create/update/delete operations, that `conversationId` must also reference an existing conversation owned by the actor before the operation continues. If it points at another user, the operation is rejected before memory mutation and before `memory_api_create`, `memory_api_update`, or `memory_api_delete` audits are written to the forged trace.
+
 ## 为什么多租户是底层设计
 
 Zleap 从第一天开始就需要考虑多租户。
@@ -108,6 +142,9 @@ workspaceId
 
 不能只靠向量相似度跨用户召回。
 
+`relationId + version` 也必须在这个隔离边界内解释。另一个用户或另一个 workspace 即使写入了相同 `relationId` 且 version 更高，也不能让当前用户当前 workspace 的 event 被视为过期。
+直接按 relation 查询或写入去重时也必须带上同样的分区键。全局 `memoryType + relationId` 查询只能作为 creator 调试辅助，不能用于 runtime 判断某条 scoped memory 是否已经存在。
+
 ### Skill
 
 skill 是共享的，但共享前必须脱敏。
@@ -151,9 +188,9 @@ type WorkspacePermission = {
 
 例如：
 
-- 普通用户可能可以进入 Browser workspace。
+- 普通用户可以进入低风险且已授权的 workspace。
 - CLI workspace 的危险命令需要确认。
-- Memory workspace 的跨用户查询只能 creator 使用。
+- 跨用户 memory 调试查询只能通过 creator 的直接 Memory Web UI/API 管理层进行；runtime 中不存在独立 Memory workspace。
 - Shared skill 管理需要较高权限。
 
 ## Tool 权限
@@ -224,7 +261,7 @@ type AuditLog = {
 - 删除或禁用某条 skill。
 - 删除 workspace 时处理其 event 和 skill。
 
-删除 vector 记录时，需要同步删除 SQL 中对应 embeddingRef 或标记为 deleted。
+首版没有独立 vector 记录；删除 memory 时需要软删除 SQLite row，并确保普通 list/get/recall 和 FTS 查询排除 deleted 记录。未来如果引入 vector store，必须在 master plan 中新增同步删除策略。
 
 推荐使用软删除：
 
@@ -244,4 +281,3 @@ type Deletable = {
 4. agent self impression 只能由 creator 修改。
 5. tool 调用和 memory 写入都要经过 runtime policy。
 6. 审计日志独立于模型 memory。
-

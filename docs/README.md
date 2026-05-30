@@ -2,7 +2,7 @@
 
 这组文档用于沉淀 Zleap Agent Framework 的核心理念、运行时模型、记忆系统、多租户隔离和后续 TypeScript 实现路线。
 
-当前阶段的目标不是直接写代码，而是先把框架的哲学和边界定义清楚。只有这些文档确认稳定之后，再开始构建可运行的 agent runtime 和 Web UI。
+当前项目已经进入实现阶段。`ZLEAP_MASTER_PLAN.md` 是长期主计划；本目录文档用于解释核心理念和约束。每次重大实现调整都必须同步更新主计划和相关 docs，旧文档如果与最新决策冲突，以主计划和最新用户确认的规则为准。
 
 ## 核心判断
 
@@ -104,3 +104,6 @@ Stable Agent Identity = LLM
 5. main workspace 只能看到 workspace manifest，不应该直接看到所有子 workspace tools。
 6. workspace 退出必须返回结构化 result，而不是只返回自然语言。
 7. 长期 memory 写入必须经过 runtime policy，而不是完全由模型自由决定。
+8. memory 不是独立 workspace；memory tools 由 runtime 挂载到每个 workspace。
+9. main workspace 通过 runtime 注入的 manifest 了解所有 workspace，不通过 `listWorkspaces` 工具发现。
+10. 代码负责身份、scope、权限、工具可见性和持久化边界；模型只在当前暴露的边界内做选择。

@@ -12,6 +12,26 @@ main workspace 可以看到的返回内容是 `status`、`summary`、`artifacts`
 
 `running` 只能表示一个 `WorkspaceSession` 仍在执行中。它不能作为 `exitWorkspace` 的交付状态；runtime 必须拒绝这种退出请求，并把失败作为 tool result 记录在当前子 workspace 里。
 
+`exitWorkspace` 还必须绑定当前 active child session 的运行状态：只有仍处于 `running` 的 session 可以被提交。重复退出已经 completed/failed/blocked/needs_user_input/needs_approval 的 child session 时，runtime 只能返回 failed tool result，不能覆盖第一次提交的 `WorkspaceResult`。
+
+子 workspace 直接生成 assistant content 也不是合法交付。runtime 应把这段文字作为内部 trace 保留，追加内部退出提醒，并继续要求模型调用 `exitWorkspace`。只有 main workspace 在收到结构化 `WorkspaceResult` 后才能生成最终面向用户的回答。
+
+`exitWorkspace` 的生命周期副作用必须按成功 tool call 去重。同一条 assistant message 里即使还带有其他 tool calls，也只能对该次成功退出运行一次 `afterWorkspaceExit`、一次 skill usage feedback 和一组退出审计/提取事件。
+
+After a successful `exitWorkspace` in an assistant tool-call batch, later child workspace tool calls in that same batch are invalid post-exit calls. Runtime should keep a failed tool-call trace for debugging, but it must not execute those calls or append them into the completed session's local evidence.
+
+Workspace-exit memory evidence belongs to the committed child session, not to every historical record with the same workspace id. Exit event metadata may reference the task-start user message, messages inside that session interval, exact `workspaceSessionId`/`taskId` tool calls, and legacy unbound tool calls inside the interval. Raw evidence from older sessions remains inspectable through trace, but it is not copied into the new exit event.
+
+`enterWorkspace`, `askUser`, and `finishTask` belong only to main workspace. This is a code boundary, not a prompt preference: child workspaces must not see these tools in their callable list, and runtime must reject child calls even if a workspace was misconfigured to bind them. Child workspaces should return `status` and `suggestedNextSteps` through `exitWorkspace`; main decides whether to ask the user, finish, or enter another workspace.
+
+`WorkspaceSession.localContext.availableTools` is a trace/debug snapshot of the same visibility rule. It must include runtime-mounted tools that the model can actually call, such as universal memory tools and child-only `exitWorkspace`, and it must hide main-only tools from child workspaces. The Web UI should not show a tool as locally available if the runtime callable list would reject it.
+
+Main workspace has two terminal orchestration tools: `askUser` and `finishTask`. These are not ordinary intermediate tool results. A successful `askUser` call commits the main session as `needs_user_input` and returns the question directly to the user; a successful `finishTask` call commits the main session as `completed` and returns the provided final response directly. The committed result, tool call, and final message must remain inspectable in trace/context, but runtime should not ask the LLM for another pass merely to restate the terminal tool result.
+
+The active `WorkspaceSession.localContext` is the authoritative memory/context snapshot for a workspace LLM call. After `WorkspaceRuntime` recalls impressions/events/skills for a session, `ContextBuilder` and `PromptAssembler` must inject those exact partitions into `impression_memory`, `event_memory`, `skill_memory`, and the synthetic `runtime_context.load` tool result. Runtime must not perform a second independent recall during prompt assembly, because that would make the persisted session trace differ from what the model actually saw.
+
+Runtime memory-write tools use the same code-bound context contract. Event and skill writes receive active workspace scope from runtime. Impression writes receive user/agent scope from runtime and stay cross-workspace, but still persist origin workspace/session/task evidence when available. Skill and impression trace metadata can include `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`; these fields are trace/debug evidence, not model-controlled arguments.
+
 ## 为什么需要契约
 
 Zleap 的核心不是让模型获得更多上下文，而是让模型获得正确上下文。
@@ -70,6 +90,7 @@ You are an agent running inside Zleap runtime.
 You must only use tools available in the active workspace.
 You must not assume access to tools outside the active workspace.
 You must follow runtime memory and permission policies.
+Memory scope is bound by runtime state: userId, agentId, and workspaceId are not model-controlled routing fields.
 ```
 
 ## 2. Agent Personality Contract
@@ -405,13 +426,14 @@ Output:
 
 ## 失败和阻塞
 
-workspace 可以返回四类状态：
+workspace 可以返回五类可交付状态：
 
 ```text
 completed
 failed
 blocked
 needs_user_input
+needs_approval
 ```
 
 语义：
@@ -420,6 +442,7 @@ needs_user_input
 - failed：子任务失败，但已经有明确失败原因。
 - blocked：缺少权限、环境或必要信息，无法继续。
 - needs_user_input：需要用户决策。
+- needs_approval：需要 creator/operator 审批后才能继续。
 
 主 workspace 根据状态决定下一步。
 

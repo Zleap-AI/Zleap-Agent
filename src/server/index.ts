@@ -4,6 +4,7 @@ import { Repositories } from "../db/repositories";
 import { AgentRuntime } from "../core/agent-runtime";
 import { MemoryService } from "../core/memory-service";
 import { normalizeProviderBaseUrl } from "../core/llm-client";
+import { parseActor, parseActorFromSearchParams } from "./actor";
 import { readJson, sendError, sendJson, serveStatic } from "./http";
 import type { AgentRunInput, MemoryRow } from "../types";
 
@@ -34,25 +35,23 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/llm-calls") {
       const limit = Number(url.searchParams.get("limit") ?? 50);
+      const actor = parseActorFromSearchParams(url.searchParams, "LLM call log API");
       sendJson(response, 200, {
-        llmCalls: repos.listLlmCalls(
-          limit,
-          url.searchParams.get("actorId") ?? "user",
-          (url.searchParams.get("actorRole") || "user") as "user" | "creator"
-        )
+        llmCalls: repos.listLlmCalls(limit, actor.actorId, actor.actorRole)
       });
       return;
     }
 
     if (request.method === "GET" && url.pathname === "/api/approvals") {
       const limit = Number(url.searchParams.get("limit") ?? 100);
+      const actor = parseActorFromSearchParams(url.searchParams, "Approval list API");
       sendJson(response, 200, {
         approvalRequests: repos.listApprovalRequests({
           conversationId: url.searchParams.get("conversationId") || undefined,
           userId: url.searchParams.get("userId") || undefined,
           status: url.searchParams.get("status") || undefined,
-          actorId: url.searchParams.get("actorId") ?? "user",
-          actorRole: (url.searchParams.get("actorRole") || "user") as "user" | "creator",
+          actorId: actor.actorId,
+          actorRole: actor.actorRole,
           limit
         })
       });
@@ -61,12 +60,13 @@ const server = http.createServer(async (request, response) => {
 
     const approvalMatch = url.pathname.match(/^\/api\/approvals\/([^/]+)\/resolve$/);
     if (approvalMatch && request.method === "POST") {
-      const body = await readJson<{ status: "approved" | "rejected"; actorId?: string; actorRole?: "user" | "creator"; resolvedBy?: string; resolutionReason?: string }>(request);
+      const body = await readJson<{ status: "approved" | "rejected"; actorId?: string; actorRole?: "user" | "creator"; resolutionReason?: string }>(request);
+      const actor = parseActor(body, "Approval resolve API");
       if (body.status !== "approved" && body.status !== "rejected") throw new Error("Approval status must be approved or rejected.");
       sendJson(response, 200, repos.resolveApprovalRequest(approvalMatch[1], {
         status: body.status,
-        resolvedBy: body.actorId ?? body.resolvedBy ?? "user",
-        resolverRole: body.actorRole ?? "user",
+        resolvedBy: actor.actorId,
+        resolverRole: actor.actorRole,
         resolutionReason: body.resolutionReason
       }));
       return;
@@ -109,12 +109,13 @@ const server = http.createServer(async (request, response) => {
     }
     if (agentMatch && request.method === "PUT") {
       const body = await readJson<any>(request);
+      const actor = parseActor(body, "Agent update API");
       sendJson(response, 200, repos.updateAgent({
         ...repos.getAgent(agentMatch[1]),
         ...body,
         id: agentMatch[1],
-        actorId: body.actorId ?? "user",
-        actorRole: body.actorRole ?? "user"
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
       }));
       return;
     }
@@ -125,36 +126,40 @@ const server = http.createServer(async (request, response) => {
     }
     if (url.pathname === "/api/workspaces" && request.method === "POST") {
       const body = await readJson<any>(request);
+      const actor = parseActor(body, "Workspace create API");
       sendJson(response, 200, repos.upsertWorkspace({
         ...body,
-        actorId: body.actorId ?? "user",
-        actorRole: body.actorRole ?? "user"
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
       }));
       return;
     }
     const workspaceMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)$/);
     if (workspaceMatch && request.method === "PUT") {
       const body = await readJson<any>(request);
+      const actor = parseActor(body, "Workspace update API");
       sendJson(response, 200, repos.upsertWorkspace({
         ...body,
         id: workspaceMatch[1],
-        actorId: body.actorId ?? "user",
-        actorRole: body.actorRole ?? "user"
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
       }));
       return;
     }
     if (workspaceMatch && request.method === "DELETE") {
       const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator"; deleteReason?: string }>(request);
-      repos.deleteWorkspace(workspaceMatch[1], body.actorId ?? "creator", body.actorRole ?? "creator", body.deleteReason);
+      const actor = parseActor(body, "Workspace delete API");
+      repos.deleteWorkspace(workspaceMatch[1], actor.actorId, actor.actorRole, body.deleteReason);
       sendJson(response, 200, { ok: true });
       return;
     }
 
     if (url.pathname === "/api/memories" && request.method === "GET") {
+      const actor = parseActorFromSearchParams(url.searchParams, "Memory list API");
       sendJson(response, 200, {
         memories: memoryService.listMemoryRecords({
-          actorId: url.searchParams.get("actorId") || "user",
-          actorRole: (url.searchParams.get("actorRole") || "user") as "user" | "creator",
+          actorId: actor.actorId,
+          actorRole: actor.actorRole,
           filters: {
             query: url.searchParams.get("query") || undefined,
             memoryType: url.searchParams.get("memoryType") || undefined,
@@ -167,20 +172,23 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (url.pathname === "/api/memories" && request.method === "POST") {
-      const body = await readJson<Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail"> & { actorId?: string; actorRole?: "user" | "creator" }>(request);
+      const body = await readJson<Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail"> & { actorId?: string; actorRole?: "user" | "creator"; conversationId?: string }>(request);
+      const actor = parseActor(body, "Memory create API");
       sendJson(response, 200, memoryService.createMemoryRecord({
-        actorId: body.actorId ?? "user",
-        actorRole: body.actorRole ?? "user",
-        memory: body
+        actorId: actor.actorId,
+        actorRole: actor.actorRole,
+        memory: body,
+        conversationId: body.conversationId
       }));
       return;
     }
     const memoryMatch = url.pathname.match(/^\/api\/memories\/([^/]+)$/);
     if (memoryMatch && request.method === "PUT") {
       const body = await readJson<Partial<MemoryRow> & { actorId?: string; actorRole?: "user" | "creator"; conversationId?: string }>(request);
+      const actor = parseActor(body, "Memory update API");
       sendJson(response, 200, memoryService.updateMemoryRecord({
-        actorId: body.actorId ?? "user",
-        actorRole: body.actorRole ?? "user",
+        actorId: actor.actorId,
+        actorRole: actor.actorRole,
         memoryId: memoryMatch[1],
         patch: body,
         conversationId: body.conversationId
@@ -189,9 +197,10 @@ const server = http.createServer(async (request, response) => {
     }
     if (memoryMatch && request.method === "DELETE") {
       const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator"; deleteReason?: string; conversationId?: string }>(request);
+      const actor = parseActor(body, "Memory delete API");
       memoryService.deleteMemoryRecord({
-        actorId: body.actorId ?? "user",
-        actorRole: body.actorRole ?? "user",
+        actorId: actor.actorId,
+        actorRole: actor.actorRole,
         memoryId: memoryMatch[1],
         deleteReason: body.deleteReason,
         conversationId: body.conversationId
@@ -202,17 +211,15 @@ const server = http.createServer(async (request, response) => {
 
     const traceMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/trace$/);
     if (traceMatch && request.method === "GET") {
-      sendJson(response, 200, repos.getTrace(
-        traceMatch[1],
-        url.searchParams.get("actorId") ?? "user",
-        (url.searchParams.get("actorRole") || "user") as "user" | "creator"
-      ));
+      const actor = parseActorFromSearchParams(url.searchParams, "Conversation trace API");
+      sendJson(response, 200, repos.getTrace(traceMatch[1], actor.actorId, actor.actorRole));
       return;
     }
     const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
     if (conversationMatch && request.method === "DELETE") {
       const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator"; deleteReason?: string }>(request);
-      repos.deleteConversation(conversationMatch[1], body.actorId ?? "user", body.actorRole ?? "user", body.deleteReason);
+      const actor = parseActor(body, "Conversation delete API");
+      repos.deleteConversation(conversationMatch[1], actor.actorId, actor.actorRole, body.deleteReason);
       sendJson(response, 200, { ok: true });
       return;
     }
