@@ -4,6 +4,7 @@ import { MemoryService } from "./memory-service";
 import { PolicyEngine } from "./policy-engine";
 import { WorkspaceRuntime } from "./workspace-runtime";
 import { McpToolExecutor } from "./mcp-executor";
+import { executeRunCommand, executeSearchFiles } from "./builtin-tools";
 
 export type ToolExecutionResult = {
   ok: boolean;
@@ -149,7 +150,21 @@ export class ToolRegistry {
     };
   }
 
-  private executeRuntimeTool(run: AgentRunInput, activeWorkspaceId: string, activeWorkspaceSession: WorkspaceSession | undefined, toolName: string, argumentsJson: string): ToolExecutionResult {
+  private async executeRuntimeTool(run: AgentRunInput, activeWorkspaceId: string, activeWorkspaceSession: WorkspaceSession | undefined, toolName: string, argumentsJson: string): Promise<ToolExecutionResult> {
+    if (toolName === "searchFiles") {
+      if (activeWorkspaceId !== "file") {
+        return { ok: false, status: "failed", result: { error: "searchFiles can only be called from file workspace." } };
+      }
+      return executeSearchFiles(argumentsJson);
+    }
+
+    if (toolName === "runCommand") {
+      if (activeWorkspaceId !== "cli") {
+        return { ok: false, status: "failed", result: { error: "runCommand can only be called from cli workspace." } };
+      }
+      return executeRunCommand(argumentsJson);
+    }
+
     if (this.runtimeMemoryToolNames.has(toolName)) {
       const result = this.memoryService.executeMemoryTool({
         run,

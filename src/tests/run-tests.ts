@@ -1541,7 +1541,7 @@ async function testRuntimeContextAndTools() {
   assert.equal(childLocalConversationPayload.messages.length, 0);
   assert.equal(childLocalConversationPayload.recentToolEvidence.length, 0);
   assert.equal(childInput?.messages[0]?.content?.includes("\"name\": \"searchFiles\""), true);
-  assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"placeholder\""), true);
+  assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"runtime\""), true);
   const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.length, 1);
@@ -3972,9 +3972,9 @@ async function testToolBindingsAndMcpReadiness() {
   const searchMemory = repos.listTools().find((tool) => tool.name === "searchMemory");
   const updateMemory = repos.listTools().find((tool) => tool.name === "updateMemory");
   const deleteMemory = repos.listTools().find((tool) => tool.name === "deleteMemory");
-  assert.equal(searchFiles?.bindingType, "placeholder");
+  assert.equal(searchFiles?.bindingType, "runtime");
   assert.equal(searchFiles?.mcpServerId, null);
-  assert.equal(runCommand?.bindingType, "placeholder");
+  assert.equal(runCommand?.bindingType, "runtime");
   assert.equal(runCommand?.mcpToolName, null);
   assert.equal(exitWorkspace?.bindingType, "runtime");
   assert.equal(writeUserImpression?.bindingType, "runtime");
@@ -4009,13 +4009,13 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(writeEventMemorySchema.required?.includes("workspaceId"), false);
   assert.equal(writeSkillMemorySchema.required?.includes("workspaceId"), false);
 
-  const mcpTool = new MainToWorkspaceToolRequestLLMClient("file", "searchFiles", { query: "runtime" });
-  const runtime = new AgentRuntime(repos, mcpTool);
+  const builtinFileTool = new MainToWorkspaceToolRequestLLMClient("file", "searchFiles", { query: "runtime" });
+  const runtime = new AgentRuntime(repos, builtinFileTool);
   await runtime.run({
     agentId: "default-agent",
     userId: "tool-binding-user",
     userRole: "creator",
-    conversationId: "conv-tool-binding-mcp",
+    conversationId: "conv-tool-binding-file-runtime",
     message: "search files for runtime",
     llm: {
       baseUrl: "https://api.302ai.com",
@@ -4023,13 +4023,31 @@ async function testToolBindingsAndMcpReadiness() {
       apiKey: "test-key"
     }
   });
-  assert.equal(mcpTool.lastToolResult.includes("not bound to a runtime or MCP executor"), true);
-  const mcpTrace = repos.getTrace("conv-tool-binding-mcp", "creator", "creator");
-  assert.equal(mcpTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
-  assert.equal(mcpTrace.toolCalls.some((call) => call.toolName === "searchFiles" && call.status === "failed"), true);
-  const mcpFileSession = mcpTrace.sessions.find((session) => session.workspaceId === "file");
-  assert.equal(mcpFileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles" && call.status === "failed"), true);
-  assert.equal(mcpFileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status failed")), true);
+  assert.equal(builtinFileTool.lastToolResult.includes("\"count\""), true);
+  const fileTrace = repos.getTrace("conv-tool-binding-file-runtime", "creator", "creator");
+  assert.equal(fileTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
+  assert.equal(fileTrace.toolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
+  const fileSession = fileTrace.sessions.find((session) => session.workspaceId === "file");
+  assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
+  assert.equal(fileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status completed")), true);
+
+  const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("cli", "runCommand", { command: "node -e \"console.log('zleap-cli-ok')\"" });
+  const cliRuntime = new AgentRuntime(repos, builtinCliTool);
+  await cliRuntime.run({
+    agentId: "default-agent",
+    userId: "tool-binding-user",
+    userRole: "creator",
+    conversationId: "conv-tool-binding-cli-runtime",
+    message: "run a harmless command",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(builtinCliTool.lastToolResult.includes("zleap-cli-ok"), true);
+  const cliTrace = repos.getTrace("conv-tool-binding-cli-runtime", "creator", "creator");
+  assert.equal(cliTrace.toolCalls.some((call) => call.toolName === "runCommand" && call.status === "completed"), true);
 
   const echoServerPath = path.resolve("src/tests/fixtures/mcp-echo-server.mjs");
   const echoServer = repos.upsertMcpServer({

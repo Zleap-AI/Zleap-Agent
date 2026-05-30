@@ -2,6 +2,28 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:02 +08:00
+
+Purpose:
+- Treat `file` and `cli` as built-in foundational workspaces instead of requiring MCP Server setup for their default tools.
+- Keep MCP as the expansion path for external/user-provided tools while making first-run file search and CLI execution actually runnable.
+
+Changed:
+- Added internal runtime executors for `searchFiles` and `runCommand`.
+- Changed seed bindings for `tool-search-files` and `tool-run-command` from placeholder to runtime executors.
+- Protected built-in file/CLI runtime tools from ordinary workspace tool editing/deletion.
+- Updated tests to prove `searchFiles` and `runCommand` complete through runtime execution, while MCP import/execution remains covered by the echo server fixture.
+- Updated `ZLEAP_MASTER_PLAN.md` with the rule that core local capabilities do not need MCP indirection.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 05:42 +08:00
 
 Purpose:

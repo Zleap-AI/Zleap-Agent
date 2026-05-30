@@ -87,6 +87,8 @@ const builtInRuntimeToolIds = new Set([
   "tool-exit-workspace",
   "tool-ask-user",
   "tool-finish-task",
+  "tool-search-files",
+  "tool-run-command",
   ...builtInMemoryToolIds
 ]);
 

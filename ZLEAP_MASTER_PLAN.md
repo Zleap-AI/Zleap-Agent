@@ -69,6 +69,7 @@
   - Runtime must enforce the active workspace memory policy during recall and writes: impressions remain cross-workspace context, user impressions are scoped to the current user, agent self impressions are scoped to the current agent, event/skill memory can be disabled independently, event/skill partitions are capped by `maxEventMemories` and `maxSkillMemories` before prompt assembly, and `eventWriteEnabled`/`skillWriteEnabled` block runtime or tool-requested writes.
   - Workspace memory-policy caps must drive the SQL recall limit for each partition before prompt assembly. Repository defaults may provide fallbacks, but they must not silently cap a workspace whose `maxEventMemories` or `maxSkillMemories` is higher.
   - The boundary between model freedom and code authority is explicit: the model may choose whether to answer, ask, call an exposed tool, enter an exposed workspace, or request a memory write; code decides identity scope, active workspace scope, callable tool set, memory policy, approval policy, tenant ownership, and persistence/audit behavior.
+  - Built-in foundational capabilities do not need MCP indirection. The default `file` workspace exposes `searchFiles` through an internal runtime executor, and the default `cli` workspace exposes `runCommand` through an internal runtime executor. MCP remains the extension mechanism for external or user-provided tools.
   - Memory/context recall is performed by runtime and injected as a synthetic tool result.
   - Every automatic memory recall attempt must be audited as `memory_recall_requested`, even when it returns zero rows. The audit metadata must include the active conversation/workspace/task, query text, recall algorithm, vector-enabled flag, per-partition limits, raw hit counts, injected partition counts, and injected memory ids so the Logs tab can prove whether recall happened.
   - The first recall algorithm is SQLite FTS plus relation/version latest-row filtering. Vector recall is explicitly disabled for now (`vectorEnabled: false`) until a future design update changes the memory strategy.
@@ -271,7 +272,7 @@
   - Runtime event/skill memory write tools expose no `workspaceId` argument and bind to the active workspace by code. Supplying any hallucinated `workspaceId`, even one matching the active workspace, is rejected.
   - Active workspace `memoryPolicyJson` controls runtime memory recall and writes, including event/skill enable flags, max recalled event/skill counts, and disabled event/skill write gates.
   - Agent self impression recall is isolated by exact `agentId`; a different agent's self impression, unscoped/global impression, or ambiguous user+agent impression must not appear in the current agent context.
-  - Runtime-bound tools execute through the ToolRegistry; MCP-bound tools execute through the MCP executor and return structured failed tool results when the server command, URL, connection, or tool call fails.
+  - Runtime-bound tools execute through the ToolRegistry, including built-in `searchFiles` and `runCommand`; MCP-bound tools execute through the MCP executor and return structured failed tool results when the server command, URL, connection, or tool call fails.
   - Non-streaming tool loops stop at the configured maximum round count and write an audit log instead of allowing unbounded autonomous execution.
   - Streaming `streamEvents` tool loops support multiple tool rounds, stop at the configured maximum round count, persist every follow-up LLM call, and write an audit log instead of allowing unbounded autonomous execution.
 - Context:
@@ -369,6 +370,7 @@
   - Tests may use a fake provider only for protocol verification.
 - MCP:
   - The runtime uses the official `@modelcontextprotocol/sdk` TypeScript SDK.
+  - MCP is for external/user-provided tool expansion, not a requirement for core local capabilities such as file search or CLI execution.
   - MCP Server definitions are stored per workspace, not globally and not primarily per tool.
   - Local MCP Servers use `StdioClientTransport` with `{ command, args, env, cwd }`.
   - Remote MCP Servers use `StreamableHTTPClientTransport` with `{ url, headers }`.
