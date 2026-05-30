@@ -634,6 +634,8 @@ export class Repositories {
     agentId?: string;
     impressionLimit?: number;
     eventLimit?: number;
+    resultEventLimit?: number;
+    processEventLimit?: number;
     skillLimit?: number;
   }): MemoryRow[] {
     const ftsQuery = buildFtsQuery(input.query);
@@ -650,12 +652,13 @@ export class Repositories {
           AND newer.version > m.version
       )
     `;
-    const textClause = ftsQuery
-      ? "AND m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)"
-      : "";
-    const recallPartition = (whereSql: string, params: unknown[], limit = 8): MemoryRow[] => {
+    const recallPartition = (whereSql: string, params: unknown[], limit = 8, options: { useFts?: boolean } = {}): MemoryRow[] => {
       const safeLimit = Math.max(0, Math.floor(limit));
       if (safeLimit <= 0) return [];
+      const useFts = Boolean(options.useFts && ftsQuery);
+      const textClause = useFts
+        ? "AND m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)"
+        : "";
       return this.db.prepare(`
       SELECT m.* FROM memories m
       WHERE m.deletedAt IS NULL
@@ -664,7 +667,7 @@ export class Repositories {
         ${textClause}
       ORDER BY m.updatedAt DESC
       LIMIT ?
-    `).all(...params, ...(ftsQuery ? [ftsQuery] : []), safeLimit) as MemoryRow[];
+    `).all(...params, ...(useFts ? [ftsQuery] : []), safeLimit) as MemoryRow[];
     };
 
     const impressions = recallPartition(`
@@ -673,19 +676,26 @@ export class Repositories {
         (m.userId = ? AND m.agentId IS NULL)
         OR (m.userId IS NULL AND m.agentId = ?)
       )
-    `, [input.userId, input.agentId ?? ""], input.impressionLimit ?? 8);
-    const events = recallPartition(
-      "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ?",
+    `, [input.userId, input.agentId ?? ""], input.impressionLimit ?? 20);
+    const resultEvents = recallPartition(
+      "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'result'",
       [input.userId, input.workspaceId],
-      input.eventLimit ?? 8
+      input.resultEventLimit ?? input.eventLimit ?? 50
+    );
+    const processEvents = recallPartition(
+      "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'process'",
+      [input.userId, input.workspaceId],
+      input.processEventLimit ?? 8,
+      { useFts: true }
     );
     const skills = recallPartition(
       "m.memoryType = 'skill' AND m.workspaceId = ?",
       [input.workspaceId],
-      input.skillLimit ?? 8
+      input.skillLimit ?? 8,
+      { useFts: true }
     );
 
-    return [...impressions, ...events, ...skills];
+    return [...impressions, ...resultEvents, ...processEvents, ...skills];
   }
 
   createMemory(input: Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail">, actorId: string, actorRole: UserRole): MemoryRow {

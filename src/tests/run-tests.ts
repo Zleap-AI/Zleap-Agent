@@ -1157,7 +1157,8 @@ async function testDatabaseAndMemory() {
     version: 1,
     title: "Old file search",
     summary: "Old search used npm",
-    detail: "Old detail"
+    detail: "Old detail",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-owner", eventKind: "result" })
   }, "creator", "creator");
   const latestEvent = repos.createMemory({
     memoryType: "event",
@@ -1167,7 +1168,8 @@ async function testDatabaseAndMemory() {
     version: 2,
     title: "Latest file search",
     summary: "Latest search uses ripgrep",
-    detail: "Latest detail"
+    detail: "Latest detail",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-owner", eventKind: "result" })
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
@@ -1201,7 +1203,8 @@ async function testDatabaseAndMemory() {
     version: 2,
     title: "Scoped collision latest",
     summary: "Scoped collision ripgrep search should stay visible.",
-    detail: "Current partition relation collision fixture."
+    detail: "Current partition relation collision fixture.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-owner", eventKind: "result" })
   }, "creator", "creator");
   const otherUserCollision = repos.createMemory({
     memoryType: "event",
@@ -1211,7 +1214,8 @@ async function testDatabaseAndMemory() {
     version: 99,
     title: "Other user same relation",
     summary: "Other user ripgrep search should not hide user-a relation.",
-    detail: "Cross-user relation collision fixture."
+    detail: "Cross-user relation collision fixture.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-owner", eventKind: "result" })
   }, "creator", "creator");
   const otherWorkspaceCollision = repos.createMemory({
     memoryType: "event",
@@ -1221,7 +1225,8 @@ async function testDatabaseAndMemory() {
     version: 100,
     title: "Other workspace same relation",
     summary: "Other workspace ripgrep search should not hide file relation.",
-    detail: "Cross-workspace relation collision fixture."
+    detail: "Cross-workspace relation collision fixture.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-owner", eventKind: "result" })
   }, "creator", "creator");
   const otherTypeCollision = repos.createMemory({
     memoryType: "skill",
@@ -1254,6 +1259,26 @@ async function testDatabaseAndMemory() {
   assert.equal(deletedLatest.deletedBy, "creator");
   assert.equal(deletedLatest.deleteReason, "superseded event cleanup");
   assert.equal(repos.getMemoryByRelation("event", "rel-test")?.id, oldEvent.id);
+
+  for (let index = 0; index < 25; index += 1) {
+    repos.createMemory({
+      memoryType: "impression",
+      userId: "user-a",
+      relationId: `impression:user-a:fixed:${index}`,
+      title: `Fixed impression ${index}`,
+      summary: "Stable impression loaded without query selection.",
+      detail: "This impression intentionally does not match the current query."
+    }, "creator", "creator");
+  }
+  const fixedImpressions = repos.recallMemories({
+    userId: "user-a",
+    workspaceId: "file",
+    query: "phrase that matches no impression",
+    impressionLimit: 20,
+    eventLimit: 0,
+    skillLimit: 0
+  });
+  assert.equal(fixedImpressions.filter((item) => item.memoryType === "impression").length, 20);
 
   const memory = repos.createMemory({
     memoryType: "impression",
@@ -1485,7 +1510,8 @@ async function testRuntimeContextAndTools() {
     relationId: "event:user:file:runtime-search",
     title: "Runtime file search event",
     summary: "Runtime search used file workspace",
-    detail: "A previous file workspace task searched runtime files."
+    detail: "A previous file workspace task searched runtime files.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-test", eventKind: "result", outcome: "completed" })
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
@@ -1578,9 +1604,10 @@ async function testRuntimeContextAndTools() {
   assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"runtime\""), false);
   assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
   const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
-  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
+  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceResultEvents: unknown[]; currentWorkspaceRelevantProcessEvents: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.length, 1);
-  assert.equal(memoryPayload.currentWorkspaceEventMemory.length, 1);
+  assert.equal(memoryPayload.currentWorkspaceResultEvents.length, 1);
+  assert.equal(memoryPayload.currentWorkspaceRelevantProcessEvents.length, 0);
   assert.equal(memoryPayload.currentWorkspaceSkillMemory.length, 1);
   assert.equal(output.workspaceTrace.length, 2);
   assert.equal(repos.getWorkspace("cli").manifest.requiresApproval, true);
@@ -1628,7 +1655,8 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
     relationId: "event:session-recall-user:file:objective-only",
     title: "Objective-only file event",
     summary: "inspect file evidence with objective-only recall",
-    detail: "This memory should be found by the child WorkspaceTask objective, not by the vague user message."
+    detail: "This memory should be found by the child WorkspaceTask objective, not by the vague user message.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-session-context-recall", eventKind: "process" })
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
@@ -1660,8 +1688,8 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   assert.equal(fileSession?.localContext.recalledSkillMemories.some((memory) => memory.title === "Objective-only file skill"), true);
   const childInput = fake.inputs[1];
   const childMemoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
-  const childMemoryPayload = JSON.parse(childMemoryToolMessage?.content ?? "{}") as { currentWorkspaceEventMemory: MemoryRow[]; currentWorkspaceSkillMemory: MemoryRow[] };
-  assert.equal(childMemoryPayload.currentWorkspaceEventMemory.some((memory) => memory.title === "Objective-only file event"), true);
+  const childMemoryPayload = JSON.parse(childMemoryToolMessage?.content ?? "{}") as { currentWorkspaceResultEvents: MemoryRow[]; currentWorkspaceRelevantProcessEvents: MemoryRow[]; currentWorkspaceSkillMemory: MemoryRow[] };
+  assert.equal(childMemoryPayload.currentWorkspaceRelevantProcessEvents.some((memory) => memory.title === "Objective-only file event"), true);
   assert.equal(childMemoryPayload.currentWorkspaceSkillMemory.some((memory) => memory.title === "Objective-only file skill"), true);
   const trace = repos.getTrace("conv-session-context-recall", "creator", "creator");
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Objective-only file event")), true);
@@ -1672,16 +1700,17 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
     vectorEnabled: boolean;
     query: string;
     rawHitCount: number;
-    injectedPartitionCounts: { event: number; skill: number };
-    hitIds: { events: string[]; skills: string[] };
+    injectedPartitionCounts: { event: number; processEvent: number; skill: number };
+    hitIds: { resultEvents: string[]; processEvents: string[]; skills: string[] };
   };
   assert.equal(fileRecallMetadata.algorithm, "sqlite_fts_relation_version");
   assert.equal(fileRecallMetadata.vectorEnabled, false);
   assert.equal(fileRecallMetadata.query.includes("inspect file evidence"), true);
   assert.equal(fileRecallMetadata.rawHitCount >= 2, true);
   assert.equal(fileRecallMetadata.injectedPartitionCounts.event, 1);
+  assert.equal(fileRecallMetadata.injectedPartitionCounts.processEvent, 1);
   assert.equal(fileRecallMetadata.injectedPartitionCounts.skill, 1);
-  assert.equal(fileRecallMetadata.hitIds.events.length, 1);
+  assert.equal(fileRecallMetadata.hitIds.processEvents.length, 1);
 }
 
 async function testMemoryRecallAuditLogsZeroHits() {
@@ -1709,13 +1738,13 @@ async function testMemoryRecallAuditLogsZeroHits() {
     vectorEnabled: boolean;
     rawHitCount: number;
     injectedHitCount: number;
-    injectedPartitionCounts: { impression: number; event: number; skill: number };
+    injectedPartitionCounts: { impression: number; event: number; resultEvent: number; processEvent: number; skill: number };
   };
   assert.equal(metadata.algorithm, "sqlite_fts_relation_version");
   assert.equal(metadata.vectorEnabled, false);
   assert.equal(metadata.rawHitCount, 0);
   assert.equal(metadata.injectedHitCount, 0);
-  assert.deepEqual(metadata.injectedPartitionCounts, { impression: 0, event: 0, skill: 0 });
+  assert.deepEqual(metadata.injectedPartitionCounts, { impression: 0, event: 0, resultEvent: 0, processEvent: 0, skill: 0 });
 }
 
 async function testAttentionBudgetTrimsHistoryButKeepsJson() {
@@ -2108,7 +2137,8 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     relationId: "event:policy-user:file:policy:1",
     title: "Policy event one",
     summary: "policy recall event one",
-    detail: "First event memory for memory policy recall."
+    detail: "First event memory for memory policy recall.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-memory-policy-capped", eventKind: "result", outcome: "completed" })
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "event",
@@ -2117,7 +2147,8 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     relationId: "event:policy-user:file:policy:2",
     title: "Policy event two",
     summary: "policy recall event two",
-    detail: "Second event memory for memory policy recall."
+    detail: "Second event memory for memory policy recall.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-memory-policy-capped", eventKind: "process" })
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
@@ -2159,10 +2190,12 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
   });
   const cappedFileInput = cappedFake.inputs.find((input) => input.tools.some((tool) => tool.name === "searchFiles"));
   const cappedMemoryMessage = cappedFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
-  const cappedMemoryPayload = JSON.parse(cappedMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
+  const cappedMemoryPayload = JSON.parse(cappedMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceResultEvents: unknown[]; currentWorkspaceRelevantProcessEvents: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(cappedMemoryPayload.crossWorkspaceImpressionMemory.length, 1);
-  assert.equal(cappedMemoryPayload.currentWorkspaceEventMemory.length, 1);
+  assert.equal(cappedMemoryPayload.currentWorkspaceResultEvents.length, 1);
+  assert.equal(cappedMemoryPayload.currentWorkspaceRelevantProcessEvents.length, 1);
   assert.equal(cappedMemoryPayload.currentWorkspaceSkillMemory.length, 1);
+  assert.equal((cappedMemoryMessage?.content ?? "").includes("metadataJson"), false);
 
   updateWorkspaceMemoryPolicy(repos, "file", {
     eventRecallEnabled: false,
@@ -2185,14 +2218,15 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
   });
   const disabledFileInput = disabledFake.inputs.find((input) => input.tools.some((tool) => tool.name === "searchFiles"));
   const disabledMemoryMessage = disabledFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
-  const disabledMemoryPayload = JSON.parse(disabledMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
+  const disabledMemoryPayload = JSON.parse(disabledMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceResultEvents: unknown[]; currentWorkspaceRelevantProcessEvents: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(disabledMemoryPayload.crossWorkspaceImpressionMemory.length, 1);
-  assert.equal(disabledMemoryPayload.currentWorkspaceEventMemory.length, 0);
+  assert.equal(disabledMemoryPayload.currentWorkspaceResultEvents.length, 0);
+  assert.equal(disabledMemoryPayload.currentWorkspaceRelevantProcessEvents.length, 0);
   assert.equal(disabledMemoryPayload.currentWorkspaceSkillMemory.length, 0);
   assert.equal(disabledOutput.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Policy event")), false);
   assert.equal(disabledOutput.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Policy skill")), false);
 
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 55; index += 1) {
     repos.createMemory({
       memoryType: "event",
       userId: "policy-user",
@@ -2200,7 +2234,8 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
       relationId: `event:policy-user:file:policy:bulk:${index}`,
       title: `Policy bulk event ${index}`,
       summary: `search files policy recall bulk event ${index}`,
-      detail: "Bulk event memory used to prove workspace policy can raise recall above the repository default."
+      detail: "Bulk event memory used to prove layered result-event recall is bounded without raw transcript injection.",
+      metadataJson: JSON.stringify({ source: "test", conversationId: "conv-memory-policy-raised-limit", eventKind: "result", outcome: "completed" })
     }, "creator", "creator");
     repos.createMemory({
       memoryType: "skill",
@@ -2246,7 +2281,10 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     }
   });
   const raisedLimitFileSession = raisedLimitOutput.workspaceTrace.find((session) => session.workspaceId === "file");
-  assert.equal(raisedLimitFileSession?.localContext.recalledEventMemories.length, 9);
+  assert.equal(raisedLimitFileSession?.localContext.recalledEventMemories.filter((memory) => metadataOf(memory).eventKind === "result").length, 50);
+  const raisedProcessEvents = raisedLimitFileSession?.localContext.recalledEventMemories.filter((memory) => metadataOf(memory).eventKind === "process") ?? [];
+  assert.equal(raisedProcessEvents.length >= 1, true);
+  assert.equal(raisedProcessEvents.length <= 8, true);
   assert.equal(raisedLimitFileSession?.localContext.recalledSkillMemories.length, 9);
 }
 

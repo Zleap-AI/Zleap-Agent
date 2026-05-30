@@ -636,12 +636,12 @@ function ConceptIntroTab() {
           <article>
             <strong>Impression</strong>
             <span>记人和 Agent 自我</span>
-            <p>Agent 自主判断是否写入稳定偏好、背景和长期约束；agent self impression 由 creator 控制。</p>
+            <p>Agent 自主判断是否写入稳定偏好、背景和长期约束；召回时固定注入最新 20 条投影视图。</p>
           </article>
           <article>
             <strong>Event</strong>
             <span>记事情过程和结果</span>
-            <p>由 runtime hook 按会话窗口和 workspace 退出自动提取；模型没有事件写入工具。</p>
+            <p>由 runtime hook 自动提取；结果事件保留旧结果时间线，过程事件只按当前任务相关性少量召回。</p>
           </article>
           <article>
             <strong>Skill</strong>
@@ -678,7 +678,7 @@ function ConceptIntroTab() {
             ["system", "系统提示词、人格提示词、内部运行策略"],
             ["workspace", "当前 workspace 说明、manifest、memory policy"],
             ["tools", "请求 tools 数组的可检查快照；不复制进 system prompt"],
-            ["memory", "impression、event、skill 分区召回"],
+            ["memory", "impression 固定 20 条、结果事件时间线、相关过程事件、skill 分区投影"],
             ["history", "同 workspace 持续本地记录、任务包、完成结果、近期工具证据"],
             ["user", "干净用户消息"],
             ["tool_result", "后续调用收到的工具结果"],
@@ -1595,7 +1595,8 @@ function contextSubsectionLabel(key: string): string {
     toolCount: "工具数量",
     tools: "本次可调用工具",
     crossWorkspaceImpressionMemory: "跨工作空间印象记忆",
-    currentWorkspaceEventMemory: "当前工作空间事件记忆",
+    currentWorkspaceResultEvents: "当前工作空间结果事件记忆",
+    currentWorkspaceRelevantProcessEvents: "当前工作空间相关过程事件记忆",
     currentWorkspaceSkillMemory: "当前工作空间经验记忆",
     messages: "本地对话消息",
     currentTask: "当前结构化任务",

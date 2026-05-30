@@ -2,6 +2,29 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:25 +08:00
+
+Purpose:
+- Implement the clarified long-conversation memory recall strategy and make impression recall fixed rather than query-selective.
+
+Changed:
+- Changed automatic runtime recall so impression memory always loads up to 20 latest effective user/agent impressions for the current scope without SQLite FTS filtering.
+- Split event recall into up to 50 latest result events plus up to 8 SQLite FTS-matched process events for the active `userId + workspaceId`.
+- Increased raw local conversation context to 20 messages/records and kept older long-conversation continuity in projected event memory instead of raw transcript injection.
+- Changed `runtime_context.memory` and the `memory` context segment to inject compact projected memory views rather than raw `MemoryRow` records, full `detail`, full `metadataJson`, or evidence arrays.
+- Updated the Chat context labels and concept intro UI to show result-event/process-event memory sections.
+- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, `docs/03-memory-model.md`, and `docs/07-context-and-prompt-contracts.md` with the fixed-impression and long-conversation recall rules.
+- Added/updated tests for fixed impression recall, result/process event recall, projection shape, audit partition counts, and 50-result-event behavior.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that introduced this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 07:13 +08:00
 
 Purpose:

@@ -2,6 +2,10 @@ import type { AgentRunInput, MemoryRow, WorkspaceDefinition, WorkspaceLocalConte
 import { createId, nowIso } from "./id";
 import { Repositories } from "../db/repositories";
 
+const IMPRESSION_RECALL_LIMIT = 20;
+const RESULT_EVENT_RECALL_LIMIT = 50;
+const PROCESS_EVENT_RECALL_LIMIT = 8;
+
 export class WorkspaceRuntime {
   private readonly universalRuntimeMemoryToolNames = new Set([
     "searchMemory",
@@ -83,8 +87,9 @@ export class WorkspaceRuntime {
       agentId: run.agentId,
       workspaceId: workspace.id,
       query,
-      impressionLimit: 8,
-      eventLimit: workspace.memoryPolicy.eventRecallEnabled ? workspace.memoryPolicy.maxEventMemories : 0,
+      impressionLimit: IMPRESSION_RECALL_LIMIT,
+      resultEventLimit: workspace.memoryPolicy.eventRecallEnabled ? RESULT_EVENT_RECALL_LIMIT : 0,
+      processEventLimit: workspace.memoryPolicy.eventRecallEnabled ? PROCESS_EVENT_RECALL_LIMIT : 0,
       skillLimit: workspace.memoryPolicy.skillRecallEnabled ? workspace.memoryPolicy.maxSkillMemories : 0
     };
     const rawRecalled = this.repos.recallMemories(recallInput);
@@ -107,7 +112,8 @@ export class WorkspaceRuntime {
         agentId: run.agentId,
         workspaceId: workspace.id,
         impressionLimit: recallInput.impressionLimit,
-        eventLimit: recallInput.eventLimit,
+        resultEventLimit: recallInput.resultEventLimit,
+        processEventLimit: recallInput.processEventLimit,
         skillLimit: recallInput.skillLimit
       },
       memoryPolicy: workspace.memoryPolicy,
@@ -115,17 +121,22 @@ export class WorkspaceRuntime {
       rawPartitionCounts: {
         impression: rawImpressions.length,
         event: rawEvents.length,
+        resultEvent: rawEvents.filter((memory) => this.eventKindOf(memory) === "result").length,
+        processEvent: rawEvents.filter((memory) => this.eventKindOf(memory) === "process").length,
         skill: rawSkills.length
       },
       injectedHitCount: recalled.length,
       injectedPartitionCounts: {
         impression: recalledImpressions.length,
         event: recalledEventMemories.length,
+        resultEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "result").length,
+        processEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "process").length,
         skill: recalledSkillMemories.length
       },
       hitIds: {
         impressions: recalledImpressions.map((memory) => memory.id),
-        events: recalledEventMemories.map((memory) => memory.id),
+        resultEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "result").map((memory) => memory.id),
+        processEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "process").map((memory) => memory.id),
         skills: recalledSkillMemories.map((memory) => memory.id)
       }
     });
@@ -176,12 +187,21 @@ export class WorkspaceRuntime {
     const policy = workspace.memoryPolicy;
     const impressions = memories.filter((memory) => memory.memoryType === "impression");
     const events = policy.eventRecallEnabled
-      ? memories.filter((memory) => memory.memoryType === "event").slice(0, Math.max(0, policy.maxEventMemories))
+      ? memories.filter((memory) => memory.memoryType === "event")
       : [];
     const skills = policy.skillRecallEnabled
       ? memories.filter((memory) => memory.memoryType === "skill").slice(0, Math.max(0, policy.maxSkillMemories))
       : [];
     return [...impressions, ...events, ...skills];
+  }
+
+  private eventKindOf(memory: MemoryRow): string {
+    try {
+      const metadata = JSON.parse(memory.metadataJson || "{}") as { eventKind?: unknown };
+      return typeof metadata.eventKind === "string" ? metadata.eventKind : "";
+    } catch {
+      return "";
+    }
   }
 
   private createResult(task: WorkspaceTask, localContext: WorkspaceLocalContext): WorkspaceResult {

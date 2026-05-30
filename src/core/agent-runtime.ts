@@ -674,7 +674,7 @@ export class AgentRuntime {
   }
 
   private selectLocalHistory(conversationId: string, workspaceId: string, userId: string, userRole: AgentRunInput["userRole"]): Array<{ role: string; content: string }> {
-    if (workspaceId === "main") return this.repos.listMessages(conversationId, 12).map((message) => ({
+    if (workspaceId === "main") return this.repos.listMessages(conversationId, 20).map((message) => ({
       role: message.role,
       content: message.content
     }));
@@ -726,7 +726,7 @@ export class AgentRuntime {
         }
       }
     }
-    return localMessages.slice(-12);
+    return localMessages.slice(-20);
   }
 
   private async executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): Promise<{ toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string }> {

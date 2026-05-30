@@ -2,10 +2,12 @@ import type { AgentConfig, AgentRunInput, ContextSegment, LLMCallSnapshot, LLMMe
 import { AttentionBudget, AttentionBudgetManager, DEFAULT_ATTENTION_BUDGET, estimateTokens } from "./attention-budget";
 import { createId } from "./id";
 
-function memoryPartition(memories: MemoryRow[]): { impressions: MemoryRow[]; eventMemories: MemoryRow[]; skillMemories: MemoryRow[] } {
+function memoryPartition(memories: MemoryRow[]): { impressions: MemoryRow[]; resultEvents: MemoryRow[]; processEvents: MemoryRow[]; skillMemories: MemoryRow[] } {
+  const eventMemories = memories.filter((memory) => memory.memoryType === "event");
   return {
     impressions: memories.filter((memory) => memory.memoryType === "impression"),
-    eventMemories: memories.filter((memory) => memory.memoryType === "event"),
+    resultEvents: eventMemories.filter((memory) => memoryEventKind(memory) === "result"),
+    processEvents: eventMemories.filter((memory) => memoryEventKind(memory) === "process"),
     skillMemories: memories.filter((memory) => memory.memoryType === "skill")
   };
 }
@@ -25,6 +27,77 @@ function parseJsonOrRaw(value: string): unknown {
   } catch {
     return value;
   }
+}
+
+function parseRecord(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value || "{}") as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function memoryEventKind(memory: MemoryRow): string {
+  const metadata = parseRecord(memory.metadataJson);
+  return typeof metadata.eventKind === "string" ? metadata.eventKind : "";
+}
+
+function truncate(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function projectMemoryBase(memory: MemoryRow): Record<string, unknown> {
+  return {
+    id: memory.id,
+    title: memory.title,
+    summary: memory.summary,
+    relationId: memory.relationId,
+    version: memory.version,
+    updatedAt: memory.updatedAt
+  };
+}
+
+function projectImpression(memory: MemoryRow): Record<string, unknown> {
+  return {
+    ...projectMemoryBase(memory),
+    scope: memory.userId ? "user" : "agent"
+  };
+}
+
+function projectResultEvent(memory: MemoryRow): Record<string, unknown> {
+  const metadata = parseRecord(memory.metadataJson);
+  return {
+    ...projectMemoryBase(memory),
+    eventKind: "result",
+    outcome: metadata.outcome,
+    source: metadata.source,
+    conversationId: metadata.conversationId
+  };
+}
+
+function projectProcessEvent(memory: MemoryRow): Record<string, unknown> {
+  const metadata = parseRecord(memory.metadataJson);
+  return {
+    ...projectMemoryBase(memory),
+    eventKind: "process",
+    source: metadata.source,
+    conversationId: metadata.conversationId,
+    detailSnippet: truncate(memory.detail, 480)
+  };
+}
+
+function projectSkill(memory: MemoryRow): Record<string, unknown> {
+  const metadata = parseRecord(memory.metadataJson);
+  return {
+    ...projectMemoryBase(memory),
+    procedure: Array.isArray(metadata.procedure) ? metadata.procedure : undefined,
+    appliesWhen: Array.isArray(metadata.appliesWhen) ? metadata.appliesWhen : undefined,
+    avoidWhen: Array.isArray(metadata.avoidWhen) ? metadata.avoidWhen : undefined,
+    confidence: metadata.confidence,
+    detailSnippet: truncate(memory.detail, 480)
+  };
 }
 
 function toolContext(tools: ToolDefinition[]): unknown[] {
@@ -176,9 +249,10 @@ export class ContextBuilder {
         segmentType: "memory",
         title: "记忆",
         content: JSON.stringify({
-          crossWorkspaceImpressionMemory: partitionedMemory.impressions,
-          currentWorkspaceEventMemory: partitionedMemory.eventMemories,
-          currentWorkspaceSkillMemory: partitionedMemory.skillMemories
+          crossWorkspaceImpressionMemory: partitionedMemory.impressions.map(projectImpression),
+          currentWorkspaceResultEvents: partitionedMemory.resultEvents.map(projectResultEvent),
+          currentWorkspaceRelevantProcessEvents: partitionedMemory.processEvents.map(projectProcessEvent),
+          currentWorkspaceSkillMemory: partitionedMemory.skillMemories.map(projectSkill)
         }, null, 2),
         sortOrder: 30
       },
@@ -264,7 +338,8 @@ export class PromptAssembler {
         name: "runtime_context.memory",
         content: JSON.stringify(parseSegment("memory", {
           crossWorkspaceImpressionMemory: [],
-          currentWorkspaceEventMemory: [],
+          currentWorkspaceResultEvents: [],
+          currentWorkspaceRelevantProcessEvents: [],
           currentWorkspaceSkillMemory: []
         }), null, 2)
       },

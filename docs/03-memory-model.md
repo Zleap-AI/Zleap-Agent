@@ -358,7 +358,11 @@ workspaceId + semantic query
 
 然后注入可用技能。
 
-event/skill 的召回数量由当前 active workspace 的 `memoryPolicyJson` 控制。`maxEventMemories` 和 `maxSkillMemories` 不只是 prompt 裁剪参数，也必须下推到 SQLite FTS / relation-version 召回层；否则 repository 的默认 limit 会让 Web UI 看到的 workspace 策略和模型实际收到的 memory 不一致。
+event/skill 的召回开关由当前 active workspace 的 `memoryPolicyJson` 控制。Event recall 不再使用单一 `maxEventMemories` 作为统一上限，而是采用固定分层策略：结果事件最多约 50 条，过程事件最多约 8 条并按当前任务文本做 SQLite FTS 相关性筛选。Skill recall 仍由 `maxSkillMemories` 控制。
+
+长对话上下文注入遵循“原始近邻 + 事件投影”的策略：最近 20 条本地对话保留详细文本；更早的上下文通过 result event 时间线和相关 process event 投影视图进入 prompt。召回 memory 注入模型前必须转为 compact projection，不把完整 `detail`、完整 `metadataJson`、证据数组或原始对话窗口重新塞回上下文。
+
+Impression recall 不做 query 选择性筛选，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 表达对人和 agent 自我的稳定认知，预期数量有自然上限，不像 event log 一样无限增长。
 
 ## Memory 写入权限
 

@@ -17,7 +17,7 @@ Second-level sections live inside those categories:
 
 - `system`: base system prompt, personality prompt, and internal runtime strategy. Runtime policy is not a separate top-level context category.
 - `workspace`: active workspace description, instructions, tool instructions, manifest, memory policy, current callable tool definitions, and for `main` only the available workspace manifest list.
-- `memory`: cross-workspace impression memory, current-workspace event memory, and current-workspace skill memory.
+- `memory`: cross-workspace impression memory, current-workspace result events, current-workspace relevant process events, and current-workspace skill memory.
 - `history`: local conversation messages, current structured task, completed workspace results, and recent local tool evidence.
 - `user`: the clean current user message.
 
@@ -168,7 +168,7 @@ impression 是跨 workspace 的。
 - 当前用户的长期背景。
 - agent self impression。
 
-注意：impression 也需要召回和筛选，不应该全部注入。
+注意：impression 不按当前 query 做选择性召回，也不全部注入。runtime 固定注入当前 user / agent scope 下最新有效的前 20 条 compact projection。
 
 推荐格式：
 
@@ -215,11 +215,16 @@ You cannot directly use child workspace tools.
 
 ## 6. Recalled Workspace Memory
 
-workspace memory 包含两类：
+workspace memory 包含三类：
 
 ```text
-Event Memory:
+Result Event Memory:
   scoped by userId + workspaceId
+  latest effective results, about 50 rows
+
+Relevant Process Event Memory:
+  scoped by userId + workspaceId
+  selected by current task/query through SQLite FTS
 
 Skill Memory:
   scoped by workspaceId
@@ -230,12 +235,17 @@ Skill Memory:
 推荐格式：
 
 ```text
-Relevant event memories:
+Result event memories:
 - [event/result] Last time in this workspace, this user needed pnpm test instead of npm test.
+
+Relevant process event memories:
+- [event/process] Prior related run found command setup issues before using the file tool.
 
 Relevant skill memories:
 - [skill] In Node projects, inspect package.json and lockfiles before choosing package manager commands.
 ```
+
+`runtime_context.memory` must be a projected view, not a raw `MemoryRow[]` dump. Do not inject full `detail`, full `metadataJson`, raw evidence arrays, or source transcript windows; those remain in SQLite, workspace sessions, tool calls, and audit/debug views.
 
 ## 7. Active Task Context
 
@@ -330,10 +340,11 @@ type AttentionBudget = {
 
 1. system 和 personality 稳定但尽量短。
 2. workspace instructions 必须准确，不能过长。
-3. event memory 只注入与当前用户和 workspace 相关的最新版本。
-4. skill memory 数量要少，优先高置信度和高相关度。
-5. tool result 长输出必须摘要。
-6. local history 只保留当前 workspace 的必要片段。
+3. impression memory 固定注入最新有效 20 条投影，不做 query 选择性召回。
+4. event memory 分层注入：约 50 条 result event 保留旧结果时间线，少量 process event 按当前任务相关性召回。
+5. skill memory 数量要少，优先高置信度和高相关度。
+6. tool result 长输出必须摘要。
+7. local history 只保留当前 workspace 的必要片段。
 
 ## Runtime 不变量
 
