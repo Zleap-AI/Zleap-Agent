@@ -1,0 +1,436 @@
+# Context and Prompt Contracts
+
+## 2026-05-30 更新：子 workspace 上下文交付契约
+
+子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`。
+
+main workspace 可以看到的返回内容是 `status`、`summary`、`artifacts`、`observations`、`errors` 和 `suggestedNextSteps`。这些字段用于继续编排、决定是否进入下一个 workspace、向用户提问，或生成最终答复。
+
+子 workspace 内部保留的内容包括原始工具输出、完整 tool call 参数和结果、召回的 event/skill、局部 scratch/evidence、审计日志和 memory 提取证据。这些内容进入 trace/debug UI，而不是默认进入 main workspace 的 prompt。这样 main workspace 得到的是可决策的交付物，不会被子 workspace 的全部执行噪声污染。
+
+完整 workspace registry 只属于 main workspace 的编排视野。子 workspace 不接收 sibling workspace 清单，只接收自己的 active manifest；如果它判断需要其他 workspace，应该把这个判断写进 `suggestedNextSteps`，由 main workspace 决定下一次切换。
+
+`running` 只能表示一个 `WorkspaceSession` 仍在执行中。它不能作为 `exitWorkspace` 的交付状态；runtime 必须拒绝这种退出请求，并把失败作为 tool result 记录在当前子 workspace 里。
+
+## 为什么需要契约
+
+Zleap 的核心不是让模型获得更多上下文，而是让模型获得正确上下文。
+
+因此，prompt 和 context 不能临时拼接。runtime 必须明确每一层内容的来源、顺序、作用和隔离边界。
+
+如果没有契约，workspace 设计会退化成普通大上下文 agent：
+
+```text
+所有 system rules
+所有 personality
+所有 tools
+所有 memory
+所有 history
+全部塞给模型
+```
+
+这正是 Zleap 要避免的设计。
+
+## Context 层级
+
+推荐将一次模型调用的上下文分为以下层级：
+
+```text
+1. Base System Contract
+2. Agent Personality Contract
+3. Runtime Policy Contract
+4. Cross-workspace Impression Context
+5. Active Workspace Contract
+6. Recalled Workspace Memory
+7. Active Task Context
+8. Local Conversation Slice
+9. Tool Results
+```
+
+不是每一层都必须很长，但每一层都必须有清晰边界。
+
+## 1. Base System Contract
+
+Base system contract 是 agent 最底层规则。
+
+它定义：
+
+- agent 的基本行为边界。
+- 如何遵守 runtime。
+- 如何处理工具调用。
+- 如何处理不确定性。
+- 如何遵守权限和安全规则。
+
+这个层级在 workspace 切换时不变。
+
+示意：
+
+```text
+You are an agent running inside Zleap runtime.
+You must only use tools available in the active workspace.
+You must not assume access to tools outside the active workspace.
+You must follow runtime memory and permission policies.
+```
+
+## 2. Agent Personality Contract
+
+personality contract 定义 agent 的人格、沟通风格和长期定位。
+
+它可以来自 agent 创建者配置。
+
+这个层级在 workspace 切换时不变。
+
+示意：
+
+```text
+You are pragmatic, precise, and task-oriented.
+You keep the user informed without unnecessary verbosity.
+You prefer structured progress over vague suggestions.
+```
+
+personality 不应该包含具体 workspace 的工具说明。
+
+## 3. Runtime Policy Contract
+
+runtime policy contract 是当前运行环境的规则。
+
+它可能包含：
+
+- 当前 userId。
+- 当前 conversationId。
+- 当前 active workspace。
+- memory 写入限制。
+- tool 调用限制。
+- 需要用户确认的风险操作。
+
+示意：
+
+```text
+Current userId: user_123
+Current workspace: cli
+You may only call tools registered to cli workspace.
+You may request memory writes, but runtime may reject them.
+```
+
+## 4. Cross-workspace Impression Context
+
+impression 是跨 workspace 的。
+
+它包括：
+
+- 当前用户的长期偏好。
+- 当前用户的长期背景。
+- agent self impression。
+
+注意：impression 也需要召回和筛选，不应该全部注入。
+
+推荐格式：
+
+```text
+Relevant user impressions:
+- User prefers Chinese for architectural discussions.
+- User wants documentation confirmed before implementation.
+
+Agent self impressions:
+- This agent follows workspace-based capability separation.
+- This agent treats userId isolation as a core invariant.
+```
+
+## 5. Active Workspace Contract
+
+active workspace contract 是当前 workspace 的说明。
+
+它定义：
+
+- workspace id。
+- workspace 目标。
+- workspace 能力边界。
+- 可用工具。
+- 工具调用说明。
+- workspace-specific constraints。
+
+例如 CLI workspace：
+
+```text
+Active workspace: cli
+Purpose: execute shell commands and inspect terminal output.
+You should use CLI tools only for command-line tasks.
+Do not edit files directly in this workspace unless a tool explicitly supports it.
+```
+
+主 workspace 的 contract 则应该强调编排：
+
+```text
+Active workspace: main
+Purpose: understand user goals, choose workspaces, and integrate results.
+You can see workspace manifests.
+You cannot directly use child workspace tools.
+```
+
+## 6. Recalled Workspace Memory
+
+workspace memory 包含两类：
+
+```text
+Event Memory:
+  scoped by userId + workspaceId
+
+Skill Memory:
+  scoped by workspaceId
+```
+
+注入时应分开呈现，避免模型混淆事实和方法。
+
+推荐格式：
+
+```text
+Relevant event memories:
+- [event/result] Last time in this workspace, this user needed pnpm test instead of npm test.
+
+Relevant skill memories:
+- [skill] In Node projects, inspect package.json and lockfiles before choosing package manager commands.
+```
+
+## 7. Active Task Context
+
+active task context 是当前任务包。
+
+进入子 workspace 时，主 workspace 应构造结构化任务，而不是直接传完整对话。
+
+```text
+Task objective:
+  Run the project test suite and report failures.
+
+Constraints:
+  - Do not modify files.
+  - Use the current project directory.
+
+Expected output:
+  A structured summary of command results and next suggested workspace.
+```
+
+这个 task context 是子 workspace 的主要目标来源。
+
+## 8. Local Conversation Slice
+
+local conversation slice 是当前 workspace 内与本任务直接相关的对话片段。
+
+它不等于完整 conversation history。
+
+选择策略：
+
+- 当前用户请求必须包含。
+- 主 workspace 给子 workspace 的任务包必须包含。
+- 当前 workspace 内最近 tool call 和模型回复可以包含。
+- 其他 workspace 的细节应通过 workspace result summary 传递。
+
+## 9. Tool Results
+
+tool result 是 workspace-local context 的一部分。
+
+原则：
+
+- tool result 不应无限累积。
+- 长输出需要摘要。
+- 原始输出可以保存在 artifact 或 audit log。
+- 注入模型的应该是与下一步决策相关的结果。
+
+## Prompt 装配顺序
+
+推荐装配顺序：
+
+```text
+system:
+  Base System Contract
+  Agent Personality Contract
+  Runtime Policy Contract
+
+developer/runtime:
+  Active Workspace Contract
+  Tool Usage Instructions
+
+context:
+  Cross-workspace Impression Context
+  Recalled Workspace Memory
+  Active Task Context
+  Local Conversation Slice
+  Tool Results
+```
+
+不同 LLM provider 的消息角色可能不同，但逻辑层级应该保持一致。
+
+## 注意力预算
+
+Zleap 应该把上下文窗口当成预算，而不是仓库。
+
+可以定义一个 attention budget：
+
+```ts
+type AttentionBudget = {
+  system: number;
+  personality: number;
+  policy: number;
+  impression: number;
+  workspaceInstructions: number;
+  eventMemory: number;
+  skillMemory: number;
+  taskContext: number;
+  localHistory: number;
+  toolResults: number;
+};
+```
+
+推荐原则：
+
+1. system 和 personality 稳定但尽量短。
+2. workspace instructions 必须准确，不能过长。
+3. event memory 只注入与当前用户和 workspace 相关的最新版本。
+4. skill memory 数量要少，优先高置信度和高相关度。
+5. tool result 长输出必须摘要。
+6. local history 只保留当前 workspace 的必要片段。
+
+## Runtime 不变量
+
+这些规则后续应该写成测试。
+
+### Invariant 1: identity stable
+
+workspace 切换不能改变：
+
+- LLM model identity。
+- system prompt。
+- personality prompt。
+- agent self impression。
+
+### Invariant 2: tools scoped
+
+模型只能调用 active workspace 中注册的 tools。
+
+即使模型输出了其他 tool call，runtime 也必须拒绝。
+
+### Invariant 3: event memory scoped
+
+event memory 召回必须满足：
+
+```text
+event.userId == currentUserId
+event.workspaceId == activeWorkspaceId
+```
+
+### Invariant 4: skill memory workspace scoped
+
+skill memory 召回必须满足：
+
+```text
+skill.workspaceId == activeWorkspaceId
+```
+
+skill 不按普通 userId 隔离，但必须经过脱敏和泛化。
+
+### Invariant 5: main workspace is not all-tools workspace
+
+main workspace 只能看到 workspace manifest。
+
+它不能直接拥有所有子 workspace 的 tools。
+
+### Invariant 6: child workspace returns structured result
+
+子 workspace 退出时必须返回 `WorkspaceResult`。
+
+主 workspace 不应该依赖解析大段自然语言来理解子任务状态。
+
+### Invariant 7: memory writes are policy-gated
+
+模型可以提出写 memory 的请求，但最终写入必须由 runtime policy 决定。
+
+## 模型循环
+
+每个 workspace 内可以采用统一的执行循环：
+
+```text
+Observe
+  - read task
+  - read local memory
+  - read tool results
+
+Decide
+  - answer directly
+  - call tool
+  - request memory write
+  - ask user
+  - return workspace result
+
+Act
+  - execute tool through runtime
+  - update local context
+
+Verify
+  - inspect tool result
+  - check task status
+  - decide next step
+```
+
+这个循环属于 runtime 能力，不等于让模型无限自主运行。
+
+runtime 需要控制：
+
+- 最大循环次数。
+- 最大 tool call 次数。
+- 最大 token 使用。
+- 是否允许高风险 tool。
+- blocked 条件。
+
+## Workspace 切换契约
+
+主 workspace 进入子 workspace 时：
+
+```text
+Input:
+  WorkspaceTask
+
+Runtime loads:
+  WorkspaceDefinition
+  Workspace tools
+  Event memory
+  Skill memory
+  Local context
+
+Output:
+  WorkspaceResult
+```
+
+主 workspace 只能通过 `WorkspaceResult` 继续编排。
+
+子 workspace 不应该直接修改主 workspace 的内部 planning state，除非通过明确 result 字段返回。
+
+## 失败和阻塞
+
+workspace 可以返回四类状态：
+
+```text
+completed
+failed
+blocked
+needs_user_input
+```
+
+语义：
+
+- completed：子任务完成。
+- failed：子任务失败，但已经有明确失败原因。
+- blocked：缺少权限、环境或必要信息，无法继续。
+- needs_user_input：需要用户决策。
+
+主 workspace 根据状态决定下一步。
+
+## 文档到代码的映射
+
+这份文档后续应该映射为：
+
+- `ContextBuilder`
+- `PromptAssembler`
+- `AttentionBudgetManager`
+- `WorkspaceSession`
+- `RuntimeInvariantTests`
+
+尤其是 runtime invariants 应该在实现时写成单元测试，避免框架逐渐变成普通大上下文 agent。

@@ -1,0 +1,306 @@
+# Zleap Web UI + Runtime Master Plan
+
+## Summary
+
+- This file is the long-term guide for the Zleap project and must be read before code changes.
+- If a future change materially affects architecture, data model, UI, runtime, LLM protocol, or memory strategy, update this file before or alongside the code.
+- The root README is not a source of truth. Core design docs and this master plan guide development.
+- The architecture is a headless TypeScript agent core, Node API server, React/Vite Web UI, and SQLite with Raw SQL.
+
+## Key Changes
+
+- Web UI:
+  - The visible interface must use Chinese by default.
+  - Top-level tabs: `对话`, `工作空间`, and `记忆`.
+  - `对话` uses three columns: agent/LLM/prompt configuration, chatbot conversation, and workspace/context stack inspection.
+  - Assistant responses must support streaming output with a character-by-character typing feel.
+  - Chat messages render Markdown for common assistant output such as headings, lists, quotes, links, inline code, and fenced code blocks.
+  - Chat errors must offer a retry action for the failed user message.
+  - The Chat page must support clearing only the current conversation while preserving cached settings and API key.
+  - Each user chat message should keep the context stack snapshot for that turn; clicking a user message shows that historical context stack in the right panel.
+  - Chat composer keyboard behavior: Enter sends the message; Ctrl+Enter inserts a newline.
+  - `工作空间` manages workspaces. A workspace is tools plus tool instructions.
+  - `记忆` is a database-like table with filtering, create, edit, and delete.
+  - The Memory editor must expose `metadataJson`, show policy/save/delete errors directly, validate JSON before save, and provide policy-aware creation templates for impression/event/skill records.
+  - Browser local storage should remember current UI/session state, including agent settings, LLM base URL/model/API key, conversation id, current messages, and the latest context stack. API keys are still not persisted to SQLite or source files.
+  - Clearing the current conversation from the Web UI should also request server-side conversation deletion for that conversation's messages, workspace sessions, LLM calls, context segments, tool calls, and approval requests, while preserving audit logs.
+- Runtime:
+  - `AgentRuntime` receives `userId`, `conversationId`, and `message`, then drives main workspace orchestration.
+  - A `conversationId` is owned by exactly one `userId + agentId` pair. Runtime/repository entry must reject attempts to reuse an existing conversation id with a different user or agent, so history, context snapshots, workspace sessions, and event extraction cannot cross tenants.
+  - `WorkspaceRuntime` executes real capability workspaces such as `main`, `file`, and `cli`; memory is not a standalone workspace.
+  - Every workspace entry creates a structured `WorkspaceTask`, `WorkspaceLocalContext`, and initial running `WorkspaceResult`; all are persisted on `workspace_sessions` and exposed in trace/debug UI.
+  - `WorkspaceLocalContext` captures the active workspace manifest, memory policy, parent context summary, recalled impression/event/skill partitions, available tool binding metadata, and recent tool calls produced inside the current workspace session.
+  - `ContextBuilder` stores full context segment snapshots.
+  - Context assembly uses an explicit `AttentionBudgetManager` before prompt assembly. Budgeting must preserve valid JSON for structured runtime partitions such as memory, task, history, workspace results, and tool results, so context trimming does not silently erase parsed payloads.
+  - `PromptAssembler` produces OpenAI-compatible chat messages.
+  - User messages stay clean. System, personality, policy, and workspace instructions are system-level partitions.
+  - Final user-facing assistant replies must not expose runtime, workspace, context stack, memory injection, or tool orchestration details. Those mechanics are internal unless the user explicitly asks to inspect them.
+  - The default personality prompt guides natural human-like replies. It must not mention workspace/context/runtime internals.
+  - Agent stable identity configuration is creator-gated. Persisted agent name, system prompt, personality prompt, default model, and default base URL are architecture/identity settings, not ordinary per-user chat preferences.
+  - Main workspace must receive the full available workspace manifest list as runtime-injected context. It should not call a `listWorkspaces` tool to discover workspaces.
+  - Each turn starts in the `main` workspace. The initial LLM call can use main orchestration tools plus the workspace's memory tools; child capability tools are not exposed until `main` explicitly calls `enterWorkspace`.
+  - Local conversation history is workspace-scoped. `main` may receive a bounded recent conversation slice for orchestration, but child workspaces must not receive the full global chat history; they rely on `WorkspaceTask`, `WorkspaceLocalContext`, recalled memory, recent local tool evidence, and explicit `WorkspaceResult` summaries.
+  - Workspace registry visibility is also scoped: `main` receives the full workspace manifest list for orchestration, while child workspaces receive only their active workspace manifest through the active workspace contract and must return to `main` instead of choosing sibling workspaces directly.
+  - When `enterWorkspace` succeeds, runtime creates a structured child `WorkspaceSession`, switches the active workspace for follow-up LLM calls, rebuilds context with that workspace's contract/memory/tools, and persists a new inspectable LLM call snapshot for the child workspace.
+  - Child workspaces remain `running` until they call runtime-bound `exitWorkspace` with a structured `WorkspaceResult`; runtime then updates the child `WorkspaceSession`, switches active context back to `main`, rebuilds main context with the returned result, and persists another inspectable LLM call for main integration.
+  - `exitWorkspace` is the only normal handoff from child workspace to main. The handoff payload is `WorkspaceResult`: status, summary, artifacts, observations, errors, and suggestedNextSteps. Raw tool outputs, recalled memory, local scratch reasoning, and detailed evidence stay in the child `WorkspaceSession`, `tool_calls`, `audit_logs`, and memory evidence metadata for debugging rather than being flattened into main context.
+  - `running` is an internal workspace session state only. It must not be accepted as an `exitWorkspace` result status because main can only integrate committed outcomes: completed, failed, blocked, needs_user_input, or needs_approval.
+  - `exitWorkspace` must validate the full `WorkspaceResult` shape before committing exit state. A malformed exit result must fail as a tool call and must not trigger workspace-exit hooks, workspace return-to-main transition, or workspace-exit memory extraction.
+  - The `exitWorkspace` function-call schema must require the same full `WorkspaceResult` fields that runtime validates: `status`, `summary`, `artifacts`, `observations`, `errors`, and `suggestedNextSteps`.
+  - Workspace definitions include first-class manifest metadata: capabilities, input kinds, output kinds, risk level, and whether approval is required. The main workspace receives these manifests rather than raw child tool details.
+  - Workspace creation and editing are creator-gated capability installation operations. Direct HTTP workspace create/update paths must pass actor identity to the repository policy boundary and ordinary users must not be able to alter manifests, tool assignments, risk level, approval flags, or memory policy.
+  - Entering a child workspace is itself a policy-gated runtime action. If the target workspace is high-risk or marked `requiresApproval`, non-creator users must receive a pending approval request and the workspace session must not be created until a matching approved request exists.
+  - Workspace definitions include a `memoryPolicyJson` contract controlling event/skill recall and write behavior plus max recalled event/skill counts.
+  - Runtime must enforce the active workspace memory policy during recall and writes: impressions remain cross-workspace context, user impressions are scoped to the current user, agent self impressions are scoped to the current agent, event/skill memory can be disabled independently, event/skill partitions are capped by `maxEventMemories` and `maxSkillMemories` before prompt assembly, and `eventWriteEnabled`/`skillWriteEnabled` block runtime or tool-requested writes.
+  - Memory/context recall is performed by runtime and injected as a synthetic tool result.
+  - Recalled memory must be partitioned by memory type before prompt assembly: cross-workspace impression memory, active-workspace event memory, and active-workspace skill memory are separate context stack segments and separate fields in the synthetic runtime memory tool result.
+  - Automatic runtime recall must fetch impression, event, and skill partitions separately before applying prompt caps. A crowded skill or impression partition must not consume the global SQL limit and starve active-workspace event recall.
+  - Active workspace task, workspace-local context, and prior workspace results are injected as synthetic runtime tool results, keeping the user message clean while making the execution contract inspectable.
+  - Follow-up LLM calls created during tool loops must persist their own context snapshots, including `tool_result` and `final_messages` segments, so the Web UI can inspect exactly what the model saw after each tool execution.
+  - Runtime runs an `afterAgentTurn` memory lifecycle hook after assistant responses.
+  - Streaming and non-streaming turns must persist the final assistant message before running `afterAgentTurn`, so conversation-window event extraction sees the same completed user/assistant message window in both paths.
+  - Runtime lifecycle hooks are first-class trace events. `beforeAgentTurn`, `afterAgentTurn`, workspace enter/exit hooks, tool call hooks, conversation-window event extraction, and skill extraction are recorded to `audit_logs` and returned in conversation trace.
+  - Workspace exit hooks are tied to real exit semantics: `beforeWorkspaceExit` and `afterWorkspaceExit` are recorded when `exitWorkspace` commits a returned `WorkspaceResult`, not when a session is merely created.
+  - Workspace exit hooks must not run for malformed `exitWorkspace` tool calls that fail result validation.
+  - Workspace exit must also trigger event extraction for the completed child `WorkspaceSession`: write separate process/result event memories scoped to `userId + workspaceId + conversationId + taskId`, include workspace session/result/tool evidence, respect that workspace's event write policy, and audit the extraction separately from the workspace-exit lifecycle hook.
+  - After event extraction, runtime may create a conservative shared skill candidate only when the same batch includes successful process/result event evidence for a non-main workspace. The candidate must be workspace-scoped, desensitized, structured with procedure/appliesWhen/avoidWhen, linked to evidence event ids, pass the same skill quality gate, respect `skillWriteEnabled`, and be audited as `hook.afterSkillExtracted`.
+  - Workspace exit must also record feedback for recalled skill memories used by that workspace session. Runtime increments skill `usageCount`, `successCount`, `failureCount`, and blocked/needs-input counters inside `metadataJson`, attaches the last session/task/conversation outcome, and writes a `skill_usage_recorded` audit log so shared skills can become inspectably better or worse over time.
+  - `afterToolCall` must persist each tool result to `tool_calls` with `workspaceId`, `workspaceSessionId`, and `taskId`, then fold a compact evidence pointer back into the active `WorkspaceSession.localContext.recentToolCalls`, so workspace sessions remain self-contained debug records.
+  - Tool call logs are tenant-scoped audit data. Every `tool_calls` row must carry `userId`, runtime/repository writes must reject a tool log whose `userId` does not match the owning conversation, and trace reads must verify actor ownership unless the actor is creator.
+  - Event memory is generated automatically from conversation windows. The first implementation writes scoped process/result event memories after each 20 stored messages by default, with `userId + workspaceId + conversationId` embedded in stable `relationId` values and preserved in metadata alongside evidence message ids, workspace session ids, task ids, and tool call ids.
+  - Conversation-window event extraction must keep evidence window-scoped: only messages in the completed window, workspace sessions overlapping that window, and tool calls created inside that window may be attached as evidence. Older or later session/tool evidence must not contaminate the event.
+  - User impression memory is written only through an explicit agent memory-write function call such as `writeUserImpression` when the user expresses long-term preferences/background/constraints; runtime must not silently create user impressions from keyword heuristics. Writes remain policy-gated and scoped to the current `userId`.
+  - Impression memory must have exactly one identity scope: either `userId` for user impression or `agentId` for agent self impression. It must not set both, omit both, or set `workspaceId`; ordinary users can write only their own user impression, and agent self impression always requires creator role.
+  - Event memory writes are current-user scoped. Ordinary users and agent runtime paths may only write events whose `userId` equals the current actor/run user; creator role is required for cross-user event maintenance or migration.
+  - Event memory writes must carry valid structured metadata with at least `conversationId` and a recognized `eventKind` (`process`, `result`, `manual`, or `agent_requested`). Runtime `writeEventMemory` requests are enriched with the active workspace, workspace session id, and task id when available, and event relation ids include the conversation id so distinct conversations do not silently deduplicate one another.
+  - Skill memory can be written when the user or agent explicitly requests reusable experience extraction; skill writes are workspace-scoped, user-shared, and must pass runtime quality gates before persistence. The write request must explicitly declare desensitization and provide reusable `procedure`, `appliesWhen`, `avoidWhen`, confidence, and optional `evidenceEventIds`; runtime rejects skill writes that look like private user/project details or insufficiently structured advice. When `evidenceEventIds` are present, each id must point to an existing non-deleted event memory in the same workspace, the same declared conversation if `conversationId` is present, and the current user's events unless the actor is creator.
+  - User/agent active skill triggers must store the actual reusable lesson from the trigger text, not meta-instructions about how to summarize. Runtime should derive a concrete title, summary, procedure, appliesWhen, and avoidWhen from the trigger, attach same-conversation event evidence when available, and still pass the shared-skill quality gate.
+  - Agent-side memory tools are registered into every workspace: `searchMemory`, `updateMemory`, `deleteMemory`, `writeUserImpression`, `writeAgentSelfImpression`, `writeEventMemory`, and `writeSkillMemory`. There is no separate memory workspace.
+  - Workspace orchestration tools include `enterWorkspace` for main-to-child transition, `exitWorkspace` for child-to-main return with structured results, plus main-scoped `askUser` and `finishTask` tools for explicit needs-user-input and final-response-ready states.
+  - Memory tools are exposed as runtime-level policy-gated function-call tools in every workspace, so each workspace can independently search, write, update, and delete memory without gaining access to unrelated child capability tools.
+  - Runtime memory tools are active-workspace scoped for event/skill records: when a model is inside `file`, it cannot search, write, update, or delete `cli` event/skill memory by passing a different `workspaceId`. Cross-workspace debug maintenance belongs to the direct Memory Web UI/API policy layer, not ordinary model tool use.
+  - Runtime policy prompts must include an explicit memory-write protocol: use `writeUserImpression` only for stable user preferences/background/identity/constraints, use `writeSkillMemory` for user/agent-triggered reusable desensitized methods, prefer lifecycle hooks for routine event memory and reserve `writeEventMemory` for unusually important events, and require creator authorization for `writeAgentSelfImpression`.
+  - Memory management tools (`searchMemory`, `updateMemory`, `deleteMemory`) are universal workspace memory tools. In runtime tool calls, event/skill reads and mutations are constrained to the active workspace; inside that boundary they still enforce record policy: current users can manage their own user impressions/events, creator role is required for agent self impressions and shared skill management, and shared skill updates must re-pass the same desensitization/reusability quality gate as new skill writes.
+  - `searchMemory` is a policy-scoped management/search tool, not the same thing as automatic runtime recall. It accepts query plus optional memoryType/userId/agentId/workspaceId filters, ordinary users can only inspect their own impressions/events plus shared workspace skills, and creator role can use those filters for full debug inspection.
+  - Direct Memory Web UI/API create, edit, and delete operations must go through the same `MemoryService` policy layer as memory tools. The debug UI must not be able to bypass user/workspace isolation, event/skill workspace write policy, creator-only shared skill management, or shared skill quality gates.
+  - Direct Memory Web UI/API debug flows must make policy requirements inspectable: skill records need reusable/desensitized quality metadata, event records need workspace/user scope, and rejected mutations should surface the policy reason in the UI.
+  - Direct Memory Web UI/API list/read paths must also go through `MemoryService`: ordinary users can list only their own user impressions/events plus shared workspace skills, while creator role can use the full debug view including agent self impressions and other users' scoped records.
+  - Runtime rejects tool calls that are not registered to the active workspace and are not approved runtime tools; rejected calls are logged in `tool_calls` and `audit_logs`.
+  - High-risk tool calls by non-creator users create first-class `approval_requests` records with conversation/workspace/tool/arguments/reason metadata. The original tool call remains blocked until a creator resolves the request.
+  - Approval requests are tenant-scoped debug/security data because `argumentsJson` may contain sensitive tool input. Approval list APIs must receive actor identity; ordinary users can list only their own approval requests even if they provide another `userId` filter, while creators can inspect the global queue.
+  - Approval resolution is creator-gated. Direct HTTP/repository approval resolve paths must receive actor identity and ordinary users must not be able to approve or reject high-risk workspace/tool requests.
+  - Approved `approval_requests` are reusable for an exact retry of the same conversation/user/workspace/tool/arguments, so the Web UI approval flow can unblock a previously denied workspace entry or tool call without changing the runtime policy boundary.
+  - Tool definitions must carry explicit executor binding metadata: `bindingType` (`runtime`, `mcp`, or `placeholder`), `bindingJson`, and optional MCP server/tool identity. Runtime-bound tools execute inside the headless core; MCP-bound tools are registered and visible but return structured "executor not connected" failures until an MCP client is attached; placeholder tools never execute silently.
+  - Seeded tool definitions must refresh `parametersJson` on startup, not only insert missing tools, so existing SQLite databases keep their function-call schemas aligned with runtime capabilities.
+  - Memory management tool schemas must expose all policy-supported editable fields. In particular, `updateMemory` can accept `memoryType`, `userId`, `agentId`, `workspaceId`, `relationId`, `version`, `title`, `summary`, `detail`, and `metadataJson`; runtime still validates permissions and quality gates before applying changes.
+  - `searchMemory` function-call schema must expose the policy-supported debug filters: `memoryType`, `userId`, `agentId`, and `workspaceId`.
+  - Registered placeholder workspace tools without MCP/runtime bindings return structured failed tool results instead of executing silently.
+  - Runtime uses a bounded Observe/Decide/Act/Verify tool loop in both non-streaming and `streamEvents` streaming paths: the model may request tools, runtime executes policy-gated calls, appends tool results, and asks the model again until a final answer or the maximum tool-round limit is reached. `enterWorkspace` and `exitWorkspace` are tool-driven context transitions inside the same loop. Each LLM/tool round is persisted for Web UI trace inspection. Legacy chunk-only streaming providers remain single-pass because they do not expose tool-call deltas.
+  - In `streamEvents` tool loops, content emitted during an intermediate round that also contains tool calls is internal trace text only. It must be saved in LLM logs/context for debugging but must not stream to the user; only the final no-tool assistant content is streamed as the user-facing answer.
+  - Current file/CLI tools are MCP-ready registered tools with MCP server/tool identity, but no MCP executor is connected yet. Real tool execution should be bound through MCP server/tool definitions in a later implementation stage.
+- LLM:
+  - Use real OpenAI-compatible Chat Completions.
+  - Runtime must support streaming Chat Completions for the Web UI.
+  - Every LLM request must write an inspectable log row with pending/completed/failed status, normalized endpoint, model, sanitized request messages/tools, response metadata, error text, and timestamps. API keys must never be logged.
+  - LLM call logs are tenant-scoped debug data because `messagesJson` and `responseJson` may contain user content. Every `llm_calls` row must carry `userId`; write paths reject mismatches with the owning conversation; global LLM log reads return only the actor's own calls unless the actor is creator.
+  - LLM log rows must be created from the same resolved base URL/model that the provider fetch actually uses, not from stale raw UI input, so the debug UI can be trusted when diagnosing connectivity.
+  - When the API server starts, stale pending LLM calls from a prior interrupted process should be marked failed with an interruption diagnostic, so the UI can clearly show whether a request returned, failed, or was cut off.
+  - Default base URL is `https://api.302ai.com`; runtime normalizes it to `/v1/chat/completions`.
+  - Both UI and runtime must canonicalize older `https://api.302.ai` values to `https://api.302ai.com` before making provider requests, including stale cached full endpoint values such as `/v1/chat/completions`.
+  - The UI should expose both current-conversation LLM logs and actor-scoped recent LLM logs for debugging connectivity and provider responses, plus a compact always-visible LLM debug summary showing latest status, normalized endpoint, model, returned text/diagnostic, and completed/failed/pending counts. Creators may inspect global recent LLM logs.
+  - During local Web UI development, served static assets should avoid browser caching so endpoint-normalization fixes and debug UI changes take effect after restart/rebuild.
+  - The UI should show the effective Chat Completions endpoint derived from the configured base URL before sending, so stale cached provider aliases are visible and correctable.
+  - Streaming LLM completion logs should include returned text length and the assistant text/diagnostic payload in `responseJson`, so the UI can verify whether the provider actually returned usable content.
+  - Default model is `gpt-5-mini`.
+  - API keys are read only from environment variables or current server session. They must not be written to code, SQLite, or docs.
+- SQLite:
+  - Use Raw SQL and `better-sqlite3`.
+  - Core tables include agents, llm_profiles, conversations, messages, workspaces, tool_definitions, workspace_tools, workspace_sessions, llm_calls, context_segments, tool_calls, memories, memories_fts, approval_requests, audit_logs.
+  - `approval_requests` records pending/approved/rejected creator approvals for high-risk tool calls, including conversation id, workspace id, tool name, arguments, reason, resolver, and resolution timestamps.
+  - `llm_calls` tracks `userId`, request lifecycle status, and sanitized result/error diagnostics for debugging provider connectivity.
+  - Tool records include executor binding metadata (`bindingType`, `bindingJson`, `mcpServerId`, `mcpToolName`) plus input schema, risk level, and workspace assignment.
+  - Seed routines update existing tool input schemas in SQLite when runtime tool contracts change.
+  - Tool call logs include `userId`, the active workspace session id, and task id when available, so event extraction and trace inspection can connect a tool result to the exact tenant and workspace task that produced it.
+  - Workspace records include `capabilitiesJson`, `inputKindsJson`, `outputKindsJson`, `requiresApproval`, and `memoryPolicyJson`.
+  - Memory uses a single `memories` table with `memoryType` for impression/event/skill.
+  - Memory deletion is soft deletion using `deletedAt`, `deletedBy`, and `deleteReason`; deleted memories are excluded from normal list/get/recall paths, while audit/debug flows may inspect the tombstone.
+  - Relation/version recall only considers non-deleted versions, so deleting the latest version can reveal the previous active version for that same `relationId`.
+  - Automatic memory recall queries relation/version latest independently per memory partition, then merges impression/event/skill results for context assembly.
+  - Conversation deletion removes the conversation's operational records through SQLite cascades plus explicit approval-request cleanup; audit logs remain as deletion evidence and are not injected into model context.
+  - Conversation creation/opening enforces ownership: existing conversation ids must match the incoming `userId` and `agentId`; empty `userId` or `conversationId` is rejected before messages or memory hooks run.
+  - Agent configuration updates are creator-only and write audit evidence. Direct HTTP agent update paths must pass actor identity to the repository policy boundary; ordinary users may use cached/session LLM settings without mutating persisted agent identity.
+  - Workspace deletion is creator-only, refuses built-in workspaces, removes the workspace definition/tool links, and soft-deletes active event/skill memories scoped to that workspace with a workspace-delete reason.
+  - Workspace creation/editing is creator-only and writes audit evidence with actor, tool assignments, risk level, and approval flag.
+  - Memory lifecycle writes use `metadataJson` to preserve source hook/tool, event kind, outcome, conversation id, evidence window, evidence ids, desensitization, skill quality metadata, and impression kind until richer subtype tables are introduced.
+  - Shared skill lifecycle metadata also stores usage feedback counters (`usageCount`, `successCount`, `failureCount`, `blockedCount`) plus last-used session/task/conversation fields until richer skill subtype tables are introduced.
+  - `workspace_sessions` persists `taskId`, `taskJson`, `localContextJson`, and `resultJson` so workspace stack execution can be audited without parsing natural-language summaries.
+  - Child `workspace_sessions` start as `running`; `completedAt`, final summary, and final result are committed only after a valid `exitWorkspace` call.
+  - `audit_logs` stores hook and policy events with `conversationId` and `workspaceId` columns when available, so the Web UI can debug runtime lifecycle behavior without injecting audit data into model context.
+  - First recall implementation uses SQLite FTS plus `relationId` and `version`.
+
+## Public APIs / Interfaces
+
+- HTTP API:
+  - `POST /api/agent/run`
+  - `POST /api/agent/run/stream`
+  - `GET/PUT /api/agents/:agentId`
+    - `PUT /api/agents/:agentId` accepts `actorId` and `actorRole`; persisted agent identity updates require creator role.
+  - `GET/POST/PUT/DELETE /api/workspaces`
+  - `GET/POST/PUT/DELETE /api/memories`
+    - `GET /api/memories` accepts `actorId` and `actorRole` for policy-scoped listing.
+  - `DELETE /api/conversations/:conversationId`
+  - `GET /api/conversations/:conversationId/trace`
+    - Accepts `actorId` and `actorRole`; ordinary users can inspect only their own conversation trace, while creators can inspect traces for debugging.
+  - `GET /api/llm-calls`
+    - Accepts `actorId` and `actorRole`; ordinary users receive only their own LLM calls, while creators can inspect global recent calls.
+  - `POST /api/approvals/:approvalId/resolve`
+    - Accepts `actorId` and `actorRole`; approval resolution requires creator role.
+  - `GET /api/approvals`
+    - Accepts `actorId` and `actorRole`; ordinary users receive only their own approval requests, while creators can inspect the global queue.
+- Core types:
+  - `AgentConfig`
+  - `AgentRunInput`
+  - `WorkspaceDefinition`
+  - `ToolDefinition`
+  - `WorkspaceSession`
+  - `WorkspaceTask`
+  - `WorkspaceLocalContext`
+  - `WorkspaceResult`
+  - `ContextSegment`
+  - `LLMCallSnapshot`
+  - `MemoryRow`
+  - `PolicyDecision`
+
+## Test Plan
+
+- Database:
+  - Migrations create all tables and FTS index.
+  - Memory CRUD supports direct update/delete and audit log write.
+  - Memory delete is soft delete: list/get/recall exclude deleted records, tombstones retain delete actor/reason, and relation latest ignores deleted versions.
+  - Conversation deletion removes messages, workspace sessions, LLM calls/context segments, tool calls, and approval requests but preserves deletion audit.
+  - Conversation ownership is a hard invariant: a conversation id cannot be reused by another user or agent.
+  - Conversation trace reads require owner or creator access, and tool call writes require `tool_calls.userId` to match the owning conversation.
+  - LLM call logs require `llm_calls.userId` to match the owning conversation, and global LLM log reads are owner-scoped unless the actor is creator.
+  - Approval request list reads are owner-scoped unless the actor is creator.
+  - Agent configuration updates require creator role and produce an `agent_update` audit log.
+  - Workspace deletion soft-deletes scoped event/skill memories and refuses built-in workspaces.
+  - Workspace creation/editing requires creator role and cannot be performed by ordinary users through direct repository/API paths.
+  - Event recall respects `userId + workspaceId + relationId/version`.
+  - Partitioned recall prevents one memory type from starving another before workspace memory-policy caps are applied.
+  - Memory recall is inspectable by partition: impression/event/skill are not merged into a single untyped context blob.
+- Runtime:
+  - `main` cannot access child workspace tools.
+  - `main` receives workspace manifests through context, not through a `listWorkspaces` tool.
+  - `main` has structured orchestration tools for `enterWorkspace`, `askUser`, and `finishTask`; child workspaces do not inherit these main-only controls unless explicitly registered.
+  - Runtime starts each turn in `main`; child workspace execution requires an explicit `enterWorkspace` function call before child tools become callable.
+  - After `enterWorkspace`, follow-up LLM calls expose only the target child workspace capability tools plus that workspace's universal memory tools.
+  - After `exitWorkspace`, follow-up LLM calls return to `main`, hide child workspace tools again, and expose the returned `WorkspaceResult` for integration.
+  - `file` cannot call `cli` tools.
+  - Workspace sessions persist structured task/local-context/result JSON.
+  - Tool call logs preserve `workspaceSessionId + taskId`, and `afterToolCall` audit events include the saved tool call id plus the same session/task evidence.
+  - Tool call logs preserve `userId + workspaceSessionId + taskId`; mismatched tool log user ids are rejected before persistence.
+  - A newly entered workspace session starts with an empty `recentToolCalls` list; older tool calls from previous sessions in the same conversation are available through trace/workspace results, not injected as the new session's local tool history.
+  - Workspace registry context exposes full manifests with capabilities/inputKinds/outputKinds/requiresApproval, not only names and descriptions.
+  - Skill memory is workspace-scoped and user-shared.
+  - Agent self impression requires creator role.
+  - High-risk file/CLI tools require creator approval.
+  - High-risk or approval-required workspace entry requires creator approval before a child `WorkspaceSession` is created.
+  - High-risk policy denials create pending approval requests that can be resolved through the HTTP API and inspected in conversation trace.
+  - Approval request listing is tenant-scoped: ordinary users cannot inspect another user's pending tool/workspace arguments.
+  - Approval resolution requires creator role; ordinary users cannot approve their own blocked high-risk workspace/tool requests through repository or HTTP paths.
+  - Retrying an exact workspace/tool request after creator approval reuses the approved request and proceeds.
+  - A hallucinated child workspace tool call from the wrong active workspace is blocked and audited.
+  - Runtime memory tools are callable from any workspace but still pass memory policy, active-workspace, and record-scope checks.
+  - Memory search/update/delete tools are mounted in every workspace; cross-workspace capability tools remain blocked when hallucinated from the wrong active workspace.
+  - Runtime memory tools cannot target another workspace's event/skill records by overriding `workspaceId`; those calls fail and are logged for trace inspection.
+  - Active workspace `memoryPolicyJson` controls runtime memory recall and writes, including event/skill enable flags, max recalled event/skill counts, and disabled event/skill write gates.
+  - Agent self impression recall is isolated by exact `agentId`; a different agent's self impression, unscoped/global impression, or ambiguous user+agent impression must not appear in the current agent context.
+  - Runtime-bound tools execute through the ToolRegistry; MCP-bound tools remain inspectable and fail explicitly until an MCP executor is connected.
+  - Non-streaming tool loops stop at the configured maximum round count and write an audit log instead of allowing unbounded autonomous execution.
+  - Streaming `streamEvents` tool loops support multiple tool rounds, stop at the configured maximum round count, persist every follow-up LLM call, and write an audit log instead of allowing unbounded autonomous execution.
+- Context:
+  - Current user message remains clean.
+  - Context stack preserves system/personality/policy/workspace/task/workspace result/impression memory/event memory/skill memory/history/tool result partitions.
+  - Attention budgeting keeps structured context partitions parseable after trimming and prevents long history, memory, tool results, or workspace-local context from turning the framework back into a large flat-context agent.
+  - Child workspace history is not the parent conversation transcript. Old global chat messages may appear in the bounded `main` orchestration slice but must not be injected into child workspace `runtime_context.history`.
+  - Child workspace context does not include the full workspace registry. Only `main` sees sibling workspace manifests; child workspace prompts see their own active manifest and return structured results to `main`.
+  - Every follow-up LLM call after function-call execution stores inspectable `tool_result` and `final_messages` context segments, not only the initial turn context.
+  - Active workspace context includes manifest metadata and workspace memory policy.
+  - The context stack after `enterWorkspace` is rebuilt around the child workspace and includes the `enterWorkspace` tool result plus the target workspace task/result.
+  - The context stack after `exitWorkspace` is rebuilt around `main` and includes the child workspace's returned structured result.
+  - Malformed `exitWorkspace` calls keep the active workspace unchanged and are only surfaced as failed tool results in trace/context.
+  - Workspace-local context is visible in context stack and trace, including recalled event/skill memory, available tool bindings, and recent tool-call evidence for the current session.
+  - Tool results update the active workspace session's local context after execution; trace viewers can inspect tool evidence from either `tool_calls` or the owning workspace session.
+  - Final LLM messages are stored and inspectable.
+  - System/policy prompts instruct the model to keep internal runtime/tool orchestration hidden from ordinary user-facing answers.
+  - System/policy prompts tell the model when to proactively request memory writes through function calls, so impression/skill/event memory generation is part of the agent contract rather than an accidental behavior.
+  - The default personality prompt does not mention workspace/context/runtime internals.
+- Memory:
+  - Conversation-window event extraction writes an event every 20 stored messages by default.
+  - Conversation-window event extraction must behave the same in streaming and non-streaming runs: the just-finished assistant response is part of the stored 20-message window before extraction runs.
+  - Conversation-window event extraction writes process/result event memory with message/session/tool evidence metadata.
+  - Conversation-window event extraction keeps session/tool evidence bounded to the message window timestamps, so event evidence remains auditable and does not pull unrelated task history into later skill extraction.
+  - Workspace-exit event extraction writes process/result event memory immediately for completed child workspace sessions, so important task evidence does not wait for the 20-message conversation window.
+  - Workspace-exit skill feedback updates recalled skill metadata with usage/success/failure counters and audit evidence tied to the exact workspace session.
+  - Event hook skill extraction is conservative: it only writes shared skill candidates from successful non-main process/result event batches, links evidence event ids, respects workspace `skillWriteEnabled`, and avoids private/task-specific details.
+  - User impression is not written by `afterAgentTurn` keyword heuristics; it requires an agent-requested memory tool call.
+  - The runtime policy prompt explicitly teaches the agent that user impressions are only for stable long-term user information and should be written through `writeUserImpression`.
+  - User impression writes require current-user scope.
+  - Impression writes require exactly one scope (`userId` xor `agentId`) and reject workspace-scoped or global impressions.
+  - Agent self impression writes require creator role.
+  - Agent self impression recall requires current-agent scope and excludes unscoped/global or ambiguous impression records.
+  - Skill writes require workspace scope and no userId.
+  - Memory update/delete tools and direct Memory Web UI/API mutations enforce the same isolation boundaries as writes: user impression/event management is current-user scoped, while agent self impression and shared skill management require creator role.
+  - `updateMemory` function-call schema matches the runtime policy surface for editable memory fields, including scope and version fields; changing those fields remains policy-gated.
+  - Direct Memory Web UI/API listing is policy-scoped: ordinary users cannot list other users' impressions/events or creator-controlled agent self impressions, but can see shared workspace skills; creators can inspect all records for debugging.
+  - `searchMemory` uses the same policy-scoped read layer as direct Memory Web UI/API listing; it must not use automatic prompt-recall as a substitute for management search.
+  - Shared skill updates are rejected if the resulting record fails skill quality checks, including desensitization, reusable procedure/appliesWhen/avoidWhen metadata, confidence, and private-detail scanning.
+  - Event/skill writes are rejected when the target workspace disables them through `memoryPolicyJson`.
+  - Event writes are rejected when a non-creator actor tries to write an event for a different `userId`.
+  - Event writes are rejected when `metadataJson` is invalid, missing `conversationId`, or missing a recognized `eventKind`; tool-requested event writes include active session/task evidence for Web UI debugging.
+  - Skill writes include evidence/quality metadata and may reference event ids from the same conversation/workspace. Evidence ids are policy-checked: they must resolve to event memory, match the skill workspace, match the declared conversation when provided, and cannot cite another user's events unless the actor is creator.
+  - Active skill-trigger writes preserve the concrete lesson text in summary/procedure and attach same-conversation event evidence when available.
+  - Runtime rejects skill writes that lack desensitization, reusable procedure steps, applicability/avoidance conditions, sufficient confidence, or that contain obvious private details such as local paths, secrets, emails, or phone numbers.
+  - Memory tool calls are logged in `tool_calls`.
+  - Lifecycle hooks are logged in `audit_logs` and visible through conversation trace.
+- UI:
+  - Chinese `对话/工作空间/记忆` tabs render.
+  - Chat right panel expands context stack and final messages.
+  - Streaming assistant text appears incrementally.
+  - Markdown in chat messages renders without unsafe HTML injection.
+  - Failed chat requests can be retried.
+  - Clearing the current conversation resets messages, trace, and conversation id without clearing saved LLM settings or API key.
+  - Clicking a previous user message switches the right context panel to that turn's saved context stack.
+  - Chat composer sends on Enter and inserts a newline on Ctrl+Enter.
+  - Chat right panel shows all LLM request logs for the current conversation, including whether each request returned or failed.
+  - Chat right panel shows global recent LLM request logs across conversations for connectivity debugging.
+  - Chat right panel shows a compact LLM debug summary near the top so endpoint/status/result/timestamp are visible without scrolling through the full context stack.
+  - Chat right panel shows memory records written by the selected/latest turn.
+  - Chat right panel shows tool call logs, including memory tool arguments and results.
+  - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact tool result messages returned into the model loop.
+  - Browser refresh restores cached settings, API key, messages, and latest context stack.
+  - Workspace creation assigns only registered tools.
+  - Workspace creation/editing manages manifest capabilities, input/output kinds, approval flag, and memory policy JSON.
+  - Workspace tool lists show whether each tool is runtime-bound, MCP-bound, or still a placeholder.
+  - Memory table supports filter/add/edit/delete.
+  - Memory editor supports metadata JSON editing, client-side JSON validation, policy-aware add buttons for event/impression/skill, and visible strategy-layer error feedback.
+  - Chat right panel shows lifecycle hook/audit logs for the current conversation.
+  - Chat right panel shows tool approval requests and lets only a creator approve or reject pending requests for debugging the approval lifecycle.
+- LLM:
+  - 302AI request uses normalized `/v1/chat/completions` on `https://api.302ai.com`.
+  - Legacy cached `https://api.302.ai` hostnames are rewritten through URL parsing before request logging and provider fetch.
+  - Streaming Chat Completions parses content deltas and OpenAI-compatible `tool_calls` deltas.
+  - Streaming Chat Completions can continue after tool-call deltas by sending tool results back into follow-up streamed LLM requests until a final content answer or the maximum tool-round limit is reached.
+  - Streaming tool-call rounds must not leak intermediate assistant narration to the chat surface; that text is retained only in request logs and trace inspection.
+  - API key is never persisted.
+  - Failed provider calls are marked failed in `llm_calls` with a visible diagnostic; successful calls are marked completed with response metadata.
+  - Tests may use a fake provider only for protocol verification.
+
+## Assumptions
+
+- `ZLEAP_MASTER_PLAN.md` lives at repository root and is mandatory reading before code changes.
+- Major implementation decisions must update `ZLEAP_MASTER_PLAN.md` before or alongside code.
+- React + Vite + TypeScript is the Web UI stack.
+- Web UI and terminal CLI share the same headless TypeScript core.
+- First version includes `main/file/cli` workspaces, not Browser workspace and not a standalone Memory workspace.
+- First product version does not provide mock LLM mode; only tests may fake provider.

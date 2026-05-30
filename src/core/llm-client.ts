@@ -1,0 +1,191 @@
+import type { LLMMessage, ToolDefinition } from "../types";
+
+export type ChatCompletionInput = {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  messages: LLMMessage[];
+  tools: ToolDefinition[];
+  temperature?: number;
+};
+
+export type ChatCompletionOutput = {
+  message: LLMMessage;
+  raw: unknown;
+};
+
+export type LLMStreamEvent =
+  | { type: "content"; text: string }
+  | { type: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }
+  | { type: "done"; raw?: unknown };
+
+export function normalizeProviderBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl
+    .trim()
+    .replace(/^http:\/\/api\.302\.ai(?=[:/]|$)/i, "https://api.302ai.com")
+    .replace(/^https:\/\/api\.302\.ai(?=[:/]|$)/i, "https://api.302ai.com")
+    .replace(/^api\.302\.ai(?=[:/]|$)/i, "https://api.302ai.com")
+    .replace(/\/+$/, "");
+  if (!trimmed) return trimmed;
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(withProtocol);
+    if (url.hostname.toLowerCase() === "api.302.ai") {
+      url.protocol = "https:";
+      url.hostname = "api.302ai.com";
+      return url.toString().replace(/\/+$/, "");
+    }
+    if (trimmed !== withProtocol) return url.toString().replace(/\/+$/, "");
+  } catch {
+    // Keep non-URL values unchanged; the provider request will surface the error.
+  }
+  return trimmed;
+}
+
+export function normalizeChatCompletionsEndpoint(baseUrl: string): string {
+  const trimmed = normalizeProviderBaseUrl(baseUrl);
+  if (trimmed.endsWith("/chat/completions")) return trimmed;
+  if (trimmed.endsWith("/v1")) return `${trimmed}/chat/completions`;
+  return `${trimmed}/v1/chat/completions`;
+}
+
+function formatFetchError(error: unknown, endpoint: string): Error {
+  const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
+  const causeParts: string[] = [];
+  if (cause && typeof cause === "object") {
+    const record = cause as Record<string, unknown>;
+    if (record.code) causeParts.push(`code=${String(record.code)}`);
+    if (record.hostname) causeParts.push(`host=${String(record.hostname)}`);
+    if (record.message) causeParts.push(String(record.message));
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  const causeText = causeParts.length > 0 ? `；底层原因：${causeParts.join("，")}` : "";
+  return new Error(`无法连接到 LLM 服务：${endpoint}。请检查接口地址、网络/代理和 API 服务可用性。原始错误：${detail}${causeText}`);
+}
+
+export interface LLMClient {
+  complete(input: ChatCompletionInput): Promise<ChatCompletionOutput>;
+  stream?(input: ChatCompletionInput): AsyncGenerator<string>;
+  streamEvents?(input: ChatCompletionInput): AsyncGenerator<LLMStreamEvent>;
+}
+
+export class OpenAICompatibleClient implements LLMClient {
+  async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
+    const endpoint = normalizeChatCompletionsEndpoint(input.baseUrl);
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${input.apiKey}`
+        },
+        body: JSON.stringify({
+          model: input.model,
+          messages: input.messages,
+          temperature: input.temperature ?? 0.2,
+          tools: input.tools.map((tool) => ({
+            type: "function",
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: JSON.parse(tool.parametersJson)
+            }
+          }))
+        })
+      });
+    } catch (error) {
+      throw formatFetchError(error, endpoint);
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`LLM 请求失败（${response.status}）：${text}`);
+    }
+
+    const raw = await response.json() as any;
+    const message = raw.choices?.[0]?.message as LLMMessage | undefined;
+    if (!message) throw new Error("LLM response did not contain choices[0].message");
+    return { message, raw };
+  }
+
+  async *stream(input: ChatCompletionInput): AsyncGenerator<string> {
+    for await (const event of this.streamEvents(input)) {
+      if (event.type === "content") yield event.text;
+    }
+  }
+
+  async *streamEvents(input: ChatCompletionInput): AsyncGenerator<LLMStreamEvent> {
+    const endpoint = normalizeChatCompletionsEndpoint(input.baseUrl);
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${input.apiKey}`
+        },
+        body: JSON.stringify({
+          model: input.model,
+          messages: input.messages,
+          temperature: input.temperature ?? 0.2,
+          stream: true,
+          tools: input.tools.map((tool) => ({
+            type: "function",
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: JSON.parse(tool.parametersJson)
+            }
+          }))
+        })
+      });
+    } catch (error) {
+      throw formatFetchError(error, endpoint);
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`LLM 流式请求失败（${response.status}）：${text}`);
+    }
+    if (!response.body) throw new Error("LLM 流式响应没有返回 body。");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+      for (const event of events) {
+        for (const line of event.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") return;
+          if (!data) continue;
+          const parsed = JSON.parse(data) as any;
+          const delta = parsed.choices?.[0]?.delta;
+          const content = delta?.content;
+          if (content) yield { type: "content", text: content };
+          const toolCalls = delta?.tool_calls;
+          if (Array.isArray(toolCalls)) {
+            for (const toolCall of toolCalls) {
+              yield {
+                type: "tool_call_delta",
+                index: Number(toolCall.index ?? 0),
+                id: toolCall.id,
+                name: toolCall.function?.name,
+                arguments: toolCall.function?.arguments
+              };
+            }
+          }
+        }
+      }
+    }
+    yield { type: "done" };
+  }
+}
