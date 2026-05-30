@@ -22,7 +22,7 @@
   - Each user chat message should keep the context stack snapshot for that turn; clicking a user message shows that historical context stack in the right panel.
   - Chat composer keyboard behavior: Enter sends the message; Ctrl+Enter inserts a newline.
   - `工作空间` manages workspaces first, then registers tools inside the selected workspace. The UI must not present tools as a global shared pool that users merely pick from.
-  - Workspace tool management must support adding, editing, deleting, and MCP discovery/import for tools inside the current workspace.
+  - Workspace tool management is MCP-server-first: bind MCP Servers inside the selected workspace, discover that server's tools, then choose which discovered tools to mount into the workspace. Manual tool editing remains an advanced path, not the primary MCP workflow.
   - `记忆` is a database-like table with filtering, create, edit, and delete.
   - `日志` is the dedicated trace inspection area for lifecycle hook logs, tool call logs, approval requests, current-conversation LLM request logs, and global recent LLM request logs.
   - Log panels must support clearing the current visible log view without treating audit data deletion as an ordinary UI action.
@@ -128,14 +128,15 @@
   - Approval requests are tenant-scoped debug/security data because `argumentsJson` may contain sensitive tool input. Approval list APIs must receive actor identity; ordinary users can list only their own approval requests even if they provide another `userId` filter, while creators can inspect the global queue.
   - Approval resolution is creator-gated. Direct HTTP/repository approval resolve paths must receive actor identity and ordinary users must not be able to approve or reject high-risk workspace/tool requests.
   - Approved `approval_requests` are reusable for an exact retry of the same conversation/user/workspace/tool/arguments, so the Web UI approval flow can unblock a previously denied workspace entry or tool call without changing the runtime policy boundary.
-  - Tool definitions must carry explicit executor binding metadata: `bindingType` (`runtime`, `mcp`, or `placeholder`), `bindingJson`, optional `workspaceId`, and optional MCP server/tool identity. Runtime-bound tools execute inside the headless core; MCP-bound tools execute through the official MCP TypeScript SDK client; placeholder tools never execute silently.
+  - MCP Servers are first-class workspace-scoped resources. A workspace binds local stdio servers or remote Streamable HTTP servers; discovery loads all tools available from that server, and the user chooses which discovered tools to mount. Imported tool definitions keep `mcpServerId`, `mcpToolName`, and a generated binding snapshot for execution, but the product model does not ask the user to configure server identity per tool.
+  - Tool definitions still carry executor metadata: `bindingType` (`runtime`, `mcp`, or `placeholder`), generated/internal `bindingJson`, optional `workspaceId`, and optional MCP server/tool identity. Runtime-bound tools execute inside the headless core; MCP-bound tools execute through the official MCP TypeScript SDK client; placeholder tools never execute silently.
   - Seeded tool definitions must refresh `parametersJson` on startup, not only insert missing tools, so existing SQLite databases keep their function-call schemas aligned with runtime capabilities.
   - Runtime memory management tool schemas must not expose scope-moving fields. In particular, `updateMemory` function calls can edit `title`, `summary`, `detail`, and `metadataJson`; `memoryType`, `userId`, `agentId`, `workspaceId`, `relationId`, and `version` are code/API-controlled fields.
   - `searchMemory` function-call schema must expose only query plus optional `memoryType`; identity/workspace debug filters belong to direct Memory Web UI/API calls, not model-controlled tool arguments.
   - Registered placeholder workspace tools without MCP/runtime bindings return structured failed tool results instead of executing silently.
   - Runtime uses a bounded Observe/Decide/Act/Verify tool loop in both non-streaming and `streamEvents` streaming paths: the model may request tools, runtime executes policy-gated calls, appends tool results, and asks the model again until a final answer or the maximum tool-round limit is reached. `enterWorkspace` and `exitWorkspace` are tool-driven context transitions inside the same loop. Each LLM/tool round is persisted for Web UI trace inspection. Legacy chunk-only streaming providers remain single-pass because they do not expose tool-call deltas.
   - In `streamEvents` tool loops, content emitted during an intermediate round that also contains tool calls is internal trace text only. It must be saved in LLM logs/context for debugging but must not stream to the user; only the final no-tool assistant content is streamed as the user-facing answer.
-  - MCP-bound tools support stdio and Streamable HTTP bindings. Runtime connects to the configured MCP server, calls `listTools()` for discovery when requested by the UI, and calls `callTool()` during agent execution.
+  - MCP-bound tools support stdio and Streamable HTTP bindings. Runtime connects through the workspace-bound MCP Server configuration, calls `listTools()` for discovery when requested by the UI, imports selected discovered tools into that workspace, and calls `callTool()` during agent execution.
 - LLM:
   - Use real OpenAI-compatible Chat Completions.
   - Runtime must support streaming Chat Completions for the Web UI.
@@ -153,10 +154,10 @@
   - API keys may enter the provider call only from environment variables, current server session/request state, or the browser cache that the user controls. They must not be written to source code, SQLite, server logs, LLM logs, audit logs, docs, or this plan.
 - SQLite:
   - Use Raw SQL and `better-sqlite3`.
-  - Core tables include agents, llm_profiles, conversations, messages, workspaces, tool_definitions, workspace_tools, workspace_sessions, llm_calls, context_segments, tool_calls, memories, memories_fts, approval_requests, audit_logs.
+  - Core tables include agents, llm_profiles, conversations, messages, workspaces, mcp_servers, tool_definitions, workspace_tools, workspace_sessions, llm_calls, context_segments, tool_calls, memories, memories_fts, approval_requests, audit_logs.
   - `approval_requests` records pending/approved/rejected creator approvals for high-risk tool calls, including conversation id, workspace id, tool name, arguments, reason, resolver, and resolution timestamps.
   - `llm_calls` tracks `userId`, request lifecycle status, and sanitized result/error diagnostics for debugging provider connectivity.
-  - Tool records include executor binding metadata (`bindingType`, `bindingJson`, `mcpServerId`, `mcpToolName`) plus input schema, risk level, and workspace assignment.
+  - `mcp_servers` records include workspaceId, transport (`stdio` or `streamable-http`), local command/args/env/cwd or remote url/headers, timeout, and audit-managed timestamps. Tool records imported from MCP Servers include executor binding metadata (`bindingType`, generated `bindingJson`, `mcpServerId`, `mcpToolName`) plus input schema, risk level, and workspace assignment.
   - Seed routines update existing tool input schemas in SQLite when runtime tool contracts change.
   - Tool call logs include `userId`, the active workspace session id, and task id when available, so event extraction and trace inspection can connect a tool result to the exact tenant and workspace task that produced it.
   - Workspace records include `capabilitiesJson`, `inputKindsJson`, `outputKindsJson`, `requiresApproval`, and `memoryPolicyJson`.
@@ -347,7 +348,7 @@
   - Browser refresh restores cached settings, API key, messages, and latest context stack.
   - Workspace creation/editing manages manifest capabilities, input/output kinds, approval flag, and memory policy JSON.
   - Workspace tool UI is workspace-first: after selecting or creating a workspace, the user registers tools into that workspace.
-  - Workspace tool UI supports manual tool registration, editing, deletion, JSON Schema parameter editing, MCP binding JSON editing, and MCP server tool discovery/import.
+  - Workspace tool UI supports MCP Server registration/editing/deletion, local stdio and remote Streamable HTTP configuration, discovery from the selected server, choosing discovered tools to mount, and deleting mounted tools. Manual JSON binding editing is advanced/debug-only and must not be the normal MCP setup path.
   - Workspace tool lists show whether each tool is runtime-bound, MCP-bound, or still a placeholder, and system/runtime tools are visually separated from workspace-registered tools.
   - Memory table supports filter/add/edit/delete.
   - Memory editor supports metadata JSON editing, client-side JSON validation, policy-aware add buttons for event/impression/skill, and visible strategy-layer error feedback.
@@ -366,9 +367,10 @@
   - Tests may use a fake provider only for protocol verification.
 - MCP:
   - The runtime uses the official `@modelcontextprotocol/sdk` TypeScript SDK.
-  - MCP stdio bindings use `StdioClientTransport` with `{ command, args, env, cwd }`.
-  - MCP remote bindings use `StreamableHTTPClientTransport` with `{ url, headers }`.
-  - MCP discovery uses `client.listTools()` and stores imported tool name, description, and input schema into workspace-scoped tool definitions.
+  - MCP Server definitions are stored per workspace, not globally and not primarily per tool.
+  - Local MCP Servers use `StdioClientTransport` with `{ command, args, env, cwd }`.
+  - Remote MCP Servers use `StreamableHTTPClientTransport` with `{ url, headers }`.
+  - MCP discovery uses `client.listTools()` against the selected workspace-bound server and stores imported tool name, description, input schema, `mcpServerId`, and `mcpToolName` into workspace-scoped tool definitions.
   - MCP execution uses `client.callTool({ name, arguments })` and records the result in `tool_calls`.
 
 ## Assumptions

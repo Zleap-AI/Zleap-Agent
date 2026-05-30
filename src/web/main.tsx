@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceSession } from "../types";
 import "./styles.css";
 
 type Tab = "chat" | "workspace" | "memory" | "logs";
@@ -123,6 +123,25 @@ function defaultMcpBindingJson(): string {
     args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
     timeoutMs: 30000
   }, null, 2);
+}
+
+function createMcpServerDraft(workspaceId: string): McpServerDefinition {
+  const now = new Date().toISOString();
+  return {
+    id: `mcp-${workspaceId}-${Date.now()}`,
+    workspaceId,
+    name: "",
+    transport: "stdio",
+    command: "npx",
+    argsJson: JSON.stringify(["-y", "@modelcontextprotocol/server-filesystem", "."], null, 2),
+    envJson: "{}",
+    cwd: ".",
+    url: "",
+    headersJson: "{}",
+    timeoutMs: 30000,
+    createdAt: now,
+    updatedAt: now
+  };
 }
 
 function createToolDraft(workspaceId: string): Partial<ToolDefinition> {
@@ -1223,8 +1242,11 @@ function WorkspaceTab() {
   const [workspaces, setWorkspaces] = useState<WorkspaceDefinition[]>([]);
   const [selected, setSelected] = useState<WorkspaceDefinition | null>(null);
   const [toolDraft, setToolDraft] = useState<Partial<ToolDefinition> | null>(null);
+  const [mcpServers, setMcpServers] = useState<McpServerDefinition[]>([]);
+  const [mcpDraft, setMcpDraft] = useState<McpServerDefinition | null>(null);
   const [toolError, setToolError] = useState("");
   const [discoveredTools, setDiscoveredTools] = useState<Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>([]);
+  const [selectedDiscoveredTools, setSelectedDiscoveredTools] = useState<Set<string>>(new Set());
 
   async function load() {
     const data = await api<{ workspaces: WorkspaceDefinition[]; tools: ToolDefinition[] }>("/api/workspaces");
@@ -1236,9 +1258,32 @@ function WorkspaceTab() {
     });
   }
 
+  async function loadMcpServers(workspaceId: string) {
+    const cached = loadCache();
+    const params = new URLSearchParams({
+      actorId: cached.userId ?? "creator",
+      actorRole: cached.userRole ?? "creator"
+    });
+    const data = await api<{ mcpServers: McpServerDefinition[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers?${params.toString()}`);
+    setMcpServers(data.mcpServers);
+    setMcpDraft((current) => {
+      if (current && current.workspaceId === workspaceId) {
+        return data.mcpServers.find((server) => server.id === current.id) ?? current;
+      }
+      return data.mcpServers[0] ?? createMcpServerDraft(workspaceId);
+    });
+  }
+
   useEffect(() => {
     load().catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (!selected?.id) return;
+    loadMcpServers(selected.id).catch((err) => setToolError(err instanceof Error ? err.message : String(err)));
+    setDiscoveredTools([]);
+    setSelectedDiscoveredTools(new Set());
+  }, [selected?.id]);
 
   async function save() {
     if (!selected) return;
@@ -1303,22 +1348,106 @@ function WorkspaceTab() {
     }
   }
 
-  async function discoverMcpTools() {
-    if (!toolDraft?.bindingJson) return;
+  async function saveMcpServer(): Promise<McpServerDefinition | null> {
+    if (!selected || !mcpDraft) return null;
     setToolError("");
-    setDiscoveredTools([]);
     try {
-      JSON.parse(toolDraft.bindingJson);
+      JSON.parse(mcpDraft.argsJson || "[]");
+      JSON.parse(mcpDraft.envJson || "{}");
+      JSON.parse(mcpDraft.headersJson || "{}");
       const cached = loadCache();
-      const data = await api<{ tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> }>("/api/mcp/tools/discover", {
-        method: "POST",
+      const exists = mcpServers.some((server) => server.id === mcpDraft.id);
+      const saved = await api<McpServerDefinition>(
+        exists
+          ? `/api/workspaces/${encodeURIComponent(selected.id)}/mcp-servers/${encodeURIComponent(mcpDraft.id)}`
+          : `/api/workspaces/${encodeURIComponent(selected.id)}/mcp-servers`,
+        {
+          method: exists ? "PUT" : "POST",
+          body: JSON.stringify({
+            ...mcpDraft,
+            actorId: cached.userId ?? "creator",
+            actorRole: cached.userRole ?? "creator"
+          })
+        }
+      );
+      setMcpDraft(saved);
+      await loadMcpServers(selected.id);
+      return saved;
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
+  async function deleteMcpServer(server: McpServerDefinition) {
+    if (!selected) return;
+    setToolError("");
+    try {
+      const cached = loadCache();
+      await api(`/api/workspaces/${encodeURIComponent(selected.id)}/mcp-servers/${encodeURIComponent(server.id)}`, {
+        method: "DELETE",
         body: JSON.stringify({
-          bindingJson: toolDraft.bindingJson,
           actorId: cached.userId ?? "creator",
-          actorRole: cached.userRole ?? "creator"
+          actorRole: cached.userRole ?? "creator",
+          deleteReason: "用户在工作空间 MCP Server UI 删除"
         })
       });
+      setDiscoveredTools([]);
+      setSelectedDiscoveredTools(new Set());
+      await load();
+      await loadMcpServers(selected.id);
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function discoverMcpTools() {
+    if (!selected || !mcpDraft?.id) return;
+    setToolError("");
+    setDiscoveredTools([]);
+    setSelectedDiscoveredTools(new Set());
+    try {
+      const cached = loadCache();
+      const server = mcpServers.some((item) => item.id === mcpDraft.id) ? mcpDraft : await saveMcpServer();
+      if (!server) return;
+      const data = await api<{ tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> }>(
+        `/api/workspaces/${encodeURIComponent(selected.id)}/mcp-servers/${encodeURIComponent(server.id)}/discover`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            actorId: cached.userId ?? "creator",
+            actorRole: cached.userRole ?? "creator"
+          })
+        }
+      );
       setDiscoveredTools(data.tools);
+      setSelectedDiscoveredTools(new Set(data.tools.map((tool) => tool.name)));
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function importDiscoveredTools() {
+    if (!selected || !mcpDraft?.id) return;
+    const tools = discoveredTools.filter((tool) => selectedDiscoveredTools.has(tool.name));
+    if (tools.length === 0) return;
+    setToolError("");
+    try {
+      const cached = loadCache();
+      await api<{ tools: ToolDefinition[] }>(
+        `/api/workspaces/${encodeURIComponent(selected.id)}/mcp-servers/${encodeURIComponent(mcpDraft.id)}/import-tools`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            tools,
+            actorId: cached.userId ?? "creator",
+            actorRole: cached.userRole ?? "creator"
+          })
+        }
+      );
+      setDiscoveredTools([]);
+      setSelectedDiscoveredTools(new Set());
+      await load();
     } catch (err) {
       setToolError(err instanceof Error ? err.message : String(err));
     }
@@ -1368,7 +1497,10 @@ function WorkspaceTab() {
       tools: []
     });
     setToolDraft(null);
+    setMcpDraft(null);
+    setMcpServers([]);
     setDiscoveredTools([]);
+    setSelectedDiscoveredTools(new Set());
   }
 
   const workspaceTools = selected?.tools.filter((tool) => !isSystemTool(tool)) ?? [];
@@ -1413,8 +1545,89 @@ function WorkspaceTab() {
               </select>
             </label>
             <div className="section-heading">
-              <h2>工作空间工具</h2>
-              <button onClick={() => setToolDraft(createToolDraft(selected.id))}>添加工具</button>
+              <h2>MCP Server</h2>
+              <button onClick={() => setMcpDraft(createMcpServerDraft(selected.id))}>新增 Server</button>
+            </div>
+            <div className="workspace-tool-list">
+              {mcpServers.map((server) => (
+                <article key={server.id} className="tool-card">
+                  <div>
+                    <strong>{server.name}</strong>
+                    <span>{server.transport === "stdio" ? `${server.command ?? ""} ${server.argsJson}` : server.url}</span>
+                  </div>
+                  <small>{server.transport === "stdio" ? "本地 stdio" : "远程 Streamable HTTP"}</small>
+                  <div className="tool-card-actions">
+                    <button onClick={() => {
+                      setMcpDraft(server);
+                      setDiscoveredTools([]);
+                      setSelectedDiscoveredTools(new Set());
+                    }}>编辑</button>
+                    <button onClick={() => void deleteMcpServer(server)}>删除</button>
+                  </div>
+                </article>
+              ))}
+              {mcpServers.length === 0 && <div className="empty">这个工作空间还没有绑定 MCP Server。</div>}
+            </div>
+            {mcpDraft && (
+              <section className="tool-editor">
+                <div className="section-heading">
+                  <h2>{mcpServers.some((server) => server.id === mcpDraft.id) ? "编辑 MCP Server" : "注册 MCP Server"}</h2>
+                  <button onClick={() => setMcpDraft(null)}>收起</button>
+                </div>
+                {toolError && <div className="error inline-error"><span>{toolError}</span></div>}
+                <label>Server ID<input value={mcpDraft.id} onChange={(event) => setMcpDraft({ ...mcpDraft, id: event.target.value })} /></label>
+                <label>名称<input value={mcpDraft.name} onChange={(event) => setMcpDraft({ ...mcpDraft, name: event.target.value })} /></label>
+                <label>
+                  类型
+                  <select value={mcpDraft.transport} onChange={(event) => setMcpDraft({ ...mcpDraft, transport: event.target.value as McpServerDefinition["transport"] })}>
+                    <option value="stdio">本地 stdio</option>
+                    <option value="streamable-http">远程 Streamable HTTP</option>
+                  </select>
+                </label>
+                {mcpDraft.transport === "stdio" ? (
+                  <>
+                    <label>启动命令<input value={mcpDraft.command ?? ""} onChange={(event) => setMcpDraft({ ...mcpDraft, command: event.target.value })} /></label>
+                    <label>参数 JSON 数组<textarea className="json-editor" value={mcpDraft.argsJson} onChange={(event) => setMcpDraft({ ...mcpDraft, argsJson: event.target.value })} /></label>
+                    <label>环境变量 JSON<textarea className="json-editor" value={mcpDraft.envJson} onChange={(event) => setMcpDraft({ ...mcpDraft, envJson: event.target.value })} /></label>
+                    <label>工作目录<input value={mcpDraft.cwd ?? ""} onChange={(event) => setMcpDraft({ ...mcpDraft, cwd: event.target.value })} /></label>
+                  </>
+                ) : (
+                  <>
+                    <label>远程地址<input value={mcpDraft.url ?? ""} onChange={(event) => setMcpDraft({ ...mcpDraft, url: event.target.value })} /></label>
+                    <label>请求头 JSON<textarea className="json-editor" value={mcpDraft.headersJson} onChange={(event) => setMcpDraft({ ...mcpDraft, headersJson: event.target.value })} /></label>
+                  </>
+                )}
+                <label>超时毫秒<input type="number" value={mcpDraft.timeoutMs} onChange={(event) => setMcpDraft({ ...mcpDraft, timeoutMs: Number(event.target.value) })} /></label>
+                <div className="tool-editor-actions">
+                  <button className="primary" onClick={() => void saveMcpServer()}>保存 Server</button>
+                  <button onClick={() => void discoverMcpTools()}>检测工具</button>
+                  <button onClick={() => void importDiscoveredTools()} disabled={selectedDiscoveredTools.size === 0}>挂载选中工具</button>
+                </div>
+                {discoveredTools.length > 0 && (
+                  <div className="discovered-tools">
+                    {discoveredTools.map((tool) => (
+                      <label key={tool.name} className="check-row discovered-tool-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedDiscoveredTools.has(tool.name)}
+                          onChange={(event) => {
+                            const next = new Set(selectedDiscoveredTools);
+                            if (event.target.checked) next.add(tool.name);
+                            else next.delete(tool.name);
+                            setSelectedDiscoveredTools(next);
+                          }}
+                        />
+                        <span><strong>{tool.name}</strong><br />{tool.description || "没有说明"}</span>
+                        <small>MCP</small>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+            <div className="section-heading">
+              <h2>工作空间已挂载工具</h2>
+              <button onClick={() => setToolDraft(createToolDraft(selected.id))}>高级手动添加</button>
             </div>
             <div className="workspace-tool-list">
               {workspaceTools.map((tool) => (
@@ -1464,29 +1677,8 @@ function WorkspaceTab() {
                 <label>MCP Tool 名称<input value={toolDraft.mcpToolName ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, mcpToolName: event.target.value })} /></label>
                 <label>绑定配置 JSON<textarea className="json-editor" value={toolDraft.bindingJson ?? "{}"} onChange={(event) => setToolDraft({ ...toolDraft, bindingJson: event.target.value })} /></label>
                 <div className="tool-editor-actions">
-                  <button onClick={() => void discoverMcpTools()}>从 MCP Server 发现工具</button>
                   <button className="primary" onClick={() => void saveTool()}>保存到当前工作空间</button>
                 </div>
-                {discoveredTools.length > 0 && (
-                  <div className="discovered-tools">
-                    {discoveredTools.map((tool) => (
-                      <button
-                        key={tool.name}
-                        className="row"
-                        onClick={() => setToolDraft({
-                          ...toolDraft,
-                          name: tool.name,
-                          mcpToolName: tool.name,
-                          description: tool.description,
-                          parametersJson: JSON.stringify(tool.inputSchema, null, 2)
-                        })}
-                      >
-                        <strong>{tool.name}</strong>
-                        <span>{tool.description || "没有说明"}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
               </section>
             )}
             <h2>系统自动挂载工具</h2>

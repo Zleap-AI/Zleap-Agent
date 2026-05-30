@@ -4,6 +4,7 @@ import { Repositories } from "../db/repositories";
 import { AgentRuntime } from "../core/agent-runtime";
 import { MemoryService } from "../core/memory-service";
 import { McpToolExecutor } from "../core/mcp-executor";
+import { mcpServerToBindingJson } from "../db/repositories";
 import { normalizeProviderBaseUrl } from "../core/llm-client";
 import { parseActor, parseActorFromSearchParams } from "./actor";
 import { readJson, sendError, sendJson, serveStatic } from "./http";
@@ -131,6 +132,68 @@ const server = http.createServer(async (request, response) => {
       const actor = parseActor(body, "MCP tool discovery API");
       if (actor.actorRole !== "creator") throw new Error("MCP tool discovery requires creator role.");
       sendJson(response, 200, { tools: await mcpToolExecutor.discoverTools(body.bindingJson ?? "{}") });
+      return;
+    }
+    const workspaceMcpCollectionMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/mcp-servers$/);
+    if (workspaceMcpCollectionMatch && request.method === "GET") {
+      parseActorFromSearchParams(url.searchParams, "MCP server list API");
+      sendJson(response, 200, { mcpServers: repos.listMcpServers(workspaceMcpCollectionMatch[1]) });
+      return;
+    }
+    if (workspaceMcpCollectionMatch && request.method === "POST") {
+      const body = await readJson<any>(request);
+      const actor = parseActor(body, "MCP server create API");
+      sendJson(response, 200, repos.upsertMcpServer({
+        ...body,
+        workspaceId: workspaceMcpCollectionMatch[1],
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
+      }));
+      return;
+    }
+    const workspaceMcpServerMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/mcp-servers\/([^/]+)$/);
+    if (workspaceMcpServerMatch && request.method === "PUT") {
+      const body = await readJson<any>(request);
+      const actor = parseActor(body, "MCP server update API");
+      sendJson(response, 200, repos.upsertMcpServer({
+        ...body,
+        id: workspaceMcpServerMatch[2],
+        workspaceId: workspaceMcpServerMatch[1],
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
+      }));
+      return;
+    }
+    if (workspaceMcpServerMatch && request.method === "DELETE") {
+      const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator"; deleteReason?: string }>(request);
+      const actor = parseActor(body, "MCP server delete API");
+      repos.deleteMcpServer(workspaceMcpServerMatch[1], workspaceMcpServerMatch[2], actor.actorId, actor.actorRole, body.deleteReason);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+    const workspaceMcpDiscoverMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/mcp-servers\/([^/]+)\/discover$/);
+    if (workspaceMcpDiscoverMatch && request.method === "POST") {
+      const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator" }>(request);
+      const actor = parseActor(body, "MCP server discovery API");
+      if (actor.actorRole !== "creator") throw new Error("MCP server discovery requires creator role.");
+      const server = repos.getMcpServer(workspaceMcpDiscoverMatch[2]);
+      if (server.workspaceId !== workspaceMcpDiscoverMatch[1]) throw new Error("MCP server belongs to a different workspace.");
+      sendJson(response, 200, { tools: await mcpToolExecutor.discoverTools(mcpServerToBindingJson(server)) });
+      return;
+    }
+    const workspaceMcpImportMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/mcp-servers\/([^/]+)\/import-tools$/);
+    if (workspaceMcpImportMatch && request.method === "POST") {
+      const body = await readJson<{ tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>; actorId?: string; actorRole?: "user" | "creator" }>(request);
+      const actor = parseActor(body, "MCP tool import API");
+      sendJson(response, 200, {
+        tools: repos.importMcpServerTools({
+          workspaceId: workspaceMcpImportMatch[1],
+          serverId: workspaceMcpImportMatch[2],
+          tools: body.tools ?? [],
+          actorId: actor.actorId,
+          actorRole: actor.actorRole
+        })
+      });
       return;
     }
     if (url.pathname === "/api/workspaces" && request.method === "POST") {

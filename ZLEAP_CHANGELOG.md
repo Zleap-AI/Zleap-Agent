@@ -2,6 +2,29 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 05:36 +08:00
+
+Purpose:
+- Correct the MCP product/runtime model from tool-first binding to workspace-scoped MCP Server binding.
+- Make MCP setup usable for both local stdio servers and remote Streamable HTTP servers: save server, detect tools, choose mounted tools, then execute through the generated binding.
+
+Changed:
+- Added the `mcp_servers` SQLite table, `McpServerDefinition` type, repository CRUD, server-to-binding generation, and workspace-scoped MCP tool import.
+- Added HTTP APIs under `/api/workspaces/:workspaceId/mcp-servers` for list/create/update/delete/discover/import.
+- Updated MCP execution parsing to accept `streamable-http` transport names and kept execution on the official TypeScript SDK client.
+- Reworked the Workspace UI so MCP Server management is the primary workflow, with discovery and selected-tool mounting inside the current workspace.
+- Changed seeded file/CLI capability tools back to placeholders until a real MCP Server is bound, so fake local MCP IDs are not presented as working tools.
+- Updated tests and docs to reflect server-first MCP setup and creator-gated MCP installation.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 05:27 +08:00
 
 Purpose:

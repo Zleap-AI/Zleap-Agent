@@ -317,8 +317,8 @@ export function seedDefaults(db: Database.Database): void {
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.exitWorkspace" }), null, null, now, "tool-exit-workspace");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.askUser" }), null, null, now, "tool-ask-user");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.finishTask" }), null, null, now, "tool-finish-task");
-  updateToolBinding.run("mcp", JSON.stringify({ expectedServer: "local.file", expectedTool: "searchFiles" }), "local.file", "searchFiles", now, "tool-search-files");
-  updateToolBinding.run("mcp", JSON.stringify({ expectedServer: "local.cli", expectedTool: "runCommand" }), "local.cli", "runCommand", now, "tool-run-command");
+  updateToolBinding.run("placeholder", JSON.stringify({ reason: "Bind an MCP server in the workspace UI, discover tools, then import selected tools." }), null, null, now, "tool-search-files");
+  updateToolBinding.run("placeholder", JSON.stringify({ reason: "Bind an MCP server in the workspace UI, discover tools, then import selected tools." }), null, null, now, "tool-run-command");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.searchMemory" }), null, null, now, "tool-search-memory");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeUserImpression" }), null, null, now, "tool-write-user-impression");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeAgentSelfImpression" }), null, null, now, "tool-write-agent-self-impression");

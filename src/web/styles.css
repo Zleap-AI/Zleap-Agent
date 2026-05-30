@@ -715,6 +715,10 @@ pre {
   overflow: auto;
 }
 
+.discovered-tool-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
 .locked-tool {
   background: #f8fafb;
   color: #5c6975;

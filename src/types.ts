@@ -129,6 +129,24 @@ export type WorkspaceDefinition = {
   tools: ToolDefinition[];
 };
 
+export type McpTransport = "stdio" | "streamable-http";
+
+export type McpServerDefinition = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  transport: McpTransport;
+  command?: string;
+  argsJson: string;
+  envJson: string;
+  cwd?: string;
+  url?: string;
+  headersJson: string;
+  timeoutMs: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ToolDefinition = {
   id: string;
   name: string;

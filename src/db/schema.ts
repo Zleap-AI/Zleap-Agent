@@ -103,6 +103,23 @@ export function migrate(db: Database.Database): void {
       FOREIGN KEY (toolId) REFERENCES tool_definitions(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS mcp_servers (
+      id TEXT PRIMARY KEY,
+      workspaceId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      transport TEXT NOT NULL CHECK (transport IN ('stdio', 'streamable-http')),
+      command TEXT,
+      argsJson TEXT NOT NULL DEFAULT '[]',
+      envJson TEXT NOT NULL DEFAULT '{}',
+      cwd TEXT,
+      url TEXT,
+      headersJson TEXT NOT NULL DEFAULT '{}',
+      timeoutMs INTEGER NOT NULL DEFAULT 30000,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      FOREIGN KEY (workspaceId) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS workspace_sessions (
       id TEXT PRIMARY KEY,
       conversationId TEXT NOT NULL,
@@ -261,6 +278,7 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, "tool_definitions", "mcpServerId", "TEXT");
   ensureColumn(db, "tool_definitions", "mcpToolName", "TEXT");
   ensureColumn(db, "tool_definitions", "workspaceId", "TEXT");
+  ensureColumn(db, "mcp_servers", "timeoutMs", "INTEGER NOT NULL DEFAULT 30000");
   ensureColumn(db, "memories", "deletedAt", "TEXT");
   ensureColumn(db, "memories", "deletedBy", "TEXT");
   ensureColumn(db, "memories", "deleteReason", "TEXT");

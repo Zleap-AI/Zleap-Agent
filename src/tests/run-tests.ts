@@ -3,10 +3,11 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
-import { Repositories } from "../db/repositories";
+import { Repositories, mcpServerToBindingJson } from "../db/repositories";
 import { AgentRuntime } from "../core/agent-runtime";
 import { MemoryService } from "../core/memory-service";
 import { WorkspaceRuntime } from "../core/workspace-runtime";
+import { McpToolExecutor } from "../core/mcp-executor";
 import { parseActor, parseActorFromSearchParams } from "../server/actor";
 import type { ChatCompletionInput, ChatCompletionOutput, LLMClient, LLMStreamEvent } from "../core/llm-client";
 import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl } from "../core/llm-client";
@@ -1540,7 +1541,7 @@ async function testRuntimeContextAndTools() {
   assert.equal(childLocalConversationPayload.messages.length, 0);
   assert.equal(childLocalConversationPayload.recentToolEvidence.length, 0);
   assert.equal(childInput?.messages[0]?.content?.includes("\"name\": \"searchFiles\""), true);
-  assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"mcp\""), true);
+  assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"placeholder\""), true);
   const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.length, 1);
@@ -3971,10 +3972,10 @@ async function testToolBindingsAndMcpReadiness() {
   const searchMemory = repos.listTools().find((tool) => tool.name === "searchMemory");
   const updateMemory = repos.listTools().find((tool) => tool.name === "updateMemory");
   const deleteMemory = repos.listTools().find((tool) => tool.name === "deleteMemory");
-  assert.equal(searchFiles?.bindingType, "mcp");
-  assert.equal(searchFiles?.mcpServerId, "local.file");
-  assert.equal(runCommand?.bindingType, "mcp");
-  assert.equal(runCommand?.mcpToolName, "runCommand");
+  assert.equal(searchFiles?.bindingType, "placeholder");
+  assert.equal(searchFiles?.mcpServerId, null);
+  assert.equal(runCommand?.bindingType, "placeholder");
+  assert.equal(runCommand?.mcpToolName, null);
   assert.equal(exitWorkspace?.bindingType, "runtime");
   assert.equal(writeUserImpression?.bindingType, "runtime");
   assert.equal(searchMemory?.bindingType, "runtime");
@@ -4022,8 +4023,7 @@ async function testToolBindingsAndMcpReadiness() {
       apiKey: "test-key"
     }
   });
-  assert.equal(mcpTool.lastToolResult.includes("MCP stdio binding requires command"), true);
-  assert.equal(mcpTool.lastToolResult.includes("local.file"), true);
+  assert.equal(mcpTool.lastToolResult.includes("not bound to a runtime or MCP executor"), true);
   const mcpTrace = repos.getTrace("conv-tool-binding-mcp", "creator", "creator");
   assert.equal(mcpTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
   assert.equal(mcpTrace.toolCalls.some((call) => call.toolName === "searchFiles" && call.status === "failed"), true);
@@ -4032,31 +4032,46 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(mcpFileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status failed")), true);
 
   const echoServerPath = path.resolve("src/tests/fixtures/mcp-echo-server.mjs");
-  repos.upsertWorkspaceTool({
-    id: "tool-file-echo-mcp",
+  const echoServer = repos.upsertMcpServer({
+    id: "mcp-file-echo",
     workspaceId: "file",
-    name: "echoMcp",
-    description: "Call the test MCP echo tool.",
-    parametersJson: JSON.stringify({
-      type: "object",
-      properties: { text: { type: "string" } },
-      required: ["text"],
-      additionalProperties: false
-    }),
-    riskLevel: "low",
-    bindingType: "mcp",
-    bindingJson: JSON.stringify({
-      transport: "stdio",
-      command: process.execPath,
-      args: [echoServerPath],
-      timeoutMs: 10000
-    }),
-    mcpServerId: "test.echo",
-    mcpToolName: "echo",
+    name: "Test Echo MCP",
+    transport: "stdio",
+    command: process.execPath,
+    argsJson: JSON.stringify([echoServerPath]),
+    envJson: "{}",
+    headersJson: "{}",
+    timeoutMs: 10000,
     actorId: "creator",
     actorRole: "creator"
   });
-  const echoClient = new MainToWorkspaceToolRequestLLMClient("file", "echoMcp", { text: "hello" });
+  assert.equal(echoServer.transport, "stdio");
+  assert.equal(JSON.parse(mcpServerToBindingJson(echoServer)).command, process.execPath);
+  assert.throws(() => repos.upsertMcpServer({
+    workspaceId: "file",
+    name: "User server",
+    transport: "stdio",
+    command: process.execPath,
+    argsJson: "[]",
+    envJson: "{}",
+    headersJson: "{}",
+    actorId: "tool-binding-user",
+    actorRole: "user"
+  }), /creator role/);
+  const discoveredEchoTools = await new McpToolExecutor().discoverTools(mcpServerToBindingJson(echoServer));
+  assert.equal(discoveredEchoTools.some((tool) => tool.name === "echo"), true);
+  const importedEchoTools = repos.importMcpServerTools({
+    workspaceId: "file",
+    serverId: echoServer.id,
+    tools: discoveredEchoTools,
+    actorId: "creator",
+    actorRole: "creator"
+  });
+  const importedEcho = importedEchoTools.find((tool) => tool.name === "echo");
+  assert.equal(importedEcho?.bindingType, "mcp");
+  assert.equal(importedEcho?.mcpServerId, echoServer.id);
+  assert.equal(importedEcho?.mcpToolName, "echo");
+  const echoClient = new MainToWorkspaceToolRequestLLMClient("file", "echo", { text: "hello" });
   const echoRuntime = new AgentRuntime(repos, echoClient);
   await echoRuntime.run({
     agentId: "default-agent",
@@ -4072,7 +4087,7 @@ async function testToolBindingsAndMcpReadiness() {
   });
   assert.equal(echoClient.lastToolResult.includes("echo:hello"), true);
   const echoTrace = repos.getTrace("conv-tool-binding-mcp-echo", "creator", "creator");
-  assert.equal(echoTrace.toolCalls.some((call) => call.toolName === "echoMcp" && call.status === "completed"), true);
+  assert.equal(echoTrace.toolCalls.some((call) => call.toolName === "echo" && call.status === "completed"), true);
 
   const enterWorkspace = new SingleToolRequestLLMClient("enterWorkspace", { workspaceId: "file", objective: "search runtime files" });
   const enterRuntime = new AgentRuntime(repos, enterWorkspace);

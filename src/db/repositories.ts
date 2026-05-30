@@ -5,6 +5,7 @@ import type {
   AuditLog,
   ContextSegment,
   LLMCallSnapshot,
+  McpServerDefinition,
   MemoryRow,
   StoredMessage,
   ToolDefinition,
@@ -23,6 +24,37 @@ function parseJson<T>(value: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function parseStrictJson<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    throw new Error(`${label} must be valid JSON.`);
+  }
+}
+
+function sanitizeToolIdPart(value: string): string {
+  return value.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "tool";
+}
+
+export function mcpServerToBindingJson(server: Pick<McpServerDefinition, "transport" | "command" | "argsJson" | "envJson" | "cwd" | "url" | "headersJson" | "timeoutMs">): string {
+  if (server.transport === "stdio") {
+    return JSON.stringify({
+      transport: "stdio",
+      command: server.command,
+      args: parseStrictJson<string[]>(server.argsJson || "[]", "MCP server argsJson"),
+      env: parseStrictJson<Record<string, string>>(server.envJson || "{}", "MCP server envJson"),
+      cwd: server.cwd || undefined,
+      timeoutMs: server.timeoutMs
+    });
+  }
+  return JSON.stringify({
+    transport: "streamable-http",
+    url: server.url,
+    headers: parseStrictJson<Record<string, string>>(server.headersJson || "{}", "MCP server headersJson"),
+    timeoutMs: server.timeoutMs
+  });
 }
 
 function buildFtsQuery(value: string): string {
@@ -239,6 +271,159 @@ export class Repositories {
     const row = this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as Omit<WorkspaceDefinition, "tools"> | undefined;
     if (!row) throw new Error(`Workspace not found: ${id}`);
     return normalizeWorkspace(row, this.listToolsForWorkspace(id));
+  }
+
+  listMcpServers(workspaceId?: string): McpServerDefinition[] {
+    if (workspaceId) {
+      return this.db.prepare("SELECT * FROM mcp_servers WHERE workspaceId = ? ORDER BY name").all(workspaceId) as McpServerDefinition[];
+    }
+    return this.db.prepare("SELECT * FROM mcp_servers ORDER BY workspaceId, name").all() as McpServerDefinition[];
+  }
+
+  getMcpServer(id: string): McpServerDefinition {
+    const row = this.db.prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as McpServerDefinition | undefined;
+    if (!row) throw new Error(`MCP server not found: ${id}`);
+    return row;
+  }
+
+  upsertMcpServer(input: Partial<McpServerDefinition> & Pick<McpServerDefinition, "workspaceId" | "name" | "transport"> & { actorId: string; actorRole: UserRole }): McpServerDefinition {
+    if (input.actorRole !== "creator") throw new Error("MCP server setup requires creator role.");
+    this.getWorkspace(input.workspaceId);
+    const id = input.id?.trim() || createId("mcp");
+    const name = input.name.trim();
+    if (!name) throw new Error("MCP server name is required.");
+    if (input.transport !== "stdio" && input.transport !== "streamable-http") throw new Error("MCP server transport must be stdio or streamable-http.");
+    const args = parseStrictJson<unknown>(input.argsJson || "[]", "MCP server argsJson");
+    if (!Array.isArray(args) || args.some((item) => typeof item !== "string")) throw new Error("MCP server argsJson must be a JSON string array.");
+    const env = parseStrictJson<unknown>(input.envJson || "{}", "MCP server envJson");
+    if (!env || typeof env !== "object" || Array.isArray(env)) throw new Error("MCP server envJson must be a JSON object.");
+    const headers = parseStrictJson<unknown>(input.headersJson || "{}", "MCP server headersJson");
+    if (!headers || typeof headers !== "object" || Array.isArray(headers)) throw new Error("MCP server headersJson must be a JSON object.");
+    if (input.transport === "stdio" && !input.command?.trim()) throw new Error("Local stdio MCP server requires command.");
+    if (input.transport === "streamable-http" && !input.url?.trim()) throw new Error("Remote MCP server requires url.");
+    const timeoutMs = Math.max(1000, Math.min(10 * 60 * 1000, Math.floor(Number(input.timeoutMs ?? 30000))));
+    const now = nowIso();
+    const existing = this.db.prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as McpServerDefinition | undefined;
+    if (existing && existing.workspaceId !== input.workspaceId) throw new Error("MCP server belongs to a different workspace.");
+
+    this.db.prepare(`
+      INSERT INTO mcp_servers
+        (id, workspaceId, name, transport, command, argsJson, envJson, cwd, url, headersJson, timeoutMs, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        transport = excluded.transport,
+        command = excluded.command,
+        argsJson = excluded.argsJson,
+        envJson = excluded.envJson,
+        cwd = excluded.cwd,
+        url = excluded.url,
+        headersJson = excluded.headersJson,
+        timeoutMs = excluded.timeoutMs,
+        updatedAt = excluded.updatedAt
+    `).run(
+      id,
+      input.workspaceId,
+      name,
+      input.transport,
+      input.transport === "stdio" ? input.command?.trim() : null,
+      JSON.stringify(args),
+      JSON.stringify(env),
+      input.transport === "stdio" ? input.cwd?.trim() || null : null,
+      input.transport === "streamable-http" ? input.url?.trim() : null,
+      JSON.stringify(headers),
+      timeoutMs,
+      existing?.createdAt ?? now,
+      now
+    );
+    this.audit(input.actorId, input.actorRole, existing ? "mcp_server_update" : "mcp_server_create", "mcp_server", id, {
+      workspaceId: input.workspaceId,
+      transport: input.transport,
+      name
+    });
+    return this.getMcpServer(id);
+  }
+
+  deleteMcpServer(workspaceId: string, serverId: string, actorId: string, actorRole: UserRole, deleteReason = "manual MCP server delete"): void {
+    if (actorRole !== "creator") throw new Error("MCP server deletion requires creator role.");
+    const server = this.getMcpServer(serverId);
+    if (server.workspaceId !== workspaceId) throw new Error("MCP server belongs to a different workspace.");
+    this.db.transaction(() => {
+      const tools = this.db.prepare("SELECT id FROM tool_definitions WHERE workspaceId = ? AND mcpServerId = ?").all(workspaceId, serverId) as Array<{ id: string }>;
+      for (const tool of tools) {
+        this.db.prepare("DELETE FROM workspace_tools WHERE workspaceId = ? AND toolId = ?").run(workspaceId, tool.id);
+        this.db.prepare("DELETE FROM tool_definitions WHERE id = ?").run(tool.id);
+      }
+      this.db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(serverId);
+      this.audit(actorId, actorRole, "mcp_server_delete", "mcp_server", serverId, {
+        workspaceId,
+        serverName: server.name,
+        deletedToolIds: tools.map((tool) => tool.id),
+        deleteReason
+      });
+    })();
+  }
+
+  importMcpServerTools(input: {
+    workspaceId: string;
+    serverId: string;
+    tools: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
+    actorId: string;
+    actorRole: UserRole;
+  }): ToolDefinition[] {
+    if (input.actorRole !== "creator") throw new Error("MCP tool import requires creator role.");
+    const server = this.getMcpServer(input.serverId);
+    if (server.workspaceId !== input.workspaceId) throw new Error("MCP server belongs to a different workspace.");
+    const bindingJson = mcpServerToBindingJson(server);
+    const now = nowIso();
+    const imported: ToolDefinition[] = [];
+    this.db.transaction(() => {
+      for (const discovered of input.tools) {
+        const name = discovered.name.trim();
+        if (!name) continue;
+        const existingByName = this.db.prepare("SELECT * FROM tool_definitions WHERE name = ?").get(name) as ToolDefinition | undefined;
+        if (existingByName && (existingByName.workspaceId !== input.workspaceId || existingByName.mcpServerId !== input.serverId || existingByName.mcpToolName !== name)) {
+          throw new Error(`Tool name already exists outside this MCP server binding: ${name}`);
+        }
+        const id = existingByName?.id ?? `tool-${sanitizeToolIdPart(input.workspaceId)}-${sanitizeToolIdPart(input.serverId)}-${sanitizeToolIdPart(name)}`;
+        this.db.prepare(`
+          INSERT INTO tool_definitions
+            (id, name, workspaceId, description, parametersJson, riskLevel, bindingType, bindingJson, mcpServerId, mcpToolName, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            workspaceId = excluded.workspaceId,
+            description = excluded.description,
+            parametersJson = excluded.parametersJson,
+            riskLevel = excluded.riskLevel,
+            bindingType = excluded.bindingType,
+            bindingJson = excluded.bindingJson,
+            mcpServerId = excluded.mcpServerId,
+            mcpToolName = excluded.mcpToolName,
+            updatedAt = excluded.updatedAt
+        `).run(
+          id,
+          name,
+          input.workspaceId,
+          discovered.description ?? "",
+          JSON.stringify(discovered.inputSchema ?? { type: "object", properties: {}, additionalProperties: true }),
+          "low",
+          "mcp",
+          bindingJson,
+          input.serverId,
+          name,
+          existingByName?.createdAt ?? now,
+          now
+        );
+        this.db.prepare("INSERT OR IGNORE INTO workspace_tools (workspaceId, toolId, createdAt) VALUES (?, ?, ?)").run(input.workspaceId, id, now);
+        imported.push(this.getTool(id));
+      }
+      this.audit(input.actorId, input.actorRole, "mcp_tools_import", "mcp_server", input.serverId, {
+        workspaceId: input.workspaceId,
+        toolNames: imported.map((tool) => tool.name)
+      });
+    })();
+    return imported;
   }
 
   upsertWorkspace(input: Omit<WorkspaceDefinition, "tools" | "createdAt" | "updatedAt"> & { toolIds: string[]; actorId: string; actorRole: UserRole }): WorkspaceDefinition {

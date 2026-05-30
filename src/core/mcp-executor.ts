@@ -14,7 +14,7 @@ type McpBinding =
       timeoutMs?: number;
     }
   | {
-      transport: "streamableHttp";
+      transport: "streamableHttp" | "streamable-http" | "http" | "remote";
       url?: string;
       headers?: Record<string, string>;
       timeoutMs?: number;
@@ -106,18 +106,19 @@ function parseBinding(value: string): McpBinding {
 }
 
 function createTransport(binding: McpBinding): StdioClientTransport | StreamableHTTPClientTransport {
-  if (binding.transport === "streamableHttp") {
+  if (binding.transport === "streamableHttp" || binding.transport === "streamable-http" || binding.transport === "http" || binding.transport === "remote") {
     if (!binding.url) throw new Error("MCP Streamable HTTP binding requires url.");
     return new StreamableHTTPClientTransport(new URL(binding.url), {
       requestInit: binding.headers ? { headers: binding.headers } : undefined
     });
   }
-  if (!binding.command) throw new Error("MCP stdio binding requires command.");
+  const stdioBinding = binding as Extract<McpBinding, { transport?: "stdio" }>;
+  if (!stdioBinding.command) throw new Error("MCP stdio binding requires command.");
   return new StdioClientTransport({
-    command: binding.command,
-    args: Array.isArray(binding.args) ? binding.args : [],
-    env: binding.env,
-    cwd: binding.cwd,
+    command: stdioBinding.command,
+    args: Array.isArray(stdioBinding.args) ? stdioBinding.args : [],
+    env: stdioBinding.env,
+    cwd: stdioBinding.cwd,
     stderr: "pipe"
   });
 }

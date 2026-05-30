@@ -6,6 +6,8 @@ In context display and prompt assembly, workspace information is one top-level c
 
 ## 2026-05-31 update: workspace-first tool registration and MCP execution
 
+2026-05-31 clarification: MCP setup is server-first, not tool-first. A workspace owns one or more MCP Server definitions. Each server is either local stdio (`command`, `args`, `env`, `cwd`) or remote Streamable HTTP (`url`, `headers`). The UI saves the server, runs discovery against that selected server with `client.listTools()`, then lets the creator choose which discovered tools to mount into the same workspace. Imported tools store the discovered name, description, input schema, `mcpServerId`, `mcpToolName`, and a generated execution binding snapshot. Users should not have to decide per tool which MCP Server it came from; that is derived from the server being discovered.
+
 工具安装的产品心智是先有 workspace，再把工具注册进这个 workspace。底层 SQLite 仍可用 `tool_definitions` 和 `workspace_tools` 做规范化存储，但非 runtime 工具必须带有明确的 workspace 归属；UI 不应该把工具表现成一个所有 workspace 共享的全局池。
 
 workspace 工具管理需要支持：
