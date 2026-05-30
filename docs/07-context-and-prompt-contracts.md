@@ -1,5 +1,30 @@
 # Context and Prompt Contracts
 
+## 2026-05-31 update: context stack categories
+
+Context stack should be clear to inspect in the Web UI. The top-level categories are intentionally few:
+
+```text
+1. system
+2. workspace
+3. memory
+4. history
+5. user
+6. tool_result / final_messages for follow-up debug
+```
+
+Second-level sections live inside those categories:
+
+- `system`: base system prompt, personality prompt, and internal runtime strategy. Runtime policy is not a separate top-level context category.
+- `workspace`: active workspace description, instructions, tool instructions, manifest, memory policy, current callable tool definitions, and for `main` only the available workspace manifest list.
+- `memory`: cross-workspace impression memory, current-workspace event memory, and current-workspace skill memory.
+- `history`: local conversation messages, current structured task, completed workspace results, and recent local tool evidence.
+- `user`: the clean current user message.
+
+`WorkspaceSession.localContext` remains an internal persisted trace object, but it should not be shown or injected as its own top-level context category. Its parts are distributed into the clearer categories above: recalled memory goes to `memory`, available tools go to `workspace`, and current task / recent tool evidence / completed workspace results go to `history`.
+
+The synthetic tool results follow the same simplified structure: `runtime_context.memory` mirrors the `memory` category, and `runtime_context.local_conversation` mirrors the `history` category. The model still receives a clean final user message.
+
 ## 2026-05-30 更新：子 workspace 上下文交付契约
 
 子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`。
@@ -28,7 +53,7 @@ Workspace-exit memory evidence belongs to the committed child session, not to ev
 
 Main workspace has two terminal orchestration tools: `askUser` and `finishTask`. These are not ordinary intermediate tool results. A successful `askUser` call commits the main session as `needs_user_input` and returns the question directly to the user; a successful `finishTask` call commits the main session as `completed` and returns the provided final response directly. The committed result, tool call, and final message must remain inspectable in trace/context, but runtime should not ask the LLM for another pass merely to restate the terminal tool result.
 
-The active `WorkspaceSession.localContext` is the authoritative memory/context snapshot for a workspace LLM call. After `WorkspaceRuntime` recalls impressions/events/skills for a session, `ContextBuilder` and `PromptAssembler` must inject those exact partitions into `impression_memory`, `event_memory`, `skill_memory`, and the synthetic `runtime_context.load` tool result. Runtime must not perform a second independent recall during prompt assembly, because that would make the persisted session trace differ from what the model actually saw.
+The active `WorkspaceSession.localContext` remains the authoritative persisted runtime snapshot for a workspace LLM call, but it is not exposed as a top-level prompt category. After `WorkspaceRuntime` recalls impressions/events/skills for a session, `ContextBuilder` and `PromptAssembler` must inject those exact partitions into the `memory` segment and the synthetic `runtime_context.memory` tool result. Runtime must not perform a second independent recall during prompt assembly, because that would make the persisted session trace differ from what the model actually saw.
 
 Runtime memory-write tools use the same code-bound context contract. Event and skill writes receive active workspace scope from runtime. Impression writes receive user/agent scope from runtime and stay cross-workspace, but still persist origin workspace/session/task evidence when available. Skill and impression trace metadata can include `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`; these fields are trace/debug evidence, not model-controlled arguments.
 

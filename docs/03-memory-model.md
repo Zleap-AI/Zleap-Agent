@@ -1,5 +1,9 @@
 # Memory Model
 
+## 2026-05-31 update: impression write instruction
+
+Impression memory writes must be explained in the system prompt, not hidden in a separate UI-only policy category. The system prompt should tell the model to call `writeUserImpression` only for stable long-term user preferences, background, identity, or constraints, while short-term task facts should remain in local conversation or event memory.
+
 ## 总览
 
 Zleap 的 memory 不应该是一个扁平的“长期记忆”集合。

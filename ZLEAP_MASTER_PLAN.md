@@ -35,17 +35,17 @@
   - `WorkspaceLocalContext` captures the active workspace manifest, memory policy, parent context summary, recalled impression/event/skill partitions, available tool binding metadata, and recent tool calls produced inside the current workspace session.
   - `WorkspaceLocalContext.availableTools` must mirror the runtime callable tool visibility for that workspace, including universal memory tools and child-only `exitWorkspace`, while excluding main-only tools from child workspaces even if misconfigured in `workspace_tools`.
   - The active `WorkspaceSession.localContext` is the authoritative source for memory injected into that workspace's LLM call. Prompt assembly must not run a second independent memory recall that can diverge from the persisted session trace.
-  - `ContextBuilder` stores full context segment snapshots.
+  - `ContextBuilder` stores clear first-level context segment snapshots with second-level sections inside each segment.
   - Context assembly uses an explicit `AttentionBudgetManager` before prompt assembly. Budgeting must preserve valid JSON for structured runtime partitions such as memory, task, history, workspace results, and tool results, so context trimming does not silently erase parsed payloads.
   - `PromptAssembler` produces OpenAI-compatible chat messages.
-  - User messages stay clean. System, personality, policy, and workspace instructions are system-level partitions.
+  - User messages stay clean. System prompt, personality prompt, and internal runtime strategy are merged into the single `system` context segment and the single OpenAI-compatible system message.
   - Final user-facing assistant replies must not expose runtime, workspace, context stack, memory injection, or tool orchestration details. Those mechanics are internal unless the user explicitly asks to inspect them.
   - The default personality prompt guides natural human-like replies. It must not mention workspace/context/runtime internals.
   - Agent stable identity configuration is creator-gated. Persisted agent name, system prompt, personality prompt, default model, and default base URL are architecture/identity settings, not ordinary per-user chat preferences.
   - Main workspace must receive the full available workspace manifest list as runtime-injected context. It should not call a `listWorkspaces` tool to discover workspaces.
   - Each turn starts in the `main` workspace. The initial LLM call can use main orchestration tools plus the workspace's memory tools; child capability tools are not exposed until `main` explicitly calls `enterWorkspace`.
   - Local conversation history is workspace-scoped. `main` may receive a bounded recent conversation slice for orchestration, but child workspaces must not receive the full global chat history; they rely on `WorkspaceTask`, `WorkspaceLocalContext`, recalled memory, recent local tool evidence, and explicit `WorkspaceResult` summaries.
-  - Workspace registry visibility is also scoped: `main` receives the full workspace manifest list for orchestration, while child workspaces receive only their active workspace manifest through the active workspace contract and must return to `main` instead of choosing sibling workspaces directly.
+  - Workspace registry visibility is also scoped: `main` receives the full workspace manifest list as part of its workspace contract, while child workspaces receive only their active workspace contract and must return to `main` instead of choosing sibling workspaces directly.
   - When `enterWorkspace` succeeds, runtime creates a structured child `WorkspaceSession`, switches the active workspace for follow-up LLM calls, rebuilds context with that workspace's contract/memory/tools, and persists a new inspectable LLM call snapshot for the child workspace.
   - Child workspaces remain `running` until they call runtime-bound `exitWorkspace` with a structured `WorkspaceResult`; runtime then updates the child `WorkspaceSession`, switches active context back to `main`, rebuilds main context with the returned result, and persists another inspectable LLM call for main integration.
   - `exitWorkspace` is the only normal handoff from child workspace to main. The handoff payload is `WorkspaceResult`: status, summary, artifacts, observations, errors, and suggestedNextSteps. Raw tool outputs, recalled memory, local scratch reasoning, and detailed evidence stay in the child `WorkspaceSession`, `tool_calls`, `audit_logs`, and memory evidence metadata for debugging rather than being flattened into main context.
@@ -67,7 +67,7 @@
   - Memory/context recall is performed by runtime and injected as a synthetic tool result.
   - Recalled memory must be partitioned by memory type before prompt assembly: cross-workspace impression memory, active-workspace event memory, and active-workspace skill memory are separate context stack segments and separate fields in the synthetic runtime memory tool result.
   - Automatic runtime recall must fetch impression, event, and skill partitions separately before applying prompt caps. A crowded skill or impression partition must not consume the global SQL limit and starve active-workspace event recall.
-  - Active workspace task, workspace-local context, and prior workspace results are injected as synthetic runtime tool results, keeping the user message clean while making the execution contract inspectable.
+  - Active workspace task, completed workspace results, and recent local tool evidence are grouped under the `history` / local conversation segment instead of appearing as separate top-level context categories.
   - Follow-up LLM calls created during tool loops must persist their own context snapshots, including `tool_result` and `final_messages` segments, so the Web UI can inspect exactly what the model saw after each tool execution.
   - Runtime runs an `afterAgentTurn` memory lifecycle hook after assistant responses.
   - Streaming and non-streaming turns must persist the final assistant message before running `afterAgentTurn`, so conversation-window event extraction sees the same completed user/assistant message window in both paths.
@@ -268,25 +268,25 @@
   - Streaming `streamEvents` tool loops support multiple tool rounds, stop at the configured maximum round count, persist every follow-up LLM call, and write an audit log instead of allowing unbounded autonomous execution.
 - Context:
   - Current user message remains clean.
-  - Context stack preserves system/personality/policy/workspace/task/workspace result/impression memory/event memory/skill memory/history/tool result partitions.
+  - Context stack first-level categories are intentionally small and stable: `system`, `workspace`, `memory`, `history`, `user`, plus follow-up debug segments such as `tool_result` and `final_messages`. Second-level sections carry details such as active workspace instructions, available workspaces, tool definitions, memory partitions, current task, completed workspace results, and recent tool evidence.
   - Attention budgeting keeps structured context partitions parseable after trimming and prevents long history, memory, tool results, or workspace-local context from turning the framework back into a large flat-context agent.
-  - Child workspace history is not the parent conversation transcript. Old global chat messages may appear in the bounded `main` orchestration slice but must not be injected into child workspace `runtime_context.history`.
-  - Child workspace context does not include the full workspace registry. Only `main` sees sibling workspace manifests; child workspace prompts see their own active manifest and return structured results to `main`.
+  - Child workspace history is not the parent conversation transcript. Old global chat messages may appear in the bounded `main` orchestration slice but must not be injected into a child workspace's `runtime_context.local_conversation`.
+  - Child workspace context does not include the full workspace registry. Only `main` sees sibling workspace manifests inside its workspace contract; child workspace prompts see their own active workspace instructions and tool definitions, then return structured results to `main`.
   - Every follow-up LLM call after function-call execution stores inspectable `tool_result` and `final_messages` context segments, not only the initial turn context.
-  - Active workspace context includes manifest metadata and workspace memory policy.
+  - Active workspace context includes workspace description/instructions, tool instructions, manifest metadata, memory policy, and current callable tool definitions in the single `workspace` category.
   - The context stack after `enterWorkspace` is rebuilt around the child workspace and includes the `enterWorkspace` tool result plus the target workspace task/result.
   - The context stack after `exitWorkspace` is rebuilt around `main` and includes the child workspace's returned structured result.
   - Malformed `exitWorkspace` calls keep the active workspace unchanged and are only surfaced as failed tool results in trace/context.
   - Workspace exit lifecycle hooks and skill usage feedback run once per successful `exitWorkspace` tool call, even if a model emits additional tool calls in the same assistant message.
   - Tool calls emitted after a successful `exitWorkspace` in the same assistant message are failed as post-exit calls and are not executed against the completed child workspace.
   - Child workspace direct-response guard calls store the intermediate child assistant text and internal exit reminder in follow-up `final_messages` context segments for trace inspection.
-  - Workspace-local context is visible in context stack and trace, including recalled event/skill memory, available tool bindings, and recent tool-call evidence for the current session.
+  - Workspace-local evidence is not a separate top-level context category: recalled memory belongs under `memory`, current tool definitions belong under `workspace`, and recent tool-call evidence/current task/completed results belong under `history`.
   - Workspace-local available tool snapshots must match the actual callable tool list used for the LLM request; trace/debug UI must not show a child workspace as having main-only tools that runtime would reject.
-  - Memory context segments and synthetic `runtime_context.load` tool results must mirror the active `WorkspaceSession.localContext` recalled memory partitions, so Web UI debugging shows the same memory that the model actually saw.
+  - The `memory` context segment and synthetic `runtime_context.memory` tool result must mirror the active `WorkspaceSession.localContext` recalled memory partitions, so Web UI debugging shows the same memory that the model actually saw.
   - Tool results update the active workspace session's local context after execution; trace viewers can inspect tool evidence from either `tool_calls` or the owning workspace session.
   - Final LLM messages are stored and inspectable.
-  - System/policy prompts instruct the model to keep internal runtime/tool orchestration hidden from ordinary user-facing answers.
-  - System/policy prompts tell the model when to proactively request memory writes through function calls, so impression/skill/event memory generation is part of the agent contract rather than an accidental behavior.
+  - The system prompt instructs the model to keep internal runtime/tool orchestration hidden from ordinary user-facing answers.
+  - The system prompt tells the model when to proactively request memory writes through function calls, especially `writeUserImpression` for stable user preferences/background/identity/constraints, so impression/skill/event memory generation is part of the agent contract rather than an accidental behavior.
   - The default personality prompt does not mention workspace/context/runtime internals.
 - Memory:
   - Conversation-window event extraction writes an event every 20 stored messages by default.

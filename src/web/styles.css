@@ -543,6 +543,21 @@ textarea {
   gap: 8px;
 }
 
+.context-substack {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.context-substack details {
+  border-color: #e6ebef;
+}
+
+.context-substack summary {
+  background: #fbfcfd;
+}
+
 details {
   border: 1px solid #dce2e8;
   border-radius: 6px;

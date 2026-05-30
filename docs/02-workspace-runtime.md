@@ -1,5 +1,9 @@
 # Workspace Runtime
 
+## 2026-05-31 update: workspace context category
+
+In context display and prompt assembly, workspace information is one top-level category. It contains the active workspace description, instructions, tool instructions, manifest, memory policy, and current callable tool definitions. Only the main workspace includes the available workspace manifest list inside this workspace contract. Child workspaces do not receive sibling workspace lists.
+
 ## 2026-05-31 更新：代码边界与当前实现口径
 
 当前实现以 `ZLEAP_MASTER_PLAN.md` 为准：首版内置 workspace 是 `main`、`file`、`cli`，没有独立 `memory workspace`，Browser workspace 只作为未来扩展示例。memory 能力以通用 runtime tools 的形式挂载到每个 workspace 中。

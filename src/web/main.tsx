@@ -966,14 +966,64 @@ function ContextStack({ segments }: { segments: ContextSegment[] }) {
       {segments.map((segment) => (
         <details key={segment.id}>
           <summary>
-            <span>{segment.sortOrder}. {segment.title}</span>
+            <span>{segment.sortOrder}. {contextSegmentLabel(segment)}</span>
             <small>{segment.segmentType} · 约 {segment.tokenEstimate} tokens</small>
           </summary>
-          <pre>{segment.content}</pre>
+          <ContextSegmentContent segment={segment} />
         </details>
       ))}
     </div>
   );
+}
+
+function contextSegmentLabel(segment: ContextSegment): string {
+  if (segment.segmentType === "system") return "系统提示词";
+  if (segment.segmentType === "workspace") return "工作空间信息";
+  if (segment.segmentType === "memory") return "记忆";
+  if (segment.segmentType === "history") return "本地对话片段";
+  if (segment.segmentType === "user") return "干净用户消息";
+  if (segment.segmentType === "tool_result") return "工具结果";
+  if (segment.segmentType === "final_messages") return "最终 LLM Messages";
+  return segment.title;
+}
+
+function contextSubsectionLabel(key: string): string {
+  const labels: Record<string, string> = {
+    currentWorkspace: "当前工作空间说明",
+    availableWorkspaces: "主工作空间可用工作空间清单",
+    crossWorkspaceImpressionMemory: "跨工作空间印象记忆",
+    currentWorkspaceEventMemory: "当前工作空间事件记忆",
+    currentWorkspaceSkillMemory: "当前工作空间经验记忆",
+    messages: "本地对话消息",
+    currentTask: "当前结构化任务",
+    completedWorkspaceResults: "已完成工作空间结果",
+    recentToolEvidence: "近期工具证据"
+  };
+  return labels[key] ?? key;
+}
+
+function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
+  const parsed = parseJsonText(segment.content);
+  if (
+    parsed
+    && typeof parsed === "object"
+    && !Array.isArray(parsed)
+    && ["workspace", "memory", "history"].includes(segment.segmentType)
+  ) {
+    return (
+      <div className="context-substack">
+        {Object.entries(parsed as Record<string, unknown>)
+          .filter(([, value]) => value !== undefined)
+          .map(([key, value]) => (
+            <details key={key} open>
+              <summary>{contextSubsectionLabel(key)}</summary>
+              <pre>{JSON.stringify(value, null, 2)}</pre>
+            </details>
+          ))}
+      </div>
+    );
+  }
+  return <pre>{segment.content}</pre>;
 }
 
 function WorkspaceTab() {

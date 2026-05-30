@@ -3,19 +3,20 @@ import type { ContextSegment } from "../types";
 export type AttentionBudget = Partial<Record<ContextSegment["segmentType"], number>>;
 
 export const DEFAULT_ATTENTION_BUDGET: AttentionBudget = {
-  system: 1200,
+  system: 2200,
   personality: 800,
   policy: 900,
-  workspace: 1400,
+  workspace: 2600,
   workspace_registry: 1200,
   task: 800,
   workspace_result: 1200,
   workspace_local_context: 1600,
   tools: 1400,
+  memory: 3000,
   impression_memory: 900,
   event_memory: 1400,
   skill_memory: 1400,
-  history: 1000,
+  history: 2200,
   user: 4000,
   tool_result: 1400
 };

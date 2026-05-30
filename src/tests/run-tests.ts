@@ -879,7 +879,7 @@ class MultiStepToolLoopLLMClient implements LLMClient {
       };
     }
     if (this.calls === 2) {
-      assert.equal(input.messages.filter((message) => message.role === "tool").length, 4);
+      assert.equal(input.messages.filter((message) => message.role === "tool").length, 3);
       return {
         message: {
           role: "assistant",
@@ -961,7 +961,7 @@ class StreamingMultiStepToolLoopLLMClient implements LLMClient {
       return;
     }
     if (this.calls === 2) {
-      assert.equal(input.messages.filter((message) => message.role === "tool").length, 4);
+      assert.equal(input.messages.filter((message) => message.role === "tool").length, 3);
       yield { type: "tool_call_delta", index: 0, id: "stream-second-memory", name: "writeUserImpression" };
       yield {
         type: "tool_call_delta",
@@ -1456,18 +1456,18 @@ async function testRuntimeContextAndTools() {
   assert.equal(normalizeChatCompletionsEndpoint(firstInput!.baseUrl), "https://api.302ai.com/v1/chat/completions");
   assert.equal(firstInput?.messages.at(-1)?.role, "user");
   assert.equal(firstInput?.messages.at(-1)?.content, "search files for runtime");
-  const firstTaskToolMessage = firstInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.task");
-  const firstTaskPayload = JSON.parse(firstTaskToolMessage?.content ?? "{}") as { workspaceResults: Array<{ workspaceId: string; status: string }> };
-  assert.equal(firstTaskPayload.workspaceResults.some((result) => result.workspaceId === "main" && result.status === "running"), true);
-  const mainHistoryToolMessage = firstInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.history");
-  assert.equal((mainHistoryToolMessage?.content ?? "").includes("old global user chat unrelated to file workspace"), true);
+  const firstLocalConversationToolMessage = firstInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
+  const firstLocalConversationPayload = JSON.parse(firstLocalConversationToolMessage?.content ?? "{}") as { currentTask: { workspaceId: string }; messages: Array<{ content: string }> };
+  assert.equal(firstLocalConversationPayload.currentTask.workspaceId, "main");
+  assert.equal(firstLocalConversationPayload.messages.some((message) => message.content.includes("old global user chat unrelated to file workspace")), true);
   const systemMessage = lastInput?.messages[0]?.content ?? "";
-  assert.equal(systemMessage.includes("runtime/workspace/context/tool"), true);
-  assert.equal(systemMessage.includes("Memory write protocol"), true);
-  assert.equal(systemMessage.includes("writeUserImpression only when the user expresses a stable long-term preference"), true);
-  assert.equal(systemMessage.includes("writeSkillMemory when the user explicitly asks to save reusable experience"), true);
-  assert.equal(systemMessage.includes("Prefer runtime hooks for routine event memory"), true);
-  assert.equal(systemMessage.includes("writeAgentSelfImpression only for creator-authorized updates"), true);
+  assert.equal(systemMessage.includes("内部运行策略"), true);
+  assert.equal(systemMessage.includes("记忆写入协议"), true);
+  assert.equal(systemMessage.includes("writeUserImpression"), true);
+  assert.equal(systemMessage.includes("稳定的长期偏好"), true);
+  assert.equal(systemMessage.includes("writeSkillMemory"), true);
+  assert.equal(systemMessage.includes("生命周期 hooks"), true);
+  assert.equal(systemMessage.includes("writeAgentSelfImpression"), true);
   const agent = repos.getAgent("default-agent");
   assert.equal(/workspace|context|runtime/i.test(agent.personalityPrompt), false);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "enterWorkspace"), true);
@@ -1484,27 +1484,26 @@ async function testRuntimeContextAndTools() {
   const childWorkspaceRegistry = childInput?.messages[0]?.content ?? "";
   assert.equal(childWorkspaceRegistry.includes("\"id\": \"cli\""), false);
   assert.equal((lastInput?.messages[0]?.content ?? "").includes("\"id\": \"cli\""), true);
-  assert.equal(childInput?.messages[0]?.content?.includes("Memory policy"), true);
+  assert.equal(childInput?.messages[0]?.content?.includes("memoryPolicy"), true);
   assert.equal(childInput?.messages[0]?.content?.includes("maxEventMemories"), true);
-  assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.task" && (message.content ?? "").includes("\"workspaceId\": \"file\"")), true);
-  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "workspace_result" && segment.content.includes("\"suggestedNextSteps\"")), true);
+  assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.local_conversation" && (message.content ?? "").includes("\"workspaceId\": \"file\"")), true);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "history" && segment.content.includes("\"suggestedNextSteps\"")), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
-  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "impression_memory" && segment.content.includes("Search style")), true);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Search style")), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledEventMemories.some((memory) => memory.title === "Runtime file search event"), true);
   assert.equal(childInput?.messages.some((message) => (message.content ?? "").includes("old global user chat unrelated to file workspace")), false);
-  assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.task"), true);
-  const childHistoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.history");
-  assert.deepEqual(JSON.parse(childHistoryToolMessage?.content ?? "[]"), []);
-  const taskToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.task");
-  const taskPayload = JSON.parse(taskToolMessage?.content ?? "{}") as { workspaceLocalContext: { recalledEventMemories: unknown[]; recalledSkillMemories: unknown[]; availableTools: Array<{ name: string; bindingType: string }> } };
-  assert.equal(taskPayload.workspaceLocalContext.recalledEventMemories.length, 1);
-  assert.equal(taskPayload.workspaceLocalContext.recalledSkillMemories.length, 1);
-  assert.equal(taskPayload.workspaceLocalContext.availableTools.some((tool) => tool.name === "searchFiles" && tool.bindingType === "mcp"), true);
-  const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.load");
-  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { impressions: unknown[]; eventMemories: unknown[]; skillMemories: unknown[] };
-  assert.equal(memoryPayload.impressions.length, 1);
-  assert.equal(memoryPayload.eventMemories.length, 1);
-  assert.equal(memoryPayload.skillMemories.length, 1);
+  assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.local_conversation"), true);
+  const childLocalConversationToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
+  const childLocalConversationPayload = JSON.parse(childLocalConversationToolMessage?.content ?? "{}") as { messages: unknown[]; recentToolEvidence: unknown[] };
+  assert.equal(childLocalConversationPayload.messages.length, 0);
+  assert.equal(childLocalConversationPayload.recentToolEvidence.length, 0);
+  assert.equal(childInput?.messages[0]?.content?.includes("\"name\": \"searchFiles\""), true);
+  assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"mcp\""), true);
+  const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
+  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory.length, 1);
+  assert.equal(memoryPayload.currentWorkspaceEventMemory.length, 1);
+  assert.equal(memoryPayload.currentWorkspaceSkillMemory.length, 1);
   assert.equal(output.workspaceTrace.length, 2);
   assert.equal(repos.getWorkspace("cli").manifest.requiresApproval, true);
   assert.equal(repos.getWorkspace("file").manifest.capabilities.length > 0, true);
@@ -1580,13 +1579,12 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   assert.equal(fileSession?.localContext.recalledEventMemories.some((memory) => memory.title === "Objective-only file event"), true);
   assert.equal(fileSession?.localContext.recalledSkillMemories.some((memory) => memory.title === "Objective-only file skill"), true);
   const childInput = fake.inputs[1];
-  const childMemoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.load");
-  const childMemoryPayload = JSON.parse(childMemoryToolMessage?.content ?? "{}") as { eventMemories: MemoryRow[]; skillMemories: MemoryRow[] };
-  assert.equal(childMemoryPayload.eventMemories.some((memory) => memory.title === "Objective-only file event"), true);
-  assert.equal(childMemoryPayload.skillMemories.some((memory) => memory.title === "Objective-only file skill"), true);
+  const childMemoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
+  const childMemoryPayload = JSON.parse(childMemoryToolMessage?.content ?? "{}") as { currentWorkspaceEventMemory: MemoryRow[]; currentWorkspaceSkillMemory: MemoryRow[] };
+  assert.equal(childMemoryPayload.currentWorkspaceEventMemory.some((memory) => memory.title === "Objective-only file event"), true);
+  assert.equal(childMemoryPayload.currentWorkspaceSkillMemory.some((memory) => memory.title === "Objective-only file skill"), true);
   const trace = repos.getTrace("conv-session-context-recall", "creator", "creator");
-  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "workspace_local_context" && segment.content.includes("Objective-only file event")), true);
-  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "event_memory" && segment.content.includes("Objective-only file event")), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Objective-only file event")), true);
 }
 
 async function testAttentionBudgetTrimsHistoryButKeepsJson() {
@@ -1612,15 +1610,15 @@ async function testAttentionBudgetTrimsHistoryButKeepsJson() {
     }
   });
 
-  const historyToolMessage = fake.lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.history");
+  const historyToolMessage = fake.lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
   const historyContent = historyToolMessage?.content ?? "";
-  const parsedHistory = JSON.parse(historyContent) as unknown[];
-  assert.equal(Array.isArray(parsedHistory), true);
+  const parsedHistory = JSON.parse(historyContent) as { messages: unknown[] };
+  assert.equal(Array.isArray(parsedHistory.messages), true);
   assert.equal(historyContent.includes("truncated by attention budget"), true);
-  assert.equal(historyContent.length < 4500, true);
+  assert.equal(historyContent.length < 9000, true);
 
   const historySegment = repos.getTrace(conversationId, "creator", "creator").contextSegments.find((segment) => segment.segmentType === "history");
-  assert.equal((historySegment?.tokenEstimate ?? 0) <= 1000, true);
+  assert.equal((historySegment?.tokenEstimate ?? 0) <= 2200, true);
   const mainSession = repos.getTrace(conversationId, "creator", "creator").sessions.find((session) => session.workspaceId === "main");
   assert.equal(mainSession?.status, "completed");
   assert.equal(mainSession?.result.summary, "fake response");
@@ -1676,16 +1674,16 @@ async function testAgentSelfImpressionRecallIsAgentScoped() {
     }
   });
 
-  const memoryToolMessage = fake.lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.load");
-  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { impressions: Array<{ title: string }> };
-  assert.equal(memoryPayload.impressions.some((memory) => memory.title === "Default self recall"), true);
-  assert.equal(memoryPayload.impressions.some((memory) => memory.title === "Other self recall"), false);
-  assert.equal(memoryPayload.impressions.some((memory) => memory.title === "Global self recall leak"), false);
-  assert.equal(memoryPayload.impressions.some((memory) => memory.title === "Ambiguous self recall leak"), false);
-  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "impression_memory" && segment.content.includes("Default self recall")), true);
-  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "impression_memory" && segment.content.includes("Other self recall")), false);
-  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "impression_memory" && segment.content.includes("Global self recall leak")), false);
-  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "impression_memory" && segment.content.includes("Ambiguous self recall leak")), false);
+  const memoryToolMessage = fake.lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
+  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: Array<{ title: string }> };
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Default self recall"), true);
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Other self recall"), false);
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Global self recall leak"), false);
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory.some((memory) => memory.title === "Ambiguous self recall leak"), false);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Default self recall")), true);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Other self recall")), false);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Global self recall leak")), false);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Ambiguous self recall leak")), false);
 }
 
 async function testWorkspaceExitReturnsToMain() {
@@ -1788,7 +1786,7 @@ async function testWorkspaceExitReturnsToMain() {
   const finalCall = trace.llmCalls[0];
   assert.equal(finalCall.toolsJson.includes("enterWorkspace"), true);
   assert.equal(finalCall.toolsJson.includes("searchFiles"), false);
-  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "workspace_result" && segment.content.includes("File workspace inspected available evidence.")), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "history" && segment.content.includes("File workspace inspected available evidence.")), true);
   const skillUsageMetadata = metadataOf(repos.getMemory(recalledSkill.id));
   assert.equal(skillUsageMetadata.usageCount, 2);
   assert.equal(skillUsageMetadata.successCount, 2);
@@ -1949,9 +1947,9 @@ async function testWorkspaceSessionLocalToolCallsAreSessionScoped() {
   assert.equal(secondFileSession.localContext.recentToolCalls.some((call) => call.toolName === "exitWorkspace"), true);
 
   const secondFileInput = fake.inputs[3];
-  const taskToolMessage = secondFileInput.messages.find((message) => message.role === "tool" && message.name === "runtime_context.task");
-  const taskPayload = JSON.parse(taskToolMessage?.content ?? "{}") as { workspaceLocalContext: { recentToolCalls: unknown[] } };
-  assert.equal(taskPayload.workspaceLocalContext.recentToolCalls.length, 0);
+  const localConversationToolMessage = secondFileInput.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
+  const localConversationPayload = JSON.parse(localConversationToolMessage?.content ?? "{}") as { recentToolEvidence: unknown[] };
+  assert.equal(localConversationPayload.recentToolEvidence.length, 0);
 
   const trace = repos.getTrace("conv-session-scope", "creator", "creator");
   const exitCalls = trace.toolCalls.filter((call) => call.toolName === "exitWorkspace");
@@ -2028,11 +2026,11 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     }
   });
   const cappedFileInput = cappedFake.inputs.find((input) => input.tools.some((tool) => tool.name === "searchFiles"));
-  const cappedMemoryMessage = cappedFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.load");
-  const cappedMemoryPayload = JSON.parse(cappedMemoryMessage?.content ?? "{}") as { impressions: unknown[]; eventMemories: unknown[]; skillMemories: unknown[] };
-  assert.equal(cappedMemoryPayload.impressions.length, 1);
-  assert.equal(cappedMemoryPayload.eventMemories.length, 1);
-  assert.equal(cappedMemoryPayload.skillMemories.length, 1);
+  const cappedMemoryMessage = cappedFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
+  const cappedMemoryPayload = JSON.parse(cappedMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
+  assert.equal(cappedMemoryPayload.crossWorkspaceImpressionMemory.length, 1);
+  assert.equal(cappedMemoryPayload.currentWorkspaceEventMemory.length, 1);
+  assert.equal(cappedMemoryPayload.currentWorkspaceSkillMemory.length, 1);
 
   updateWorkspaceMemoryPolicy(repos, "file", {
     eventRecallEnabled: false,
@@ -2054,13 +2052,13 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     }
   });
   const disabledFileInput = disabledFake.inputs.find((input) => input.tools.some((tool) => tool.name === "searchFiles"));
-  const disabledMemoryMessage = disabledFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.load");
-  const disabledMemoryPayload = JSON.parse(disabledMemoryMessage?.content ?? "{}") as { impressions: unknown[]; eventMemories: unknown[]; skillMemories: unknown[] };
-  assert.equal(disabledMemoryPayload.impressions.length, 1);
-  assert.equal(disabledMemoryPayload.eventMemories.length, 0);
-  assert.equal(disabledMemoryPayload.skillMemories.length, 0);
-  assert.equal(disabledOutput.contextSegments.some((segment) => segment.segmentType === "event_memory" && segment.content.includes("Policy event")), false);
-  assert.equal(disabledOutput.contextSegments.some((segment) => segment.segmentType === "skill_memory" && segment.content.includes("Policy skill")), false);
+  const disabledMemoryMessage = disabledFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
+  const disabledMemoryPayload = JSON.parse(disabledMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
+  assert.equal(disabledMemoryPayload.crossWorkspaceImpressionMemory.length, 1);
+  assert.equal(disabledMemoryPayload.currentWorkspaceEventMemory.length, 0);
+  assert.equal(disabledMemoryPayload.currentWorkspaceSkillMemory.length, 0);
+  assert.equal(disabledOutput.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Policy event")), false);
+  assert.equal(disabledOutput.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Policy skill")), false);
 
   for (let index = 0; index < 10; index += 1) {
     repos.createMemory({
