@@ -2,6 +2,21 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:46 +08:00
+
+Purpose:
+- Make the Chat context stack numbering read like normal UI order instead of exposing internal sort weights.
+
+Changed:
+- Updated the context stack summary labels to display sequential numbers (`1`, `2`, `3`, ...) while continuing to use `sortOrder` only for internal ordering.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:40 +08:00
 
 Purpose:

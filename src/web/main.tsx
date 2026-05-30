@@ -1385,10 +1385,10 @@ function ContextStack({ segments }: { segments: ContextSegment[] }) {
   if (segments.length === 0) return <div className="empty">还没有上下文快照。</div>;
   return (
     <div className="stack">
-      {segments.map((segment) => (
+      {segments.map((segment, index) => (
         <details key={segment.id}>
           <summary>
-            <span>{segment.sortOrder}. {contextSegmentLabel(segment)}</span>
+            <span>{index + 1}. {contextSegmentLabel(segment)}</span>
             <small>{segment.segmentType} · 约 {segment.tokenEstimate} tokens</small>
           </summary>
           <ContextSegmentContent segment={segment} />
