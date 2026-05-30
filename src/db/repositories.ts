@@ -76,10 +76,7 @@ const builtInMemoryToolIds = [
   "tool-search-memory",
   "tool-write-user-impression",
   "tool-write-agent-self-impression",
-  "tool-write-event-memory",
-  "tool-write-skill-memory",
-  "tool-update-memory",
-  "tool-delete-memory"
+  "tool-write-skill-memory"
 ];
 
 const builtInRuntimeToolIds = new Set([

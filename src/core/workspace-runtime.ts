@@ -7,10 +7,7 @@ export class WorkspaceRuntime {
     "searchMemory",
     "writeUserImpression",
     "writeAgentSelfImpression",
-    "writeEventMemory",
-    "writeSkillMemory",
-    "updateMemory",
-    "deleteMemory"
+    "writeSkillMemory"
   ]);
   private readonly mainOnlyToolNames = new Set(["enterWorkspace", "askUser", "finishTask"]);
 

@@ -101,16 +101,6 @@ const toolSchemas = {
     required: ["title", "summary", "detail"],
     additionalProperties: false
   },
-  writeEventMemory: {
-    type: "object",
-    properties: {
-      title: { type: "string" },
-      summary: { type: "string" },
-      detail: { type: "string" }
-    },
-    required: ["title", "summary", "detail"],
-    additionalProperties: false
-  },
   writeSkillMemory: {
     type: "object",
     properties: {
@@ -126,27 +116,6 @@ const toolSchemas = {
     },
     required: ["title", "summary", "detail", "desensitized", "procedure", "appliesWhen", "avoidWhen"],
     additionalProperties: false
-  },
-  updateMemory: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      title: { type: "string" },
-      summary: { type: "string" },
-      detail: { type: "string" },
-      metadataJson: { type: "string" }
-    },
-    required: ["id"],
-    additionalProperties: false
-  },
-  deleteMemory: {
-    type: "object",
-    properties: {
-      id: { type: "string" },
-      deleteReason: { type: "string" }
-    },
-    required: ["id"],
-    additionalProperties: false
   }
 };
 
@@ -154,7 +123,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "你是 Zleap 的内部执行 agent。",
   "runtime、workspace、context、tool call、memory injection 等信息只用于内部决策，不要在面向用户的回答里展示或解释。",
   "需要使用工具时，直接通过 function call 调用，不要告诉用户你正在调用工具、切换内部模块或读取内部上下文。",
-  "当用户表达长期偏好、长期背景、自我认知更新或可复用经验时，应通过记忆写入工具请求 runtime 写入；runtime 会做权限和隔离检查。",
+  "当用户表达长期偏好、长期背景、自我认知更新或已脱敏的可复用经验时，可以通过对应记忆写入工具请求 runtime 写入；事件记忆由 runtime 生命周期 hook 自动提取。",
   "除非用户明确要求查看系统内部状态，否则像真人助手一样直接回答用户。"
 ].join("\n");
 
@@ -275,11 +244,7 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-search-memory", "searchMemory", "使用 SQLite FTS 和作用域过滤搜索记忆。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
   insertTool.run("tool-write-user-impression", "writeUserImpression", "为当前用户写入长期偏好、长期背景或长期约束。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
   insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "由 creator 授权后写入 agent 自我认知。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
-  insertTool.run("tool-write-event-memory", "writeEventMemory", "为当前用户和当前 active workspace 写入重要事件记忆。", JSON.stringify(toolSchemas.writeEventMemory), "medium", now, now);
   insertTool.run("tool-write-skill-memory", "writeSkillMemory", "为当前 active workspace 写入脱敏后的可复用经验。", JSON.stringify(toolSchemas.writeSkillMemory), "medium", now, now);
-
-  insertTool.run("tool-update-memory", "updateMemory", "Update a memory record within runtime policy boundaries.", JSON.stringify(toolSchemas.updateMemory), "medium", now, now);
-  insertTool.run("tool-delete-memory", "deleteMemory", "Delete a memory record within runtime policy boundaries.", JSON.stringify(toolSchemas.deleteMemory), "medium", now, now);
 
   const updateTool = db.prepare("UPDATE tool_definitions SET description = ?, updatedAt = ? WHERE id = ?");
   updateTool.run("带着目标请求进入子 workspace。", now, "tool-enter-workspace");
@@ -291,11 +256,7 @@ export function seedDefaults(db: Database.Database): void {
   updateTool.run("使用 SQLite FTS 和作用域过滤搜索记忆。", now, "tool-search-memory");
   updateTool.run("为当前用户写入长期偏好、长期背景或长期约束。", now, "tool-write-user-impression");
   updateTool.run("由 creator 授权后写入 agent 自我认知。", now, "tool-write-agent-self-impression");
-  updateTool.run("为当前用户和当前 active workspace 写入重要事件记忆。", now, "tool-write-event-memory");
   updateTool.run("为当前 active workspace 写入脱敏后的可复用经验。", now, "tool-write-skill-memory");
-
-  updateTool.run("Update a memory record within runtime policy boundaries.", now, "tool-update-memory");
-  updateTool.run("Delete a memory record within runtime policy boundaries.", now, "tool-delete-memory");
 
   const updateToolSchema = db.prepare("UPDATE tool_definitions SET parametersJson = ?, updatedAt = ? WHERE id = ?");
   updateToolSchema.run(JSON.stringify(toolSchemas.enterWorkspace), now, "tool-enter-workspace");
@@ -307,10 +268,7 @@ export function seedDefaults(db: Database.Database): void {
   updateToolSchema.run(JSON.stringify(toolSchemas.searchMemory), now, "tool-search-memory");
   updateToolSchema.run(JSON.stringify(toolSchemas.writeUserImpression), now, "tool-write-user-impression");
   updateToolSchema.run(JSON.stringify(toolSchemas.writeAgentSelfImpression), now, "tool-write-agent-self-impression");
-  updateToolSchema.run(JSON.stringify(toolSchemas.writeEventMemory), now, "tool-write-event-memory");
   updateToolSchema.run(JSON.stringify(toolSchemas.writeSkillMemory), now, "tool-write-skill-memory");
-  updateToolSchema.run(JSON.stringify(toolSchemas.updateMemory), now, "tool-update-memory");
-  updateToolSchema.run(JSON.stringify(toolSchemas.deleteMemory), now, "tool-delete-memory");
 
   const updateToolBinding = db.prepare("UPDATE tool_definitions SET bindingType = ?, bindingJson = ?, mcpServerId = ?, mcpToolName = ?, updatedAt = ? WHERE id = ?");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.enterWorkspace" }), null, null, now, "tool-enter-workspace");
@@ -322,11 +280,7 @@ export function seedDefaults(db: Database.Database): void {
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.searchMemory" }), null, null, now, "tool-search-memory");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeUserImpression" }), null, null, now, "tool-write-user-impression");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeAgentSelfImpression" }), null, null, now, "tool-write-agent-self-impression");
-  updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeEventMemory" }), null, null, now, "tool-write-event-memory");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeSkillMemory" }), null, null, now, "tool-write-skill-memory");
-
-  updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.updateMemory" }), null, null, now, "tool-update-memory");
-  updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.deleteMemory" }), null, null, now, "tool-delete-memory");
 
   db.prepare("UPDATE tool_definitions SET workspaceId = NULL WHERE bindingType = 'runtime'").run();
   db.prepare("UPDATE tool_definitions SET workspaceId = 'file' WHERE id = 'tool-search-files'").run();
@@ -342,16 +296,24 @@ export function seedDefaults(db: Database.Database): void {
     "tool-search-memory",
     "tool-write-user-impression",
     "tool-write-agent-self-impression",
-    "tool-write-event-memory",
-    "tool-write-skill-memory",
-    "tool-update-memory",
-    "tool-delete-memory"
+    "tool-write-skill-memory"
   ];
   const linkMemoryToolToAllWorkspaces = db.prepare(`
     INSERT OR IGNORE INTO workspace_tools (workspaceId, toolId, createdAt)
     SELECT id, ?, ? FROM workspaces
   `);
   for (const toolId of memoryToolIds) linkMemoryToolToAllWorkspaces.run(toolId, now);
+
+  db.prepare(`
+    DELETE FROM workspace_tools
+    WHERE toolId IN ('tool-write-event-memory', 'tool-update-memory', 'tool-delete-memory')
+       OR toolId IN (SELECT id FROM tool_definitions WHERE name IN ('writeEventMemory', 'updateMemory', 'deleteMemory'))
+  `).run();
+  db.prepare(`
+    DELETE FROM tool_definitions
+    WHERE id IN ('tool-write-event-memory', 'tool-update-memory', 'tool-delete-memory')
+       OR name IN ('writeEventMemory', 'updateMemory', 'deleteMemory')
+  `).run();
 
   db.prepare("DELETE FROM workspace_tools WHERE toolId = 'tool-list-workspaces' OR (workspaceId = 'main' AND toolId = 'tool-list-workspaces')").run();
   db.prepare("DELETE FROM tool_definitions WHERE id = 'tool-list-workspaces' OR name = 'listWorkspaces'").run();

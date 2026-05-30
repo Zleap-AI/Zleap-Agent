@@ -219,10 +219,7 @@ const SYSTEM_TOOL_NAMES = new Set([
   "searchMemory",
   "writeUserImpression",
   "writeAgentSelfImpression",
-  "writeEventMemory",
-  "writeSkillMemory",
-  "updateMemory",
-  "deleteMemory"
+  "writeSkillMemory"
 ]);
 
 const BUILT_IN_WORKSPACE_IDS = new Set(["main", "file", "cli"]);
@@ -643,17 +640,17 @@ function ConceptIntroTab() {
           <article>
             <strong>Impression</strong>
             <span>记人和 Agent 自我</span>
-            <p>用户偏好、背景、长期约束跨 workspace 生效；agent self impression 由 creator 控制。</p>
+            <p>Agent 自主判断是否写入稳定偏好、背景和长期约束；agent self impression 由 creator 控制。</p>
           </article>
           <article>
             <strong>Event</strong>
             <span>记事情过程和结果</span>
-            <p>按 userId + workspaceId 隔离；当前第一版使用 SQLite FTS + relationId/version 最新行召回。</p>
+            <p>由 runtime hook 按会话窗口和 workspace 退出自动提取；模型没有事件写入工具。</p>
           </article>
           <article>
             <strong>Skill</strong>
             <span>记可复用方法</span>
-            <p>按 workspace 共享，跨用户可用，但必须脱敏、泛化，并保留适用条件和置信度。</p>
+            <p>模型、人工和保守 hook 都可以触发，但必须脱敏、泛化，并保留适用条件和置信度。</p>
           </article>
         </div>
         <table className="concept-table">

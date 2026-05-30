@@ -189,14 +189,18 @@ Skill 有两种生成路径：
 - 结果不确定或没有验证过。
 - 包含未脱敏的用户、项目、路径、账号或业务细节。
 
-### 4.5 记忆工具与 Workspace 边界
+### 4.5 记忆写入来源与 Workspace 边界
 
-记忆不作为独立 Memory Workspace 存在。`searchMemory`、`writeUserImpression`、`writeEventMemory`、`writeSkillMemory`、`updateMemory`、`deleteMemory` 等 runtime memory tools 挂载在每个 workspace 中。
+记忆不作为独立 Memory Workspace 存在。模型可见的 runtime memory tools 只包括 `searchMemory`、`writeUserImpression`、`writeAgentSelfImpression`、`writeSkillMemory`。
 
-- 模型调用记忆工具时，event/skill 的 workspaceId 由当前 active workspace 代码绑定。
+- Impression Memory 是 agentic：当模型判断用户表达了稳定长期偏好、背景、身份或约束时，可以主动请求写入；agent self impression 需要 creator 权限。
+- Event Memory 是 programmatic：由 runtime hook 按会话窗口、workspace 退出等时机自动提取，模型没有 event 写入工具。
+- Skill Memory 同时有 agentic 和 programmatic 来源：模型或用户可以主动请求沉淀经验；hook 也可以从成功且有泛化价值的事件中保守提取，但必须脱敏，且不能为了写记忆而强行总结经验。
+- 模型调用 skill 记忆工具时，workspaceId 由当前 active workspace 代码绑定。
 - 模型不能通过传入 `workspaceId` 操作其他 workspace 的 event/skill。
+- 记忆演化以追加新记录、读取最新有效记录为主；更新和删除不作为模型可调用工具。
 - User impression 的 userId、agent self impression 的 agentId 也由 runtime 绑定或 creator policy 控制。
-- 跨 workspace 的筛选、人工编辑、调试属于 Web UI/API 管理层能力。
+- 跨 workspace 的筛选、人工编辑、删除和调试属于 Web UI/API 管理层能力，不属于普通 agent runtime。
 
 ---
 

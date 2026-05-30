@@ -435,14 +435,6 @@ export class MemoryService {
       };
     }
 
-    if (input.toolName === "updateMemory") {
-      return this.executeUpdateMemoryTool(input.run, args, input.activeWorkspaceId, true);
-    }
-
-    if (input.toolName === "deleteMemory") {
-      return this.executeDeleteMemoryTool(input.run, args, input.activeWorkspaceId);
-    }
-
     let memory: MemoryWriteInput | undefined;
     if (input.toolName === "writeUserImpression") {
       const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
@@ -474,28 +466,6 @@ export class MemoryService {
         metadataJson: JSON.stringify({
           source: "memoryToolCall",
           impressionKind: "agentSelf",
-          conversationId: input.run.conversationId,
-          activeWorkspaceId: input.activeWorkspaceId,
-          ...runtimeEvidence
-        })
-      };
-    }
-    if (input.toolName === "writeEventMemory") {
-      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
-      if (scopeError) return { ok: false, result: { error: scopeError } };
-      const workspaceScope = this.requireActiveWorkspaceScope(input.activeWorkspaceId);
-      if (!workspaceScope.allowed) return { ok: false, result: { error: workspaceScope.reason } };
-      const workspaceId = workspaceScope.workspaceId;
-      const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
-      memory = {
-        ...base,
-        memoryType: "event",
-        userId: input.run.userId,
-        workspaceId,
-        relationId: `event:${input.run.userId}:${workspaceId}:${input.run.conversationId}:${stableId(`${base.title}:${base.summary}`)}`,
-        metadataJson: JSON.stringify({
-          source: "memoryToolCall",
-          eventKind: "agent_requested",
           conversationId: input.run.conversationId,
           activeWorkspaceId: input.activeWorkspaceId,
           ...runtimeEvidence

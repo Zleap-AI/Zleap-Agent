@@ -2,6 +2,27 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:04 +08:00
+
+Purpose:
+- Align memory writing with the clarified strategy: impression is agentic, event is hook/programmatic, skill is both agentic and conservative hook/manual, and runtime memory does not expose model-callable update/delete tools.
+
+Changed:
+- Removed `writeEventMemory`, `updateMemory`, and `deleteMemory` from the model-callable runtime memory tool surface and seed cleanup now removes legacy tool definitions/links from existing SQLite databases.
+- Kept `searchMemory`, `writeUserImpression`, `writeAgentSelfImpression`, and `writeSkillMemory` as the only universal memory tools visible inside workspaces.
+- Updated the hidden runtime prompt contract so event memory is described as lifecycle-hook owned, skill hook extraction is conservative and desensitized, and memory evolution is append/latest rather than in-place model mutation.
+- Updated `ZLEAP_MASTER_PLAN.md` and `zleap-agent-framework.md` to clarify the three memory write sources and the boundary between agent freedom and code authority.
+- Updated tests to assert legacy memory mutation tools are absent from callable tools while hook-generated event memory remains auditable.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that introduced this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 06:57 +08:00
 
 Purpose:

@@ -61,10 +61,12 @@ function runtimeSystemContract(input: {
     "",
     "记忆写入协议：",
     "- 当用户表达稳定的长期偏好、背景、身份或约束时，可以调用 writeUserImpression 写入跨工作空间印象记忆；不要把短期任务事实写成 impression。",
+    "- 事件记忆由 runtime 生命周期 hook 按会话窗口、工作空间退出等程序化时机自动提取；模型没有事件记忆写入工具。",
     "- 当用户或 agent 明确要求沉淀可复用经验，或你发现了已经脱敏、可复用的方法时，可以调用 writeSkillMemory；skill 必须属于当前工作空间，并包含 procedure、appliesWhen、avoidWhen、desensitized=true 和 confidence。",
-    "- 普通事件优先交给生命周期 hooks 自动沉淀；只有特别重要、需要立即保留的事件才调用 writeEventMemory。",
+    "- 生命周期 hook 也可以保守地提取 skill，但必须脱敏，并且只有在确实得到可复用方法时才写入；不要为了写记忆而强行总结经验。",
     "- writeAgentSelfImpression 只用于 creator 授权的 agent 长期自我认识更新。",
-    "- memory 工具调用中不要传 userId、agentId、workspaceId、relationId、version 等 scope 字段；这些由 runtime 代码绑定。"
+    "- memory 工具调用中不要传 userId、agentId、workspaceId、relationId、version 等 scope 字段；这些由 runtime 代码绑定。",
+    "- 记忆演化采用追加新记录/读取最新有效记录的方式；模型不能通过工具更新或删除既有记忆。"
   ].join("\n");
 }
 

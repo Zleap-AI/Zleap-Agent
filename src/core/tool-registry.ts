@@ -22,10 +22,7 @@ export class ToolRegistry {
     "searchMemory",
     "writeUserImpression",
     "writeAgentSelfImpression",
-    "writeEventMemory",
-    "writeSkillMemory",
-    "updateMemory",
-    "deleteMemory"
+    "writeSkillMemory"
   ]);
   private readonly runtimeOrchestrationToolNames = new Set(["exitWorkspace"]);
   private readonly mainOnlyToolNames = new Set(["enterWorkspace", "askUser", "finishTask"]);
