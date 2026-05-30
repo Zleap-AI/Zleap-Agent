@@ -2,6 +2,27 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:08 +08:00
+
+Purpose:
+- Prevent editing an existing workspace ID from accidentally creating a new workspace.
+- Add a Workspace UI path for deleting non-built-in workspaces.
+
+Changed:
+- Made saved workspace IDs read-only in the Workspace editor while keeping new unsaved workspace IDs editable.
+- Added a Workspace editor delete/cancel action: unsaved workspaces can be abandoned, custom saved workspaces can be deleted, and built-in `main/file/cli` workspaces cannot be deleted.
+- Routed Workspace UI deletion through the existing creator-gated `DELETE /api/workspaces/:id` API.
+- Updated `ZLEAP_MASTER_PLAN.md` with the immutable workspace ID and non-built-in deletion UI rules.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 06:02 +08:00
 
 Purpose:

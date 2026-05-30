@@ -138,6 +138,8 @@ const SYSTEM_TOOL_NAMES = new Set([
   "deleteMemory"
 ]);
 
+const BUILT_IN_WORKSPACE_IDS = new Set(["main", "file", "cli"]);
+
 function isSystemTool(tool: ToolDefinition): boolean {
   return tool.bindingType === "runtime" || SYSTEM_TOOL_NAMES.has(tool.name);
 }
@@ -1329,18 +1331,23 @@ function WorkspaceTab() {
 
   async function save() {
     if (!selected) return;
-    const cached = loadCache();
-    const saved = await api<WorkspaceDefinition>(`/api/workspaces/${selected.id}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        ...selected,
-        toolIds: selected.tools.map((tool) => tool.id),
-        actorId: cached.userId ?? "user",
-        actorRole: cached.userRole ?? "user"
-      })
-    });
-    setSelected(saved);
-    await load();
+    setToolError("");
+    try {
+      const cached = loadCache();
+      const saved = await api<WorkspaceDefinition>(`/api/workspaces/${encodeURIComponent(selected.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          ...selected,
+          toolIds: selected.tools.map((tool) => tool.id),
+          actorId: cached.userId ?? "user",
+          actorRole: cached.userRole ?? "user"
+        })
+      });
+      setSelected(saved);
+      await load();
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function saveTool() {
@@ -1545,8 +1552,51 @@ function WorkspaceTab() {
     setSelectedDiscoveredTools(new Set());
   }
 
+  async function deleteWorkspace() {
+    if (!selected) return;
+    const isExisting = workspaces.some((workspace) => workspace.id === selected.id);
+    if (!isExisting) {
+      setSelected(workspaces[0] ?? null);
+      setToolDraft(null);
+      setMcpDraft(null);
+      setMcpServers([]);
+      setDiscoveredTools([]);
+      setSelectedDiscoveredTools(new Set());
+      setToolError("");
+      return;
+    }
+    if (BUILT_IN_WORKSPACE_IDS.has(selected.id)) {
+      setToolError("内置工作空间不能删除。");
+      return;
+    }
+    if (!window.confirm(`删除工作空间 ${selected.id}？相关专属工具和 MCP Server 也会被移除。`)) return;
+    setToolError("");
+    try {
+      const cached = loadCache();
+      await api(`/api/workspaces/${encodeURIComponent(selected.id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          actorId: cached.userId ?? "creator",
+          actorRole: cached.userRole ?? "creator",
+          deleteReason: "用户在工作空间 UI 删除"
+        })
+      });
+      setSelected(null);
+      setToolDraft(null);
+      setMcpDraft(null);
+      setMcpServers([]);
+      setDiscoveredTools([]);
+      setSelectedDiscoveredTools(new Set());
+      await load();
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const workspaceTools = selected?.tools.filter((tool) => !isSystemTool(tool)) ?? [];
   const systemTools = selected?.tools.filter(isSystemTool) ?? [];
+  const isExistingWorkspace = selected ? workspaces.some((workspace) => workspace.id === selected.id) : false;
+  const isBuiltInWorkspace = selected ? BUILT_IN_WORKSPACE_IDS.has(selected.id) : false;
 
   return (
     <section className="workspace-grid">
@@ -1556,7 +1606,10 @@ function WorkspaceTab() {
           <button onClick={createWorkspace}>新建</button>
         </div>
         {workspaces.map((workspace) => (
-          <button key={workspace.id} className={selected?.id === workspace.id ? "row active" : "row"} onClick={() => setSelected(workspace)}>
+          <button key={workspace.id} className={selected?.id === workspace.id ? "row active" : "row"} onClick={() => {
+            setSelected(workspace);
+            setToolError("");
+          }}>
             <strong>{workspace.name}</strong>
             <span>{workspace.id}</span>
           </button>
@@ -1565,7 +1618,16 @@ function WorkspaceTab() {
       <section className="panel editor-panel">
         {selected ? (
           <>
-            <label>ID<input value={selected.id} onChange={(event) => setSelected({ ...selected, id: event.target.value })} /></label>
+            {toolError && <div className="error inline-error"><span>{toolError}</span></div>}
+            <label>
+              ID
+              <input
+                value={selected.id}
+                disabled={isExistingWorkspace}
+                onChange={(event) => setSelected({ ...selected, id: event.target.value })}
+              />
+              {isExistingWorkspace && <small>已保存工作空间的 ID 是稳定主键，不能在编辑时修改。</small>}
+            </label>
             <label>名称<input value={selected.name} onChange={(event) => setSelected({ ...selected, name: event.target.value })} /></label>
             <label>描述<textarea value={selected.description} onChange={(event) => setSelected({ ...selected, description: event.target.value })} /></label>
             <label>能力清单<textarea value={stringifyListText(selected.capabilitiesJson)} onChange={(event) => setSelected(updateWorkspaceListField(selected, "capabilitiesJson", event.target.value))} /></label>
@@ -1732,7 +1794,12 @@ function WorkspaceTab() {
                 </div>
               ))}
             </div>
-            <button className="primary" onClick={save}>保存工作空间</button>
+            <div className="workspace-actions">
+              <button className="primary" onClick={save}>保存工作空间</button>
+              <button className="danger" onClick={() => void deleteWorkspace()} disabled={isExistingWorkspace && isBuiltInWorkspace}>
+                {isExistingWorkspace ? "删除工作空间" : "放弃新建"}
+              </button>
+            </div>
           </>
         ) : <div className="empty">请选择一个工作空间。</div>}
       </section>

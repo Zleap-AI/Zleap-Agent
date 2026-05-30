@@ -349,7 +349,8 @@
   - Chat right panel shows memory records written by the selected/latest turn.
   - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact tool result messages returned into the model loop.
   - Browser refresh restores cached settings, API key, messages, and latest context stack.
-  - Workspace creation/editing manages manifest capabilities, input/output kinds, approval flag, and memory policy JSON.
+  - Workspace creation/editing manages manifest capabilities, input/output kinds, approval flag, and memory policy JSON. A saved workspace id is an immutable stable primary key in the UI; editing the ID field is only allowed before a new workspace is saved, so changing a saved workspace's identity cannot accidentally create a second workspace.
+  - Workspace UI supports deleting non-built-in workspaces through the existing creator-gated delete API. Built-in `main/file/cli` workspaces cannot be deleted from the UI.
   - Workspace tool UI is workspace-first: after selecting or creating a workspace, the user registers tools into that workspace.
   - Workspace tool UI supports MCP Server registration/editing/deletion, local stdio and remote Streamable HTTP configuration, discovery from the selected server, choosing discovered tools to mount, and deleting mounted tools. Manual JSON binding editing is advanced/debug-only and must not be the normal MCP setup path.
   - Workspace tool lists show whether each tool is runtime-bound, MCP-bound, or still a placeholder, and system/runtime tools are visually separated from workspace-registered tools.

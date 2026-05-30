@@ -38,6 +38,11 @@ button.primary {
   color: #ffffff;
 }
 
+button.danger {
+  border-color: #d93025;
+  color: #b3261e;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: wait;
@@ -768,6 +773,13 @@ pre {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .tool-editor {
