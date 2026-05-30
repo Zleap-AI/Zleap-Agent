@@ -3,6 +3,7 @@ import { Repositories } from "../db/repositories";
 import { MemoryService } from "./memory-service";
 import { PolicyEngine } from "./policy-engine";
 import { WorkspaceRuntime } from "./workspace-runtime";
+import { McpToolExecutor } from "./mcp-executor";
 
 export type ToolExecutionResult = {
   ok: boolean;
@@ -28,6 +29,7 @@ export class ToolRegistry {
   private readonly runtimeOrchestrationToolNames = new Set(["exitWorkspace"]);
   private readonly mainOnlyToolNames = new Set(["enterWorkspace", "askUser", "finishTask"]);
   private readonly runtimeMemoryToolNames = this.universalRuntimeMemoryToolNames;
+  private readonly mcpToolExecutor = new McpToolExecutor();
 
   constructor(
     private readonly repos: Repositories,
@@ -49,14 +51,14 @@ export class ToolRegistry {
     return [...activeTools, ...runtimeOrchestrationTools, ...runtimeMemoryTools];
   }
 
-  execute(input: {
+  async execute(input: {
     run: AgentRunInput;
     activeWorkspaceId: string;
     activeWorkspaceSession?: WorkspaceSession;
     callableTools: ToolDefinition[];
     toolName: string;
     argumentsJson: string;
-  }): ToolExecutionResult {
+  }): Promise<ToolExecutionResult> {
     const tool = input.callableTools.find((item) => item.name === input.toolName)
       ?? this.repos.listTools().find((item) => item.name === input.toolName);
     if (!tool) {
@@ -132,18 +134,7 @@ export class ToolRegistry {
     }
 
     if (tool.bindingType === "mcp") {
-      return {
-        ok: false,
-        status: "failed",
-        result: {
-          error: "MCP tool binding is registered, but no MCP executor is connected in this runtime yet.",
-          toolName: input.toolName,
-          workspaceId: input.activeWorkspaceId,
-          mcpServerId: tool.mcpServerId ?? null,
-          mcpToolName: tool.mcpToolName ?? null,
-          binding: safeJson(tool.bindingJson)
-        }
-      };
+      return this.mcpToolExecutor.execute(tool, input.argumentsJson);
     }
 
     return {

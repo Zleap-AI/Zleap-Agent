@@ -82,6 +82,7 @@ export function migrate(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS tool_definitions (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
+      workspaceId TEXT,
       description TEXT NOT NULL,
       parametersJson TEXT NOT NULL,
       riskLevel TEXT NOT NULL CHECK (riskLevel IN ('low', 'medium', 'high')),
@@ -259,6 +260,7 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, "tool_definitions", "bindingJson", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, "tool_definitions", "mcpServerId", "TEXT");
   ensureColumn(db, "tool_definitions", "mcpToolName", "TEXT");
+  ensureColumn(db, "tool_definitions", "workspaceId", "TEXT");
   ensureColumn(db, "memories", "deletedAt", "TEXT");
   ensureColumn(db, "memories", "deletedBy", "TEXT");
   ensureColumn(db, "memories", "deleteReason", "TEXT");

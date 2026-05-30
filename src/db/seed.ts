@@ -328,6 +328,10 @@ export function seedDefaults(db: Database.Database): void {
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.updateMemory" }), null, null, now, "tool-update-memory");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.deleteMemory" }), null, null, now, "tool-delete-memory");
 
+  db.prepare("UPDATE tool_definitions SET workspaceId = NULL WHERE bindingType = 'runtime'").run();
+  db.prepare("UPDATE tool_definitions SET workspaceId = 'file' WHERE id = 'tool-search-files'").run();
+  db.prepare("UPDATE tool_definitions SET workspaceId = 'cli' WHERE id = 'tool-run-command'").run();
+
   const link = db.prepare("INSERT OR IGNORE INTO workspace_tools (workspaceId, toolId, createdAt) VALUES (?, ?, ?)");
   link.run("main", "tool-enter-workspace", now);
   link.run("main", "tool-ask-user", now);

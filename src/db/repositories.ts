@@ -50,6 +50,14 @@ const builtInMemoryToolIds = [
   "tool-delete-memory"
 ];
 
+const builtInRuntimeToolIds = new Set([
+  "tool-enter-workspace",
+  "tool-exit-workspace",
+  "tool-ask-user",
+  "tool-finish-task",
+  ...builtInMemoryToolIds
+]);
+
 function normalizeWorkspace(row: Omit<WorkspaceDefinition, "tools">, tools: ToolDefinition[]): WorkspaceDefinition {
   const capabilities = parseJson<string[]>(row.capabilitiesJson ?? "[]", []);
   const inputKinds = parseJson<string[]>(row.inputKindsJson ?? "[]", []);
@@ -327,6 +335,86 @@ export class Repositories {
       WHERE wt.workspaceId = ?
       ORDER BY t.name
     `).all(workspaceId) as ToolDefinition[];
+  }
+
+  upsertWorkspaceTool(input: Partial<ToolDefinition> & Pick<ToolDefinition, "name" | "description" | "parametersJson" | "riskLevel" | "bindingType" | "bindingJson"> & { workspaceId: string; actorId: string; actorRole: UserRole }): ToolDefinition {
+    if (input.actorRole !== "creator") throw new Error("Workspace tool registration requires creator role.");
+    this.getWorkspace(input.workspaceId);
+    const id = input.id?.trim() || createId("tool");
+    if (builtInRuntimeToolIds.has(id)) throw new Error("Built-in runtime tools cannot be edited through workspace tool registration.");
+    if (!input.name.trim()) throw new Error("Tool name is required.");
+    JSON.parse(input.parametersJson);
+    if (input.bindingJson) JSON.parse(input.bindingJson);
+    const now = nowIso();
+    const existing = this.db.prepare("SELECT * FROM tool_definitions WHERE id = ?").get(id) as ToolDefinition | undefined;
+    if (existing && existing.workspaceId && existing.workspaceId !== input.workspaceId) {
+      throw new Error("Workspace tool belongs to a different workspace.");
+    }
+
+    this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO tool_definitions
+          (id, name, workspaceId, description, parametersJson, riskLevel, bindingType, bindingJson, mcpServerId, mcpToolName, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          workspaceId = excluded.workspaceId,
+          description = excluded.description,
+          parametersJson = excluded.parametersJson,
+          riskLevel = excluded.riskLevel,
+          bindingType = excluded.bindingType,
+          bindingJson = excluded.bindingJson,
+          mcpServerId = excluded.mcpServerId,
+          mcpToolName = excluded.mcpToolName,
+          updatedAt = excluded.updatedAt
+      `).run(
+        id,
+        input.name.trim(),
+        input.workspaceId,
+        input.description,
+        input.parametersJson,
+        input.riskLevel,
+        input.bindingType,
+        input.bindingJson || "{}",
+        input.mcpServerId ?? null,
+        input.mcpToolName ?? null,
+        existing?.createdAt ?? now,
+        now
+      );
+      this.db.prepare("INSERT OR IGNORE INTO workspace_tools (workspaceId, toolId, createdAt) VALUES (?, ?, ?)").run(input.workspaceId, id, now);
+      this.audit(input.actorId, input.actorRole, existing ? "workspace_tool_update" : "workspace_tool_register", "tool", id, {
+        workspaceId: input.workspaceId,
+        toolName: input.name,
+        bindingType: input.bindingType,
+        mcpServerId: input.mcpServerId,
+        mcpToolName: input.mcpToolName
+      });
+    })();
+    return this.getTool(id);
+  }
+
+  getTool(id: string): ToolDefinition {
+    const row = this.db.prepare("SELECT * FROM tool_definitions WHERE id = ?").get(id) as ToolDefinition | undefined;
+    if (!row) throw new Error(`Tool not found: ${id}`);
+    return row;
+  }
+
+  deleteWorkspaceTool(workspaceId: string, toolId: string, actorId: string, actorRole: UserRole, deleteReason = "manual workspace tool delete"): void {
+    if (actorRole !== "creator") throw new Error("Workspace tool deletion requires creator role.");
+    this.getWorkspace(workspaceId);
+    const tool = this.getTool(toolId);
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM workspace_tools WHERE workspaceId = ? AND toolId = ?").run(workspaceId, toolId);
+      if (tool.workspaceId === workspaceId && !builtInRuntimeToolIds.has(toolId)) {
+        this.db.prepare("DELETE FROM tool_definitions WHERE id = ?").run(toolId);
+      }
+      this.audit(actorId, actorRole, "workspace_tool_delete", "tool", toolId, {
+        workspaceId,
+        toolName: tool.name,
+        bindingType: tool.bindingType,
+        deleteReason
+      });
+    })();
   }
 
   listMemories(filters: { query?: string; memoryType?: string; userId?: string; agentId?: string; workspaceId?: string } = {}): MemoryRow[] {

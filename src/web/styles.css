@@ -633,6 +633,69 @@ pre {
   gap: 8px;
 }
 
+.workspace-tool-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tool-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  background: #f8fafb;
+}
+
+.tool-card div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tool-card strong,
+.tool-card span {
+  overflow-wrap: anywhere;
+}
+
+.tool-card span,
+.tool-card small {
+  color: #6c7884;
+  font-size: 12px;
+}
+
+.tool-card-actions,
+.tool-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tool-editor {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.discovered-tools {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.locked-tool {
+  background: #f8fafb;
+  color: #5c6975;
+}
+
 .check-row {
   grid-template-columns: auto 1fr auto;
   align-items: center;

@@ -4,6 +4,19 @@
 
 In context display and prompt assembly, workspace information is one top-level category. It contains the active workspace description, instructions, tool instructions, manifest, memory policy, and current callable tool definitions. Only the main workspace includes the available workspace manifest list inside this workspace contract. Child workspaces do not receive sibling workspace lists.
 
+## 2026-05-31 update: workspace-first tool registration and MCP execution
+
+工具安装的产品心智是先有 workspace，再把工具注册进这个 workspace。底层 SQLite 仍可用 `tool_definitions` 和 `workspace_tools` 做规范化存储，但非 runtime 工具必须带有明确的 workspace 归属；UI 不应该把工具表现成一个所有 workspace 共享的全局池。
+
+workspace 工具管理需要支持：
+
+- 在当前 workspace 内新增工具。
+- 编辑当前 workspace 内工具的名称、说明、参数 JSON Schema、风险等级和绑定配置。
+- 删除当前 workspace 内的非系统工具。
+- 从 MCP server 发现工具，并把发现到的工具导入当前 workspace。
+
+Runtime MCP 执行已经不是占位概念。MCP-bound tool 使用官方 TypeScript SDK：stdio server 通过 `StdioClientTransport` 启动进程，远程 server 通过 `StreamableHTTPClientTransport` 连接；发现工具使用 `client.listTools()`，执行工具使用 `client.callTool()`。连接失败、配置缺失、超时或工具执行错误都应作为 structured failed tool result 写入 `tool_calls`，不能静默失败。
+
 ## 2026-05-31 更新：代码边界与当前实现口径
 
 当前实现以 `ZLEAP_MASTER_PLAN.md` 为准：首版内置 workspace 是 `main`、`file`、`cli`，没有独立 `memory workspace`，Browser workspace 只作为未来扩展示例。memory 能力以通用 runtime tools 的形式挂载到每个 workspace 中。

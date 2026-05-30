@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import Database from "better-sqlite3";
 import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
@@ -3894,7 +3895,7 @@ async function testToolBindingsAndMcpReadiness() {
       apiKey: "test-key"
     }
   });
-  assert.equal(mcpTool.lastToolResult.includes("MCP tool binding"), true);
+  assert.equal(mcpTool.lastToolResult.includes("MCP stdio binding requires command"), true);
   assert.equal(mcpTool.lastToolResult.includes("local.file"), true);
   const mcpTrace = repos.getTrace("conv-tool-binding-mcp", "creator", "creator");
   assert.equal(mcpTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
@@ -3902,6 +3903,49 @@ async function testToolBindingsAndMcpReadiness() {
   const mcpFileSession = mcpTrace.sessions.find((session) => session.workspaceId === "file");
   assert.equal(mcpFileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles" && call.status === "failed"), true);
   assert.equal(mcpFileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status failed")), true);
+
+  const echoServerPath = path.resolve("src/tests/fixtures/mcp-echo-server.mjs");
+  repos.upsertWorkspaceTool({
+    id: "tool-file-echo-mcp",
+    workspaceId: "file",
+    name: "echoMcp",
+    description: "Call the test MCP echo tool.",
+    parametersJson: JSON.stringify({
+      type: "object",
+      properties: { text: { type: "string" } },
+      required: ["text"],
+      additionalProperties: false
+    }),
+    riskLevel: "low",
+    bindingType: "mcp",
+    bindingJson: JSON.stringify({
+      transport: "stdio",
+      command: process.execPath,
+      args: [echoServerPath],
+      timeoutMs: 10000
+    }),
+    mcpServerId: "test.echo",
+    mcpToolName: "echo",
+    actorId: "creator",
+    actorRole: "creator"
+  });
+  const echoClient = new MainToWorkspaceToolRequestLLMClient("file", "echoMcp", { text: "hello" });
+  const echoRuntime = new AgentRuntime(repos, echoClient);
+  await echoRuntime.run({
+    agentId: "default-agent",
+    userId: "tool-binding-user",
+    userRole: "creator",
+    conversationId: "conv-tool-binding-mcp-echo",
+    message: "echo hello through mcp",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(echoClient.lastToolResult.includes("echo:hello"), true);
+  const echoTrace = repos.getTrace("conv-tool-binding-mcp-echo", "creator", "creator");
+  assert.equal(echoTrace.toolCalls.some((call) => call.toolName === "echoMcp" && call.status === "completed"), true);
 
   const enterWorkspace = new SingleToolRequestLLMClient("enterWorkspace", { workspaceId: "file", objective: "search runtime files" });
   const enterRuntime = new AgentRuntime(repos, enterWorkspace);

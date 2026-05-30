@@ -3,6 +3,7 @@ import { openDatabase } from "../db/database";
 import { Repositories } from "../db/repositories";
 import { AgentRuntime } from "../core/agent-runtime";
 import { MemoryService } from "../core/memory-service";
+import { McpToolExecutor } from "../core/mcp-executor";
 import { normalizeProviderBaseUrl } from "../core/llm-client";
 import { parseActor, parseActorFromSearchParams } from "./actor";
 import { readJson, sendError, sendJson, serveStatic } from "./http";
@@ -14,6 +15,7 @@ const repos = new Repositories(db);
 repos.markPendingLlmCallsInterrupted();
 const runtime = new AgentRuntime(repos);
 const memoryService = new MemoryService(repos);
+const mcpToolExecutor = new McpToolExecutor();
 
 function parseUrl(request: http.IncomingMessage): URL {
   return new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -124,6 +126,13 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, { workspaces: repos.listWorkspaces(), tools: repos.listTools() });
       return;
     }
+    if (url.pathname === "/api/mcp/tools/discover" && request.method === "POST") {
+      const body = await readJson<{ bindingJson?: string; actorId?: string; actorRole?: "user" | "creator" }>(request);
+      const actor = parseActor(body, "MCP tool discovery API");
+      if (actor.actorRole !== "creator") throw new Error("MCP tool discovery requires creator role.");
+      sendJson(response, 200, { tools: await mcpToolExecutor.discoverTools(body.bindingJson ?? "{}") });
+      return;
+    }
     if (url.pathname === "/api/workspaces" && request.method === "POST") {
       const body = await readJson<any>(request);
       const actor = parseActor(body, "Workspace create API");
@@ -150,6 +159,38 @@ const server = http.createServer(async (request, response) => {
       const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator"; deleteReason?: string }>(request);
       const actor = parseActor(body, "Workspace delete API");
       repos.deleteWorkspace(workspaceMatch[1], actor.actorId, actor.actorRole, body.deleteReason);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+    const workspaceToolCollectionMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/tools$/);
+    if (workspaceToolCollectionMatch && request.method === "POST") {
+      const body = await readJson<any>(request);
+      const actor = parseActor(body, "Workspace tool registration API");
+      sendJson(response, 200, repos.upsertWorkspaceTool({
+        ...body,
+        workspaceId: workspaceToolCollectionMatch[1],
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
+      }));
+      return;
+    }
+    const workspaceToolMatch = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/tools\/([^/]+)$/);
+    if (workspaceToolMatch && request.method === "PUT") {
+      const body = await readJson<any>(request);
+      const actor = parseActor(body, "Workspace tool update API");
+      sendJson(response, 200, repos.upsertWorkspaceTool({
+        ...body,
+        id: workspaceToolMatch[2],
+        workspaceId: workspaceToolMatch[1],
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
+      }));
+      return;
+    }
+    if (workspaceToolMatch && request.method === "DELETE") {
+      const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator"; deleteReason?: string }>(request);
+      const actor = parseActor(body, "Workspace tool delete API");
+      repos.deleteWorkspaceTool(workspaceToolMatch[1], workspaceToolMatch[2], actor.actorId, actor.actorRole, body.deleteReason);
       sendJson(response, 200, { ok: true });
       return;
     }

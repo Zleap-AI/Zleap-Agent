@@ -63,6 +63,48 @@ function bindingLabel(value: ToolDefinition["bindingType"]): string {
   return "占位";
 }
 
+const SYSTEM_TOOL_NAMES = new Set([
+  "enterWorkspace",
+  "exitWorkspace",
+  "askUser",
+  "finishTask",
+  "searchMemory",
+  "writeUserImpression",
+  "writeAgentSelfImpression",
+  "writeEventMemory",
+  "writeSkillMemory",
+  "updateMemory",
+  "deleteMemory"
+]);
+
+function isSystemTool(tool: ToolDefinition): boolean {
+  return tool.bindingType === "runtime" || SYSTEM_TOOL_NAMES.has(tool.name);
+}
+
+function defaultMcpBindingJson(): string {
+  return JSON.stringify({
+    transport: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
+    timeoutMs: 30000
+  }, null, 2);
+}
+
+function createToolDraft(workspaceId: string): Partial<ToolDefinition> {
+  return {
+    id: `tool-${workspaceId}-${Date.now()}`,
+    workspaceId,
+    name: "",
+    description: "",
+    parametersJson: JSON.stringify({ type: "object", properties: {}, additionalProperties: false }, null, 2),
+    riskLevel: "low",
+    bindingType: "mcp",
+    bindingJson: defaultMcpBindingJson(),
+    mcpServerId: "",
+    mcpToolName: ""
+  };
+}
+
 function parseListText(value: string): string[] {
   return value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
 }
@@ -1089,14 +1131,19 @@ function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
 
 function WorkspaceTab() {
   const [workspaces, setWorkspaces] = useState<WorkspaceDefinition[]>([]);
-  const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [selected, setSelected] = useState<WorkspaceDefinition | null>(null);
+  const [toolDraft, setToolDraft] = useState<Partial<ToolDefinition> | null>(null);
+  const [toolError, setToolError] = useState("");
+  const [discoveredTools, setDiscoveredTools] = useState<Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>([]);
 
   async function load() {
     const data = await api<{ workspaces: WorkspaceDefinition[]; tools: ToolDefinition[] }>("/api/workspaces");
     setWorkspaces(data.workspaces);
-    setTools(data.tools);
-    setSelected((current) => current ? data.workspaces.find((item) => item.id === current.id) ?? current : data.workspaces[0] ?? null);
+    setSelected((current) => {
+      const next = current ? data.workspaces.find((item) => item.id === current.id) ?? current : data.workspaces[0] ?? null;
+      if (next && toolDraft && toolDraft.workspaceId !== next.id) setToolDraft(createToolDraft(next.id));
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -1117,6 +1164,74 @@ function WorkspaceTab() {
     });
     setSelected(saved);
     await load();
+  }
+
+  async function saveTool() {
+    if (!selected || !toolDraft?.name || !toolDraft.description || !toolDraft.parametersJson || !toolDraft.bindingType) return;
+    setToolError("");
+    try {
+      JSON.parse(toolDraft.parametersJson);
+      JSON.parse(toolDraft.bindingJson || "{}");
+      const cached = loadCache();
+      const body = {
+        ...toolDraft,
+        actorId: cached.userId ?? "creator",
+        actorRole: cached.userRole ?? "creator"
+      };
+      const path = toolDraft.id && selected.tools.some((tool) => tool.id === toolDraft.id)
+        ? `/api/workspaces/${encodeURIComponent(selected.id)}/tools/${encodeURIComponent(toolDraft.id)}`
+        : `/api/workspaces/${encodeURIComponent(selected.id)}/tools`;
+      await api<ToolDefinition>(path, {
+        method: toolDraft.id && selected.tools.some((tool) => tool.id === toolDraft.id) ? "PUT" : "POST",
+        body: JSON.stringify(body)
+      });
+      setToolDraft(createToolDraft(selected.id));
+      setDiscoveredTools([]);
+      await load();
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function deleteTool(tool: ToolDefinition) {
+    if (!selected || isSystemTool(tool)) return;
+    setToolError("");
+    try {
+      const cached = loadCache();
+      await api(`/api/workspaces/${encodeURIComponent(selected.id)}/tools/${encodeURIComponent(tool.id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          actorId: cached.userId ?? "creator",
+          actorRole: cached.userRole ?? "creator",
+          deleteReason: "用户在工作空间工具 UI 删除"
+        })
+      });
+      if (toolDraft?.id === tool.id) setToolDraft(createToolDraft(selected.id));
+      await load();
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function discoverMcpTools() {
+    if (!toolDraft?.bindingJson) return;
+    setToolError("");
+    setDiscoveredTools([]);
+    try {
+      JSON.parse(toolDraft.bindingJson);
+      const cached = loadCache();
+      const data = await api<{ tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> }>("/api/mcp/tools/discover", {
+        method: "POST",
+        body: JSON.stringify({
+          bindingJson: toolDraft.bindingJson,
+          actorId: cached.userId ?? "creator",
+          actorRole: cached.userRole ?? "creator"
+        })
+      });
+      setDiscoveredTools(data.tools);
+    } catch (err) {
+      setToolError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   function createWorkspace() {
@@ -1162,7 +1277,12 @@ function WorkspaceTab() {
       },
       tools: []
     });
+    setToolDraft(null);
+    setDiscoveredTools([]);
   }
+
+  const workspaceTools = selected?.tools.filter((tool) => !isSystemTool(tool)) ?? [];
+  const systemTools = selected?.tools.filter(isSystemTool) ?? [];
 
   return (
     <section className="workspace-grid">
@@ -1202,31 +1322,91 @@ function WorkspaceTab() {
                 <option value="high">高</option>
               </select>
             </label>
-            <h2>已注册工具</h2>
+            <div className="section-heading">
+              <h2>工作空间工具</h2>
+              <button onClick={() => setToolDraft(createToolDraft(selected.id))}>添加工具</button>
+            </div>
+            <div className="workspace-tool-list">
+              {workspaceTools.map((tool) => (
+                <article key={tool.id} className="tool-card">
+                  <div>
+                    <strong>{tool.name}</strong>
+                    <span>{tool.description}</span>
+                  </div>
+                  <small title={tool.bindingType === "mcp" ? `${tool.mcpServerId ?? ""}/${tool.mcpToolName ?? ""}` : tool.bindingJson}>
+                    {riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)}
+                  </small>
+                  <div className="tool-card-actions">
+                    <button onClick={() => setToolDraft({ ...tool })}>编辑</button>
+                    <button onClick={() => void deleteTool(tool)}>删除</button>
+                  </div>
+                </article>
+              ))}
+              {workspaceTools.length === 0 && <div className="empty">这个工作空间还没有注册专属工具。</div>}
+            </div>
+            {toolDraft && (
+              <section className="tool-editor">
+                <div className="section-heading">
+                  <h2>{selected.tools.some((tool) => tool.id === toolDraft.id) ? "编辑工具" : "注册工具"}</h2>
+                  <button onClick={() => setToolDraft(null)}>收起</button>
+                </div>
+                {toolError && <div className="error inline-error"><span>{toolError}</span></div>}
+                <label>工具 ID<input value={toolDraft.id ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, id: event.target.value })} /></label>
+                <label>Function 名称<input value={toolDraft.name ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, name: event.target.value })} /></label>
+                <label>说明<textarea value={toolDraft.description ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, description: event.target.value })} /></label>
+                <label>
+                  类型
+                  <select value={toolDraft.bindingType ?? "mcp"} onChange={(event) => setToolDraft({ ...toolDraft, bindingType: event.target.value as ToolDefinition["bindingType"] })}>
+                    <option value="mcp">MCP</option>
+                    <option value="placeholder">占位</option>
+                  </select>
+                </label>
+                <label>
+                  风险等级
+                  <select value={toolDraft.riskLevel ?? "low"} onChange={(event) => setToolDraft({ ...toolDraft, riskLevel: event.target.value as ToolDefinition["riskLevel"] })}>
+                    <option value="low">低</option>
+                    <option value="medium">中</option>
+                    <option value="high">高</option>
+                  </select>
+                </label>
+                <label>参数 JSON Schema<textarea className="json-editor" value={toolDraft.parametersJson ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, parametersJson: event.target.value })} /></label>
+                <label>MCP Server ID<input value={toolDraft.mcpServerId ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, mcpServerId: event.target.value })} /></label>
+                <label>MCP Tool 名称<input value={toolDraft.mcpToolName ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, mcpToolName: event.target.value })} /></label>
+                <label>绑定配置 JSON<textarea className="json-editor" value={toolDraft.bindingJson ?? "{}"} onChange={(event) => setToolDraft({ ...toolDraft, bindingJson: event.target.value })} /></label>
+                <div className="tool-editor-actions">
+                  <button onClick={() => void discoverMcpTools()}>从 MCP Server 发现工具</button>
+                  <button className="primary" onClick={() => void saveTool()}>保存到当前工作空间</button>
+                </div>
+                {discoveredTools.length > 0 && (
+                  <div className="discovered-tools">
+                    {discoveredTools.map((tool) => (
+                      <button
+                        key={tool.name}
+                        className="row"
+                        onClick={() => setToolDraft({
+                          ...toolDraft,
+                          name: tool.name,
+                          mcpToolName: tool.name,
+                          description: tool.description,
+                          parametersJson: JSON.stringify(tool.inputSchema, null, 2)
+                        })}
+                      >
+                        <strong>{tool.name}</strong>
+                        <span>{tool.description || "没有说明"}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+            <h2>系统自动挂载工具</h2>
             <div className="tool-grid">
-              {tools.map((tool) => {
-                const checked = selected.tools.some((item) => item.id === tool.id);
-                return (
-                  <label key={tool.id} className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(event) => {
-                        setSelected({
-                          ...selected,
-                          tools: event.target.checked
-                            ? [...selected.tools, tool]
-                            : selected.tools.filter((item) => item.id !== tool.id)
-                        });
-                      }}
-                    />
-                    <span>{tool.name}</span>
-                    <small title={tool.bindingType === "mcp" ? `${tool.mcpServerId ?? ""}/${tool.mcpToolName ?? ""}` : tool.bindingJson}>
-                      {riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)}
-                    </small>
-                  </label>
-                );
-              })}
+              {systemTools.map((tool) => (
+                <div key={tool.id} className="check-row locked-tool">
+                  <span>{tool.name}</span>
+                  <small>{riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)}</small>
+                </div>
+              ))}
             </div>
             <button className="primary" onClick={save}>保存工作空间</button>
           </>

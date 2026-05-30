@@ -11,13 +11,14 @@
     "test": "tsx src/tests/run-tests.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@vitejs/plugin-react": "^4.3.4",
     "better-sqlite3": "^11.10.0",
-    "vite": "^6.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vite": "^6.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

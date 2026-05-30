@@ -20,6 +20,31 @@ Git:
 - Recorded by the Git commit that introduced this changelog entry.
 - No remote repository is currently configured, so push cannot be performed yet.
 
+## 2026-05-31 04:48 +08:00
+
+Purpose:
+- Change workspace/tool management from a global shared tool-pool UI to workspace-first tool registration, and connect MCP-bound tools to a real MCP client executor instead of leaving them as placeholders.
+
+Changed:
+- Added `@modelcontextprotocol/sdk` as the official MCP TypeScript SDK dependency.
+- Added `src/core/mcp-executor.ts` to support MCP stdio and Streamable HTTP bindings, `listTools()` discovery, and `callTool()` execution with structured failed results on connection/configuration/tool errors.
+- Updated `ToolRegistry` and `AgentRuntime` so MCP tool execution can run asynchronously during normal and streaming tool loops.
+- Added `tool_definitions.workspaceId` and repository APIs for workspace-scoped tool create/update/delete.
+- Added HTTP APIs for workspace tool registration and MCP tool discovery.
+- Reworked the Workspace UI so tools are added, edited, discovered, and deleted inside the selected workspace rather than selected from a global pool.
+- Visually separated system/runtime tools from workspace-registered tools.
+- Added an MCP echo server fixture and an end-to-end runtime test proving a workspace MCP tool can execute through stdio.
+- Updated `ZLEAP_MASTER_PLAN.md` and `docs/02-workspace-runtime.md` with the workspace-first tool model and real MCP execution contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- In-app browser verification could not complete because Browser Use rejected the localhost action under its URL policy.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 04:31 +08:00
 
 Purpose:

@@ -251,7 +251,7 @@ export class AgentRuntime {
             content: roundText || null,
             tool_calls: toolCalls
           };
-          const toolExecution = this.executeToolCalls(input, prepared, toolCalls);
+          const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
           memoryWrites.push(...toolExecution.memoryWrites);
           const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
             ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, assistantToolMessage, toolExecution.toolMessages);
@@ -584,7 +584,7 @@ export class AgentRuntime {
     }));
   }
 
-  private executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): { toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string } {
+  private async executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): Promise<{ toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string }> {
     const memoryWrites: MemoryRow[] = [];
     const toolMessages: LLMMessage[] = [];
     let enteredWorkspaceSession: WorkspaceSession | undefined;
@@ -621,7 +621,7 @@ export class AgentRuntime {
             taskId: activeSession?.taskId ?? null
           }
         }
-        : this.toolRegistry.execute({
+        : await this.toolRegistry.execute({
           run: input,
           activeWorkspaceId: prepared.activeWorkspaceId,
           activeWorkspaceSession: activeSession,
@@ -959,7 +959,7 @@ export class AgentRuntime {
         return { completion, memoryWrites, finalMessages: messages };
       }
 
-      const toolExecution = this.executeToolCalls(input, prepared, toolCalls);
+      const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
       memoryWrites.push(...toolExecution.memoryWrites);
       const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, completion.message, toolExecution.toolMessages)
         ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, completion.message, toolExecution.toolMessages);
