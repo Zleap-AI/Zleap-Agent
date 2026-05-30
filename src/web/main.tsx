@@ -63,6 +63,34 @@ function bindingLabel(value: ToolDefinition["bindingType"]): string {
   return "占位";
 }
 
+function workspaceStatusLabel(value: WorkspaceSession["status"]): string {
+  if (value === "running") return "运行中";
+  if (value === "completed") return "已完成";
+  if (value === "failed") return "失败";
+  if (value === "blocked") return "已阻塞";
+  if (value === "needs_user_input") return "需要用户补充";
+  if (value === "needs_approval") return "等待审批";
+  return value;
+}
+
+function describeWorkspaceView(output: AgentRunOutput | null): { primary: string; detail: string; involved: string[] } {
+  if (!output) return { primary: "暂无", detail: "", involved: [] };
+  const sessions = output.workspaceTrace ?? [];
+  const lastCapabilitySession = [...sessions].reverse().find((session) => session.workspaceId !== "main");
+  const displaySession = lastCapabilitySession ?? sessions.at(-1);
+  const involved = Array.from(new Set(sessions.map((session) => session.workspaceId)));
+  if (!displaySession) return { primary: output.activeWorkspaceId, detail: "", involved };
+  const statusText = workspaceStatusLabel(displaySession.status);
+  const returnedToMain = displaySession.workspaceId !== output.activeWorkspaceId;
+  return {
+    primary: displaySession.workspaceId,
+    detail: returnedToMain
+      ? `状态：${statusText}；运行结束后回到 ${output.activeWorkspaceId}`
+      : `状态：${statusText}`,
+    involved
+  };
+}
+
 const SYSTEM_TOOL_NAMES = new Set([
   "enterWorkspace",
   "exitWorkspace",
@@ -376,6 +404,7 @@ function ChatTab() {
   const [loading, setLoading] = useState(false);
   const selectedUserMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId && item.role === "用户") : undefined;
   const visibleOutput = selectedUserMessage ? selectedUserMessage.turnOutput ?? null : output;
+  const workspaceView = describeWorkspaceView(visibleOutput);
 
   useEffect(() => {
     api<AgentConfig>("/api/agents/default-agent")
@@ -640,8 +669,12 @@ function ChatTab() {
             </>
           )}
         </div>
-        <h2>当前工作空间</h2>
-        <div className="workspace-badge">{visibleOutput?.activeWorkspaceId ?? "暂无"}</div>
+        <h2>当前查看工作空间</h2>
+        <div className="workspace-badge">
+          <strong>{workspaceView.primary}</strong>
+          {workspaceView.detail && <span>{workspaceView.detail}</span>}
+          {workspaceView.involved.length > 1 && <small>本轮涉及：{workspaceView.involved.join(" → ")}</small>}
+        </div>
         <h2>工作空间轨迹</h2>
         <div className="stack">
           {visibleOutput?.workspaceTrace.map((session) => (

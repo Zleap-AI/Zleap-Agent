@@ -333,6 +333,7 @@
 - UI:
   - Chinese `对话/工作空间/记忆` tabs render.
   - Chat right panel expands context stack and final messages.
+  - Chat right panel workspace status must distinguish final runtime active workspace from the workspace being inspected for the selected turn. Because child workspaces normally return to `main` after `exitWorkspace`, the UI should highlight the latest non-main workspace involved in that turn and state when execution has returned to `main`.
   - Streaming assistant text appears incrementally.
   - Markdown in chat messages renders without unsafe HTML injection.
   - Failed chat requests can be retried.

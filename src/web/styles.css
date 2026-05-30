@@ -388,11 +388,23 @@ textarea {
 }
 
 .workspace-badge {
+  display: grid;
+  gap: 4px;
   padding: 10px;
   border-radius: 6px;
   background: #eaf5ee;
   color: #17633a;
-  font-weight: 700;
+}
+
+.workspace-badge strong {
+  font-size: 15px;
+}
+
+.workspace-badge span,
+.workspace-badge small {
+  color: #3f6f53;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .turn-badge {

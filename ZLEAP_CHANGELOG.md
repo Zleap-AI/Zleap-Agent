@@ -2,6 +2,28 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 05:22 +08:00
+
+Purpose:
+- Fix the Chat right panel's workspace display so a turn that entered `file` or another child workspace is not shown as only `main` after the child returns its result to main.
+- Make the UI reflect the runtime contract: child workspaces execute capability work, then normally exit back to main for final integration.
+
+Changed:
+- Added Web UI logic that derives the currently inspected workspace from the selected/latest turn's workspace trace, preferring the latest non-main workspace when one was involved.
+- Changed the Chat right panel label from current workspace to current inspected workspace, with status text and a "returned to main" note when applicable.
+- Updated workspace badge styling for primary workspace, status, and involved route.
+- Updated `ZLEAP_MASTER_PLAN.md` with the display rule.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- In-app browser reload at `http://localhost:4173/` confirmed the selected `查找js文件` turn now displays `file`, `状态：失败；运行结束后回到 main`, and `本轮涉及：main → file`.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 04:52 +08:00
 
 Purpose:
