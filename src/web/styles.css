@@ -267,6 +267,78 @@ textarea {
   font-weight: 700;
 }
 
+.message.process {
+  max-width: 86%;
+  margin-left: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.process-details {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.process-details summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #f7f9fb;
+  color: #53606b;
+  cursor: pointer;
+  user-select: none;
+}
+
+.process-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.process-details summary span {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: 13px;
+}
+
+.process-details summary small {
+  color: #7b8792;
+  font-size: 12px;
+}
+
+.process-icon {
+  display: inline-grid !important;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #bac4ce;
+  border-radius: 4px;
+  font-size: 10px !important;
+  line-height: 1;
+}
+
+.process-details[open] .process-icon {
+  transform: rotate(90deg);
+}
+
+.process-details pre {
+  max-width: min(640px, 100%);
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: #24313d;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .message.failed {
   border-color: #f5b5b0;
   background: #fff7f7;

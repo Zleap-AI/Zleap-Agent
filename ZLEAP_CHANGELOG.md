@@ -2,6 +2,27 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 05:42 +08:00
+
+Purpose:
+- Make the Chat timeline feel like one continuous agent task stream for ordinary users, while still exposing workspace switches and function calls for users who inspect details.
+- Replace visible workspace/debug-looking process messages with compact collapsible run-process blocks.
+
+Changed:
+- Added `运行过程` chat messages for workspace entry/exit, function-call batches, and tool results.
+- Rendered non-final runtime events as collapsible details with simple summaries and expanded workspace/tool metadata.
+- Kept child workspace assistant text visible separately from the final assistant answer.
+- Updated `ZLEAP_MASTER_PLAN.md` with the user-task-first timeline rule.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 05:36 +08:00
 
 Purpose:

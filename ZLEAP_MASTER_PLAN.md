@@ -21,6 +21,7 @@
   - The Chat page must support clearing only the current conversation while preserving cached settings and API key.
   - Each user chat message should keep the context stack snapshot for that turn; clicking a user message shows that historical context stack in the right panel.
   - Chat composer keyboard behavior: Enter sends the message; Ctrl+Enter inserts a newline.
+  - The Chat timeline is user-task-first: ordinary users should experience one continuous conversation, not a forced workspace/debug mental model. Workspace switches and function-call/tool execution must appear as compact collapsible process blocks inside the same conversation stream, with simple summaries such as entering a capability workspace or running several function calls; detailed workspace ids, tool names, arguments/results, and runtime evidence live inside the expanded details and Logs/Context panels.
   - `工作空间` manages workspaces first, then registers tools inside the selected workspace. The UI must not present tools as a global shared pool that users merely pick from.
   - Workspace tool management is MCP-server-first: bind MCP Servers inside the selected workspace, discover that server's tools, then choose which discovered tools to mount into the workspace. Manual tool editing remains an advanced path, not the primary MCP workflow.
   - `记忆` is a database-like table with filtering, create, edit, and delete.
@@ -337,7 +338,8 @@
   - Chat right panel expands context stack and final messages.
   - Chat right panel workspace status must distinguish final runtime active workspace from the workspace being inspected for the selected turn. Because child workspaces normally return to `main` after `exitWorkspace`, the UI should highlight the latest non-main workspace involved in that turn and state when execution has returned to `main`.
   - Streaming assistant text appears incrementally.
-  - Child workspace LLM interactions appear in the central conversation timeline as workspace process messages, with the workspace id and event kind visible, while the final assistant answer remains a separate user-facing message.
+  - Child workspace LLM interactions appear in the central conversation timeline as workspace process messages, while the final assistant answer remains a separate user-facing message.
+  - Workspace entry/exit, function-call batches, and tool results render as collapsible `运行过程` blocks so users can follow progress in one linear timeline without needing to understand workspace internals.
   - Markdown in chat messages renders without unsafe HTML injection.
   - Failed chat requests can be retried.
   - Clearing the current conversation resets messages, trace, and conversation id without clearing saved LLM settings or API key.

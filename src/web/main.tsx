@@ -10,6 +10,9 @@ type ChatMessage = {
   content: string;
   workspaceId?: string;
   eventKind?: string;
+  title?: string;
+  toolNames?: string[];
+  status?: string;
   streaming?: boolean;
   failed?: boolean;
   requestText?: string;
@@ -95,7 +98,30 @@ function describeWorkspaceView(output: AgentRunOutput | null): { primary: string
 
 function messageRoleLabel(item: ChatMessage): string {
   if (item.role === "工作空间" && item.workspaceId) return `${item.workspaceId} 工作空间`;
+  if (item.role === "运行过程") return "运行过程";
   return item.role;
+}
+
+function processMessageSummary(item: ChatMessage): string {
+  const workspaceId = item.workspaceId ?? "main";
+  const toolCount = item.toolNames?.length ?? 0;
+  if (item.eventKind === "entered") return `进入 ${workspaceId} 工作空间`;
+  if (item.eventKind === "exit") return `${workspaceId} 工作空间已返回主流程`;
+  if (item.eventKind === "tool_call") return `已运行 ${toolCount || 1} 条函数调用`;
+  if (item.eventKind === "tool_result") return `已收到 ${toolCount || 1} 条工具结果`;
+  return item.title || `${workspaceId} 运行过程`;
+}
+
+function processMessageDetail(item: ChatMessage): string {
+  const lines = [
+    item.title ? `标题：${item.title}` : "",
+    item.workspaceId ? `工作空间：${item.workspaceId}` : "",
+    item.eventKind ? `事件：${item.eventKind}` : "",
+    item.status ? `状态：${item.status}` : "",
+    item.toolNames?.length ? `函数：${item.toolNames.join(", ")}` : "",
+    item.content
+  ].filter(Boolean);
+  return lines.join("\n\n");
 }
 
 const SYSTEM_TOOL_NAMES = new Set([
@@ -514,9 +540,12 @@ function ChatTab() {
         if (payload.eventKind !== "assistant") {
           setMessages((items) => insertBeforeAssistant(items, {
             id: workspaceMessageId,
-            role: "工作空间",
+            role: "运行过程",
             workspaceId: payload.workspaceId,
             eventKind: payload.eventKind,
+            title: payload.title,
+            toolNames: payload.toolNames,
+            status: payload.status,
             content: baseContent
           }));
           return;
@@ -695,7 +724,7 @@ function ChatTab() {
           {messages.map((item, index) => (
             <article
               key={item.id ?? `${item.role}-${index}`}
-              className={`message ${item.role === "用户" ? "user clickable" : item.role === "工作空间" ? "workspace" : "assistant"} ${item.failed ? "failed" : ""} ${selectedTurnId === item.id ? "selected" : ""}`}
+              className={`message ${item.role === "用户" ? "user clickable" : item.role === "运行过程" ? "process" : item.role === "工作空间" ? "workspace" : "assistant"} ${item.failed ? "failed" : ""} ${selectedTurnId === item.id ? "selected" : ""}`}
               role={item.role === "用户" ? "button" : undefined}
               tabIndex={item.role === "用户" ? 0 : undefined}
               onClick={() => item.role === "用户" && setSelectedTurnId(item.id)}
@@ -704,8 +733,21 @@ function ChatTab() {
               }}
               title={item.role === "用户" ? "查看这轮对话的上下文窗口堆栈" : undefined}
             >
-              <span>{messageRoleLabel(item)}{item.streaming ? " · 正在生成" : ""}</span>
-              <MarkdownMessage content={item.content} />
+              {item.role === "运行过程" ? (
+                <details className="process-details">
+                  <summary>
+                    <span className="process-icon">▻</span>
+                    <span>{processMessageSummary(item)}</span>
+                    {item.workspaceId && <small>{item.workspaceId}</small>}
+                  </summary>
+                  <pre>{processMessageDetail(item)}</pre>
+                </details>
+              ) : (
+                <>
+                  <span>{messageRoleLabel(item)}{item.streaming ? " · 正在生成" : ""}</span>
+                  <MarkdownMessage content={item.content} />
+                </>
+              )}
               {item.failed && item.requestText && (
                 <button className="inline-action" disabled={loading} onClick={() => sendMessage(item.requestText)}>重试</button>
               )}
