@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:51 +08:00
+
+Purpose:
+- Turn the external Framework markdown into a product-facing concept introduction while keeping it aligned with the latest Zleap runtime decisions.
+
+Changed:
+- Rewrote `zleap-agent-framework.md` to remove outdated/conflicting guidance: `listWorkspaces` is not a tool, `exitWorkspace` is child-only, Browser workspace is future scope, vector recall is not enabled in the first version, and tools/context categories follow the latest master plan.
+- Added a top-level `概念介绍` Web UI tab.
+- Built a visual concept guide covering the traditional-agent problem, Zleap's stable identity + dynamic workspace state model, workspace routing, memory layers, context stack, lifecycle hooks, design principles, and implementation modules.
+- Updated `ZLEAP_MASTER_PLAN.md` so the new tab and Framework markdown alignment rules remain part of the project direction.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:46 +08:00
 
 Purpose:

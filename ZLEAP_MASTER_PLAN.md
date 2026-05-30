@@ -13,7 +13,7 @@
 
 - Web UI:
   - The visible interface must use Chinese by default.
-  - Top-level tabs: `对话`, `工作空间`, `记忆`, and `日志`.
+  - Top-level tabs: `对话`, `工作空间`, `记忆`, `日志`, and `概念介绍`.
   - `对话` uses three columns: agent/LLM/prompt configuration, chatbot conversation, and workspace/context stack inspection.
   - Assistant responses must support streaming output with a character-by-character typing feel.
   - Chat messages render Markdown for common assistant output such as headings, lists, quotes, links, inline code, and fenced code blocks.
@@ -27,6 +27,7 @@
   - Workspace tool management is MCP-server-first: bind MCP Servers inside the selected workspace, discover that server's tools, then choose which discovered tools to mount into the workspace. Manual tool editing remains an advanced path, not the primary MCP workflow.
   - `记忆` is a database-like table with filtering, create, edit, and delete.
   - `日志` is the dedicated trace inspection area for lifecycle hook logs, tool call logs, approval requests, current-conversation LLM request logs, and global recent LLM request logs.
+  - `概念介绍` presents the corrected `zleap-agent-framework.md` concepts as a polished Chinese visual guide with diagrams for workspace routing, memory layers, context stack, lifecycle hooks, principles, and implementation modules.
   - Log panels must support clearing the current visible log view without treating audit data deletion as an ordinary UI action.
   - The Memory editor must expose `metadataJson`, show policy/save/delete errors directly, validate JSON before save, and provide policy-aware creation templates for impression/event/skill records.
   - Browser local storage should remember current UI/session state, including agent settings, LLM base URL/model/API key, conversation id, current messages, and the latest context stack. API keys may be cached only in the user's browser session/storage for convenience; they must never be persisted to SQLite, source files, server logs, or plan/docs.
@@ -337,7 +338,7 @@
   - Lifecycle hooks are logged in `audit_logs` and visible through conversation trace.
   - Memory recall attempts are logged in `audit_logs` as `memory_recall_requested`, including zero-hit attempts, so the UI can distinguish "no recall was attempted" from "SQLite FTS recall ran but found no matching memory."
 - UI:
-  - Chinese `对话/工作空间/记忆` tabs render.
+  - Chinese `对话/工作空间/记忆/日志/概念介绍` tabs render.
   - Chat right panel expands context stack, callable tool snapshots, and final messages.
   - Chat right panel workspace status must distinguish final runtime active workspace from the workspace being inspected for the selected turn. Because child workspaces normally return to `main` after `exitWorkspace`, the UI should highlight the latest non-main workspace involved in that turn and state when execution has returned to `main`.
   - Streaming assistant text appears incrementally.
@@ -365,6 +366,7 @@
   - The dedicated `日志` tab shows a compact LLM debug summary so endpoint/status/result/timestamp are visible without scrolling through raw request payloads.
   - The dedicated `日志` tab lets only a creator approve or reject pending requests for debugging the approval lifecycle.
   - The dedicated `日志` tab supports clearing each visible log section and clearing the whole current log view.
+  - The `概念介绍` tab keeps the conceptual explanation aligned with `ZLEAP_MASTER_PLAN.md` and must not present superseded ideas such as `listWorkspaces` as a tool, Browser workspace as a first-version built-in workspace, or vector recall as enabled before implementation.
 - LLM:
   - 302AI request uses normalized `/v1/chat/completions` on `https://api.302ai.com`.
   - Legacy cached `https://api.302.ai` hostnames are rewritten through URL parsing before request logging and provider fetch.

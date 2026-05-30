@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceSession } from "../types";
 import "./styles.css";
 
-type Tab = "chat" | "workspace" | "memory" | "logs";
+type Tab = "chat" | "workspace" | "memory" | "logs" | "concept";
 type ChatMessage = {
   id: string;
   role: string;
@@ -33,6 +33,13 @@ const CACHE_KEY = "zleap.web.state.v2";
 const DEFAULT_BASE_URL = "https://api.302ai.com";
 const OLD_SYSTEM_PROMPT_MARKER = "你是运行在 Zleap runtime 内的 agent";
 const OLD_PERSONALITY_PROMPT_MARKER = "workspace 选择和 context 组织";
+const TAB_LABELS: Record<Tab, string> = {
+  chat: "对话",
+  workspace: "工作空间",
+  memory: "记忆",
+  logs: "日志",
+  concept: "概念介绍"
+};
 
 type CachedState = {
   userId?: string;
@@ -525,9 +532,9 @@ function App() {
           <p>工作空间优先的智能体调试控制台</p>
         </div>
         <nav className="tabs" aria-label="主导航">
-          {(["chat", "workspace", "memory", "logs"] as Tab[]).map((item) => (
+          {(["chat", "workspace", "memory", "logs", "concept"] as Tab[]).map((item) => (
             <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
-              {item === "chat" ? "对话" : item === "workspace" ? "工作空间" : item === "memory" ? "记忆" : "日志"}
+              {TAB_LABELS[item]}
             </button>
           ))}
         </nav>
@@ -536,7 +543,229 @@ function App() {
       {tab === "workspace" && <WorkspaceTab />}
       {tab === "memory" && <MemoryTab />}
       {tab === "logs" && <LogsTab />}
+      {tab === "concept" && <ConceptIntroTab />}
     </main>
+  );
+}
+
+function ConceptIntroTab() {
+  return (
+    <section className="concept-page">
+      <section className="concept-hero">
+        <div className="concept-hero-copy">
+          <span className="concept-kicker">Zleap Agent Framework</span>
+          <h2>稳定身份 + 动态工作空间状态</h2>
+          <p>
+            Zleap 的核心不是让模型看到更多内容，而是让模型在正确的工作空间里看到正确内容。
+            Runtime 负责边界、隔离和生命周期，模型负责判断、行动和自然表达。
+          </p>
+        </div>
+        <div className="identity-diagram" aria-label="Agent 结构图">
+          <div className="identity-node stable">
+            <strong>Stable Identity</strong>
+            <span>LLM / 系统提示词 / 人格提示词 / 自我印象</span>
+          </div>
+          <div className="identity-plus">+</div>
+          <div className="identity-node dynamic">
+            <strong>Dynamic Workspace State</strong>
+            <span>工具 / 局部记忆 / 任务上下文 / 工具证据</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="concept-section">
+        <div className="section-heading">
+          <span>问题与答案</span>
+          <h2>为什么不是一个装满所有能力的大 Agent</h2>
+        </div>
+        <div className="compare-grid">
+          <article className="compare-card problem">
+            <h3>传统 Agent</h3>
+            <code>LLM + 所有 tools + 所有 memory + 所有 context</code>
+            <ul>
+              <li>工具、记忆、历史全部混在同一个窗口里。</li>
+              <li>模型既要编排任务，又要执行底层操作。</li>
+              <li>用户信息、过程事件、共享经验容易互相污染。</li>
+              <li>上下文越堆越大，注意力越来越稀薄。</li>
+            </ul>
+          </article>
+          <article className="compare-card solution">
+            <h3>Zleap Agent</h3>
+            <code>Stable Identity + Dynamic Workspace State</code>
+            <ul>
+              <li>按 workspace 暴露当前真正需要的工具。</li>
+              <li>Main 负责编排，子 workspace 负责专业执行。</li>
+              <li>Impression、Event、Skill 分层存储和召回。</li>
+              <li>每次 LLM 调用都能检查真实 context stack。</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section className="concept-section">
+        <div className="section-heading">
+          <span>工作空间模型</span>
+          <h2>Workspace 是能力边界，不是子 Agent</h2>
+        </div>
+        <div className="workspace-map">
+          <div className="map-main">
+            <strong>Main Workspace</strong>
+            <span>理解目标、选择 workspace、整合结果</span>
+            <small>可见 workspace manifest；不直接拥有子 workspace 工具</small>
+          </div>
+          <div className="map-branches">
+            {[
+              ["File", "文件搜索和检查", "searchFiles"],
+              ["CLI", "命令行任务", "runCommand"],
+              ["MCP", "外部能力扩展", "stdio / Streamable HTTP"]
+            ].map(([name, desc, tools]) => (
+              <div className="map-workspace" key={name}>
+                <strong>{name} Workspace</strong>
+                <span>{desc}</span>
+                <small>{tools}</small>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flow-lane">
+          {["用户请求", "Main 编排", "enterWorkspace", "子空间执行", "exitWorkspace", "Main 整合", "最终答复"].map((item) => (
+            <div className="flow-step" key={item}>{item}</div>
+          ))}
+        </div>
+      </section>
+
+      <section className="concept-section">
+        <div className="section-heading">
+          <span>记忆系统</span>
+          <h2>Impression / Event / Skill 三层分工</h2>
+        </div>
+        <div className="memory-triad">
+          <article>
+            <strong>Impression</strong>
+            <span>记人和 Agent 自我</span>
+            <p>用户偏好、背景、长期约束跨 workspace 生效；agent self impression 由 creator 控制。</p>
+          </article>
+          <article>
+            <strong>Event</strong>
+            <span>记事情过程和结果</span>
+            <p>按 userId + workspaceId 隔离；当前第一版使用 SQLite FTS + relationId/version 最新行召回。</p>
+          </article>
+          <article>
+            <strong>Skill</strong>
+            <span>记可复用方法</span>
+            <p>按 workspace 共享，跨用户可用，但必须脱敏、泛化，并保留适用条件和置信度。</p>
+          </article>
+        </div>
+        <table className="concept-table">
+          <thead>
+            <tr>
+              <th>记忆类型</th>
+              <th>跨 Workspace</th>
+              <th>User 隔离</th>
+              <th>共享</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>User Impression</td><td>是</td><td>是</td><td>否</td><td>长期偏好、背景、约束</td></tr>
+            <tr><td>Agent Self Impression</td><td>是</td><td>否</td><td>creator 控制</td><td>Agent 自我认知</td></tr>
+            <tr><td>Event</td><td>否</td><td>是</td><td>否</td><td>某用户在某 workspace 做过什么</td></tr>
+            <tr><td>Skill</td><td>否</td><td>否</td><td>是</td><td>某 workspace 可复用经验</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section className="concept-section">
+        <div className="section-heading">
+          <span>上下文契约</span>
+          <h2>每一次 LLM 调用都是可检查的窗口</h2>
+        </div>
+        <div className="context-stack-visual">
+          {[
+            ["system", "系统提示词、人格提示词、内部运行策略"],
+            ["workspace", "当前 workspace 说明、manifest、memory policy"],
+            ["tools", "本次真实暴露的 function call、schema、MCP/runtime 绑定"],
+            ["memory", "impression、event、skill 分区召回"],
+            ["history", "本地对话片段、任务包、完成结果、近期工具证据"],
+            ["user", "干净用户消息"],
+            ["tool_result", "后续调用收到的工具结果"],
+            ["final_messages", "真实发送给 provider 的 messages 快照"]
+          ].map(([name, desc], index) => (
+            <div className="context-layer" key={name}>
+              <b>{index + 1}</b>
+              <strong>{name}</strong>
+              <span>{desc}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="concept-section">
+        <div className="section-heading">
+          <span>生命周期</span>
+          <h2>Runtime 负责边界，模型负责判断和行动</h2>
+        </div>
+        <div className="lifecycle-grid">
+          {[
+            ["beforeAgentTurn", "校验会话归属、加载配置、准备 context"],
+            ["beforeWorkspaceEnter", "权限检查、构造 WorkspaceTask、召回记忆"],
+            ["beforeToolCall / afterToolCall", "校验工具边界、保存结果、更新局部证据"],
+            ["beforeWorkspaceExit", "校验结构化 WorkspaceResult"],
+            ["afterWorkspaceExit", "保存结果、提取 event、生成 skill candidate"],
+            ["afterAgentTurn", "基于已保存对话窗口沉淀长期记忆"]
+          ].map(([hook, desc]) => (
+            <article key={hook}>
+              <strong>{hook}</strong>
+              <span>{desc}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="concept-section principle-section">
+        <div className="section-heading">
+          <span>七大原则</span>
+          <h2>让框架可以长期成长，而不是只跑一次任务</h2>
+        </div>
+        <div className="principle-grid">
+          {[
+            "注意力分区",
+            "稳定人格",
+            "Workspace 即能力边界",
+            "记忆分层",
+            "多租户优先",
+            "可成长",
+            "可运行"
+          ].map((item, index) => (
+            <div className="principle" key={item}>
+              <b>{index + 1}</b>
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="concept-section">
+        <div className="section-heading">
+          <span>实现路线</span>
+          <h2>从理念到 TypeScript Agent Framework</h2>
+        </div>
+        <div className="module-grid">
+          {[
+            ["core", "AgentRuntime、ContextBuilder、LLM、tool loop、memory lifecycle"],
+            ["db", "SQLite schema、Raw SQL repositories、migrations、seed"],
+            ["server", "HTTP API、streaming endpoint、static web serving"],
+            ["web", "对话、工作空间、记忆、日志、上下文堆栈、概念介绍"],
+            ["tests", "runtime、memory、policy、context、MCP、UI contract"]
+          ].map(([name, desc]) => (
+            <article key={name}>
+              <strong>src/{name}</strong>
+              <span>{desc}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+    </section>
   );
 }
 
