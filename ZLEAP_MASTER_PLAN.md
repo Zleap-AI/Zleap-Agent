@@ -7,6 +7,7 @@
 - When user decisions clarify or override earlier assumptions, treat the newest decision as authoritative, then update this master plan and the affected docs before or alongside code. Older docs are not allowed to remain as conflicting guidance.
 - The root README is not a source of truth. Core design docs and this master plan guide development.
 - The architecture is a headless TypeScript agent core, Node API server, React/Vite Web UI, and SQLite with Raw SQL.
+- Every meaningful code or documentation change must be recorded in Git. The change should also be appended to `ZLEAP_CHANGELOG.md` with the local timestamp, purpose, touched areas, verification status, and Git commit reference when available. If a Git remote is configured, changes should be pushed after commit unless the user explicitly says not to push.
 
 ## Key Changes
 
