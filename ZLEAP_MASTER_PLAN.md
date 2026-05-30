@@ -68,6 +68,8 @@
   - Workspace memory-policy caps must drive the SQL recall limit for each partition before prompt assembly. Repository defaults may provide fallbacks, but they must not silently cap a workspace whose `maxEventMemories` or `maxSkillMemories` is higher.
   - The boundary between model freedom and code authority is explicit: the model may choose whether to answer, ask, call an exposed tool, enter an exposed workspace, or request a memory write; code decides identity scope, active workspace scope, callable tool set, memory policy, approval policy, tenant ownership, and persistence/audit behavior.
   - Memory/context recall is performed by runtime and injected as a synthetic tool result.
+  - Every automatic memory recall attempt must be audited as `memory_recall_requested`, even when it returns zero rows. The audit metadata must include the active conversation/workspace/task, query text, recall algorithm, vector-enabled flag, per-partition limits, raw hit counts, injected partition counts, and injected memory ids so the Logs tab can prove whether recall happened.
+  - The first recall algorithm is SQLite FTS plus relation/version latest-row filtering. Vector recall is explicitly disabled for now (`vectorEnabled: false`) until a future design update changes the memory strategy.
   - Recalled memory must be partitioned by memory type before prompt assembly: cross-workspace impression memory, active-workspace event memory, and active-workspace skill memory are separate context stack segments and separate fields in the synthetic runtime memory tool result.
   - Automatic runtime recall must fetch impression, event, and skill partitions separately before applying prompt caps. A crowded skill or impression partition must not consume the global SQL limit and starve active-workspace event recall.
   - Active workspace task, completed workspace results, and recent local tool evidence are grouped under the `history` / local conversation segment instead of appearing as separate top-level context categories.
@@ -327,6 +329,7 @@
   - Runtime rejects skill writes that lack desensitization, reusable procedure steps, applicability/avoidance conditions, sufficient confidence, or that contain obvious private details such as local paths, secrets, emails, or phone numbers.
   - Memory tool calls are logged in `tool_calls`.
   - Lifecycle hooks are logged in `audit_logs` and visible through conversation trace.
+  - Memory recall attempts are logged in `audit_logs` as `memory_recall_requested`, including zero-hit attempts, so the UI can distinguish "no recall was attempted" from "SQLite FTS recall ran but found no matching memory."
 - UI:
   - Chinese `对话/工作空间/记忆` tabs render.
   - Chat right panel expands context stack and final messages.

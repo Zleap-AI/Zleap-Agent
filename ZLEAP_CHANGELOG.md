@@ -2,6 +2,27 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 04:52 +08:00
+
+Purpose:
+- Make runtime memory recall inspectable in the Logs tab, including turns where the current SQLite FTS recall algorithm returns zero hits.
+- Clarify that missing recall results can be an FTS query/token limitation, not necessarily a missing memory or permission failure.
+
+Changed:
+- Added `memory_recall_requested` audit logs during workspace local-context construction, with conversation/workspace/task ids, query text, algorithm name, `vectorEnabled`, recall limits, raw partition counts, injected partition counts, and injected memory ids.
+- Added impression counts to `hook.afterWorkspaceEnter` metadata.
+- Added tests for successful child-workspace recall logging and zero-hit main-workspace recall logging.
+- Updated `ZLEAP_MASTER_PLAN.md` and `docs/03-memory-model.md` with the recall observability contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Recorded by the Git commit that includes this changelog entry.
+- No remote repository is currently configured, so push cannot be performed yet.
+
 ## 2026-05-31 04:10 +08:00
 
 Purpose:

@@ -1,5 +1,16 @@
 # Memory Model
 
+## 2026-05-31 update: recall observability
+
+Runtime memory recall must be observable even when SQLite FTS returns no rows. Each workspace entry records a `memory_recall_requested` audit log with the active `conversationId`, `workspaceId`, `taskId`, query text, algorithm name, `vectorEnabled: false`, per-partition limits, raw hit counts, injected partition counts, and injected memory ids.
+
+This makes the Logs tab answer two separate questions:
+
+1. Did runtime attempt memory recall for this turn/workspace?
+2. Did the current SQLite FTS + relation/version algorithm return anything worth injecting?
+
+The first product version still uses SQLite FTS, not vector semantic search. A question like "what is my name?" may fail to match an existing name memory if the stored title/summary/detail has no overlapping FTS token. That is an algorithm limitation, not permission evidence by itself, and the recall audit log should make that visible.
+
 ## 2026-05-31 update: impression write instruction
 
 Impression memory writes must be explained in the system prompt, not hidden in a separate UI-only policy category. The system prompt should tell the model to call `writeUserImpression` only for stable long-term user preferences, background, identity, or constraints, while short-term task facts should remain in local conversation or event memory.

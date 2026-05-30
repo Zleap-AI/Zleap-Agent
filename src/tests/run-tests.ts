@@ -1586,6 +1586,57 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   assert.equal(childMemoryPayload.currentWorkspaceSkillMemory.some((memory) => memory.title === "Objective-only file skill"), true);
   const trace = repos.getTrace("conv-session-context-recall", "creator", "creator");
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Objective-only file event")), true);
+  const fileRecallLog = trace.auditLogs.find((log) => log.action === "memory_recall_requested" && log.workspaceId === "file");
+  assert.ok(fileRecallLog);
+  const fileRecallMetadata = JSON.parse(fileRecallLog.metadataJson) as {
+    algorithm: string;
+    vectorEnabled: boolean;
+    query: string;
+    rawHitCount: number;
+    injectedPartitionCounts: { event: number; skill: number };
+    hitIds: { events: string[]; skills: string[] };
+  };
+  assert.equal(fileRecallMetadata.algorithm, "sqlite_fts_relation_version");
+  assert.equal(fileRecallMetadata.vectorEnabled, false);
+  assert.equal(fileRecallMetadata.query.includes("inspect file evidence"), true);
+  assert.equal(fileRecallMetadata.rawHitCount >= 2, true);
+  assert.equal(fileRecallMetadata.injectedPartitionCounts.event, 1);
+  assert.equal(fileRecallMetadata.injectedPartitionCounts.skill, 1);
+  assert.equal(fileRecallMetadata.hitIds.events.length, 1);
+}
+
+async function testMemoryRecallAuditLogsZeroHits() {
+  const repos = createRepos();
+  const fake = new FakeLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "recall-log-user",
+    userRole: "creator",
+    conversationId: "conv-recall-log-zero",
+    message: "what is my name?",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+
+  const trace = repos.getTrace("conv-recall-log-zero", "creator", "creator");
+  const recallLog = trace.auditLogs.find((log) => log.action === "memory_recall_requested" && log.workspaceId === "main");
+  assert.ok(recallLog);
+  const metadata = JSON.parse(recallLog.metadataJson) as {
+    algorithm: string;
+    vectorEnabled: boolean;
+    rawHitCount: number;
+    injectedHitCount: number;
+    injectedPartitionCounts: { impression: number; event: number; skill: number };
+  };
+  assert.equal(metadata.algorithm, "sqlite_fts_relation_version");
+  assert.equal(metadata.vectorEnabled, false);
+  assert.equal(metadata.rawHitCount, 0);
+  assert.equal(metadata.injectedHitCount, 0);
+  assert.deepEqual(metadata.injectedPartitionCounts, { impression: 0, event: 0, skill: 0 });
 }
 
 async function testAttentionBudgetTrimsHistoryButKeepsJson() {
@@ -4477,6 +4528,7 @@ async function main() {
   await testApprovalListIsUserScoped();
   await testRuntimeContextAndTools();
   await testLlmMemoryContextUsesWorkspaceSessionRecall();
+  await testMemoryRecallAuditLogsZeroHits();
   await testAttentionBudgetTrimsHistoryButKeepsJson();
   await testAgentSelfImpressionRecallIsAgentScoped();
   await testWorkspaceExitReturnsToMain();

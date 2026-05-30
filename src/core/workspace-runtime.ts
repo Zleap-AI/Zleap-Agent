@@ -32,6 +32,7 @@ export class WorkspaceRuntime {
       conversationId: input.run.conversationId,
       workspaceId: workspace.id,
       taskId: task.taskId,
+      recalledImpressionCount: localContext.recalledImpressions.length,
       recalledEventCount: localContext.recalledEventMemories.length,
       recalledSkillCount: localContext.recalledSkillMemories.length,
       recentToolCallCount: localContext.recentToolCalls.length
@@ -79,22 +80,66 @@ export class WorkspaceRuntime {
   }
 
   private createLocalContext(run: AgentRunInput, workspace: WorkspaceDefinition, task: WorkspaceTask): WorkspaceLocalContext {
-    const recalled = this.applyWorkspaceMemoryPolicy(workspace, this.repos.recallMemories({
+    const query = `${task.objective}\n${task.relevantUserRequest}`;
+    const recallInput = {
       userId: run.userId,
       agentId: run.agentId,
       workspaceId: workspace.id,
-      query: `${task.objective}\n${task.relevantUserRequest}`,
+      query,
+      impressionLimit: 8,
       eventLimit: workspace.memoryPolicy.eventRecallEnabled ? workspace.memoryPolicy.maxEventMemories : 0,
       skillLimit: workspace.memoryPolicy.skillRecallEnabled ? workspace.memoryPolicy.maxSkillMemories : 0
-    }));
+    };
+    const rawRecalled = this.repos.recallMemories(recallInput);
+    const recalled = this.applyWorkspaceMemoryPolicy(workspace, rawRecalled);
+    const rawImpressions = rawRecalled.filter((memory) => memory.memoryType === "impression");
+    const rawEvents = rawRecalled.filter((memory) => memory.memoryType === "event");
+    const rawSkills = rawRecalled.filter((memory) => memory.memoryType === "skill");
+    const recalledImpressions = recalled.filter((memory) => memory.memoryType === "impression");
+    const recalledEventMemories = recalled.filter((memory) => memory.memoryType === "event");
+    const recalledSkillMemories = recalled.filter((memory) => memory.memoryType === "skill");
+    this.repos.audit(run.userId, "system", "memory_recall_requested", "memory", undefined, {
+      conversationId: run.conversationId,
+      workspaceId: workspace.id,
+      taskId: task.taskId,
+      algorithm: "sqlite_fts_relation_version",
+      vectorEnabled: false,
+      query,
+      recallInput: {
+        userId: run.userId,
+        agentId: run.agentId,
+        workspaceId: workspace.id,
+        impressionLimit: recallInput.impressionLimit,
+        eventLimit: recallInput.eventLimit,
+        skillLimit: recallInput.skillLimit
+      },
+      memoryPolicy: workspace.memoryPolicy,
+      rawHitCount: rawRecalled.length,
+      rawPartitionCounts: {
+        impression: rawImpressions.length,
+        event: rawEvents.length,
+        skill: rawSkills.length
+      },
+      injectedHitCount: recalled.length,
+      injectedPartitionCounts: {
+        impression: recalledImpressions.length,
+        event: recalledEventMemories.length,
+        skill: recalledSkillMemories.length
+      },
+      hitIds: {
+        impressions: recalledImpressions.map((memory) => memory.id),
+        events: recalledEventMemories.map((memory) => memory.id),
+        skills: recalledSkillMemories.map((memory) => memory.id)
+      }
+    });
     const availableTools = this.visibleToolDefinitions(workspace);
     return {
       workspaceManifest: workspace.manifest,
       memoryPolicy: workspace.memoryPolicy,
       parentContextSummary: task.parentContextSummary,
-      recalledImpressions: recalled.filter((memory) => memory.memoryType === "impression"),
-      recalledEventMemories: recalled.filter((memory) => memory.memoryType === "event"),
-      recalledSkillMemories: recalled.filter((memory) => memory.memoryType === "skill"),
+      recalledImpressions,
+      recalledEventMemories,
+      recalledSkillMemories,
       availableTools: availableTools.map((tool) => ({
         id: tool.id,
         name: tool.name,
