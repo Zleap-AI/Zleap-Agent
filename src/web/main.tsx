@@ -140,6 +140,26 @@ function segmentsForLlmCall(segments: ContextSegment[], llmCallId: string): Cont
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
+function segmentsWithToolSnapshot(segments: ContextSegment[], call?: LLMCallSnapshot): ContextSegment[] {
+  if (!call?.toolsJson || segments.some((segment) => segment.segmentType === "tools")) {
+    return segments;
+  }
+  const toolSegment: ContextSegment = {
+    id: `synthetic-tools-${call.id}`,
+    llmCallId: call.id,
+    conversationId: call.conversationId,
+    segmentType: "tools",
+    title: "可调用工具",
+    content: call.toolsJson,
+    tokenEstimate: Math.max(1, Math.ceil(call.toolsJson.length / 4)),
+    sortOrder: 25
+  };
+  return [
+    ...segments,
+    toolSegment
+  ].sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
 function workspaceIdForLlmCall(segments: ContextSegment[]): string {
   const workspaceSegment = segments.find((segment) => segment.segmentType === "workspace");
   if (!workspaceSegment) return "未知";
@@ -548,7 +568,8 @@ function ChatTab() {
   const inspectedLlmCallId = selectedLlmCallId || inspectedMessage?.inspectLlmCallId || inspectedOutput?.contextSegments?.[0]?.llmCallId || llmCalls.at(-1)?.id || "";
   const inspectedLlmCall = llmCalls.find((call) => call.id === inspectedLlmCallId);
   const inspectedLlmSegments = inspectedLlmCallId ? segmentsForLlmCall(traceSegments, inspectedLlmCallId) : [];
-  const inspectedContextSegments = inspectedLlmSegments.length > 0 ? inspectedLlmSegments : (inspectedOutput?.contextSegments ?? []);
+  const inspectedRawContextSegments = inspectedLlmSegments.length > 0 ? inspectedLlmSegments : (inspectedOutput?.contextSegments ?? []);
+  const inspectedContextSegments = segmentsWithToolSnapshot(inspectedRawContextSegments, inspectedLlmCall);
 
   async function loadConversationTrace(targetConversationId = conversationId): Promise<ConversationTrace | null> {
     if (!targetConversationId.trim()) return null;
@@ -1380,6 +1401,7 @@ function ContextStack({ segments }: { segments: ContextSegment[] }) {
 function contextSegmentLabel(segment: ContextSegment): string {
   if (segment.segmentType === "system") return "系统提示词";
   if (segment.segmentType === "workspace") return "工作空间信息";
+  if (segment.segmentType === "tools") return "可调用工具";
   if (segment.segmentType === "memory") return "记忆";
   if (segment.segmentType === "history") return "本地对话片段";
   if (segment.segmentType === "user") return "干净用户消息";
@@ -1392,6 +1414,9 @@ function contextSubsectionLabel(key: string): string {
   const labels: Record<string, string> = {
     currentWorkspace: "当前工作空间说明",
     availableWorkspaces: "主工作空间可用工作空间清单",
+    activeWorkspaceId: "当前工作空间",
+    toolCount: "工具数量",
+    tools: "本次可调用工具",
     crossWorkspaceImpressionMemory: "跨工作空间印象记忆",
     currentWorkspaceEventMemory: "当前工作空间事件记忆",
     currentWorkspaceSkillMemory: "当前工作空间经验记忆",
@@ -1409,7 +1434,7 @@ function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
     parsed
     && typeof parsed === "object"
     && !Array.isArray(parsed)
-    && ["workspace", "memory", "history"].includes(segment.segmentType)
+    && ["workspace", "tools", "memory", "history"].includes(segment.segmentType)
   ) {
     return (
       <div className="context-substack">

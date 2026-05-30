@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:40 +08:00
+
+Purpose:
+- Make callable tools visible inside every inspected LLM context stack, so each request shows exactly which function calls were exposed.
+
+Changed:
+- Added a first-level `tools` context segment during runtime prompt assembly with active workspace id, tool count, tool schemas, risk levels, and runtime/MCP binding metadata.
+- Removed callable tool definitions from the `workspace` segment so workspace information and tool exposure are no longer conflated.
+- Included the `tools` segment in the system message assembly, keeping the prompt and stored context stack aligned.
+- Updated the Chat context inspector to label/render `tools` as its own expandable category and synthesize the same view from saved `toolsJson` for older LLM call records.
+- Updated `ZLEAP_MASTER_PLAN.md` so future context-stack work treats tools as a first-level category.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:35 +08:00
 
 Purpose:

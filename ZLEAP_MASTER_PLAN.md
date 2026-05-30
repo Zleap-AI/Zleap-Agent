@@ -279,19 +279,19 @@
   - Streaming `streamEvents` tool loops support multiple tool rounds, use the same configurable global circuit breaker, persist every follow-up LLM call, and write an audit log instead of exposing internal loop-limit mechanics to the user.
 - Context:
   - Current user message remains clean.
-  - Context stack first-level categories are intentionally small and stable: `system`, `workspace`, `memory`, `history`, `user`, plus follow-up debug segments such as `tool_result` and `final_messages`. Second-level sections carry details such as active workspace instructions, available workspaces, tool definitions, memory partitions, current task, completed workspace results, and recent tool evidence.
+  - Context stack first-level categories are intentionally small and stable: `system`, `workspace`, `tools`, `memory`, `history`, `user`, plus follow-up debug segments such as `tool_result` and `final_messages`. Second-level sections carry details such as active workspace instructions, available workspaces, current callable tool definitions/schemas/bindings, memory partitions, current task, completed workspace results, and recent tool evidence.
   - Attention budgeting keeps structured context partitions parseable after trimming and prevents long history, memory, tool results, or workspace-local context from turning the framework back into a large flat-context agent.
   - Child workspace history is not the parent conversation transcript. Old global chat messages may appear in the bounded `main` orchestration slice but must not be injected into a child workspace's `runtime_context.local_conversation`.
   - Child workspace context does not include the full workspace registry. Only `main` sees sibling workspace manifests inside its workspace contract; child workspace prompts see their own active workspace instructions and tool definitions, then return structured results to `main`.
   - Every follow-up LLM call after function-call execution stores inspectable `tool_result` and `final_messages` context segments, not only the initial turn context.
-  - Active workspace context includes the single workspace explanation, manifest metadata, memory policy, and current callable tool definitions in the single `workspace` category. Tool usage guidance belongs to each tool definition/schema rather than a separate workspace-level setting.
+  - Active workspace context includes the single workspace explanation, manifest metadata, and memory policy in the `workspace` category. Current callable tool definitions, schemas, risk level, runtime/MCP binding metadata, and active workspace id are stored in the separate `tools` category so each LLM call shows exactly which function calls were exposed.
   - The context stack after `enterWorkspace` is rebuilt around the child workspace and includes the `enterWorkspace` tool result plus the target workspace task/result.
   - The context stack after `exitWorkspace` is rebuilt around `main` and includes the child workspace's returned structured result.
   - Malformed `exitWorkspace` calls keep the active workspace unchanged and are only surfaced as failed tool results in trace/context.
   - Workspace exit lifecycle hooks and skill usage feedback run once per successful `exitWorkspace` tool call, even if a model emits additional tool calls in the same assistant message.
   - Tool calls emitted after a successful `exitWorkspace` in the same assistant message are failed as post-exit calls and are not executed against the completed child workspace.
   - Child workspace direct-response guard calls store the intermediate child assistant text and internal exit reminder in follow-up `final_messages` context segments for trace inspection.
-  - Workspace-local evidence is not a separate top-level context category: recalled memory belongs under `memory`, current tool definitions belong under `workspace`, and recent tool-call evidence/current task/completed results belong under `history`.
+  - Workspace-local evidence is not a separate top-level context category: recalled memory belongs under `memory`, current callable tool definitions belong under `tools`, and recent tool-call evidence/current task/completed results belong under `history`.
   - Workspace-local available tool snapshots must match the actual callable tool list used for the LLM request; trace/debug UI must not show a child workspace as having main-only tools that runtime would reject.
   - The `memory` context segment and synthetic `runtime_context.memory` tool result must mirror the active `WorkspaceSession.localContext` recalled memory partitions, so Web UI debugging shows the same memory that the model actually saw.
   - Tool results update the active workspace session's local context after execution; trace viewers can inspect tool evidence from either `tool_calls` or the owning workspace session.
@@ -338,7 +338,7 @@
   - Memory recall attempts are logged in `audit_logs` as `memory_recall_requested`, including zero-hit attempts, so the UI can distinguish "no recall was attempted" from "SQLite FTS recall ran but found no matching memory."
 - UI:
   - Chinese `对话/工作空间/记忆` tabs render.
-  - Chat right panel expands context stack and final messages.
+  - Chat right panel expands context stack, callable tool snapshots, and final messages.
   - Chat right panel workspace status must distinguish final runtime active workspace from the workspace being inspected for the selected turn. Because child workspaces normally return to `main` after `exitWorkspace`, the UI should highlight the latest non-main workspace involved in that turn and state when execution has returned to `main`.
   - Streaming assistant text appears incrementally.
   - Child workspace LLM interactions appear in the central conversation timeline as workspace process messages, while the final assistant answer remains a separate user-facing message.
@@ -350,7 +350,7 @@
   - Clicking assistant messages, workspace process messages, function-call/result process blocks, or an LLM checkpoint switches the right context panel to the associated saved LLM call context stack.
   - Chat composer sends on Enter and inserts a newline on Ctrl+Enter.
   - Chat right panel shows memory records written by the selected/latest turn.
-  - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact tool result messages returned into the model loop.
+  - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact callable tools exposed to that LLM request and the exact tool result messages returned into the model loop.
   - Browser refresh restores cached settings, API key, messages, and latest context stack.
   - Workspace creation/editing manages one workspace explanation, manifest capabilities, approval flag, risk level, and memory policy JSON. It must not ask users to configure redundant input/output types, duplicate description/instructions fields, or workspace-level tool usage instructions. A saved workspace id is an immutable stable primary key in the UI; editing the ID field is only allowed before a new workspace is saved, so changing a saved workspace's identity cannot accidentally create a second workspace.
   - Workspace UI supports deleting non-built-in workspaces through the existing creator-gated delete API. Built-in `main/file/cli` workspaces cannot be deleted from the UI.

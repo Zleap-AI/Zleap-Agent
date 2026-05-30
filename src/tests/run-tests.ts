@@ -1550,6 +1550,7 @@ async function testRuntimeContextAndTools() {
   assert.equal(lastInput?.tools.some((tool) => tool.name === "searchFiles"), false);
   assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
   assert.equal(lastInput?.tools.some((tool) => tool.name === "writeUserImpression"), true);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "final_messages"), true);
   const firstSystemMessage = firstInput?.messages[0]?.content ?? "";
   assert.equal(firstSystemMessage.includes("\"id\": \"main\""), true);
@@ -1598,6 +1599,8 @@ async function testRuntimeContextAndTools() {
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"plannedWorkspace\":\"file\"")), true);
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"ok\":true")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tool_result" && segment.content.includes("enterWorkspace")), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"file\"") && segment.content.includes("\"name\": \"searchFiles\"")), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"main\"") && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
   const fileSession = trace.sessions.find((session) => session.workspaceId === "file");
   assert.equal(fileSession?.task.objective, "search files for runtime");
   assert.equal(fileSession?.result.status, "completed");

@@ -19,6 +19,29 @@ function parseTools(toolsJson: string): ToolDefinition[] {
   }
 }
 
+function parseJsonOrRaw(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function toolContext(tools: ToolDefinition[]): unknown[] {
+  return tools.map((tool) => ({
+    id: tool.id,
+    workspaceId: tool.workspaceId,
+    name: tool.name,
+    description: tool.description,
+    riskLevel: tool.riskLevel,
+    bindingType: tool.bindingType,
+    mcpServerId: tool.mcpServerId,
+    mcpToolName: tool.mcpToolName,
+    parameters: parseJsonOrRaw(tool.parametersJson),
+    binding: parseJsonOrRaw(tool.bindingJson)
+  }));
+}
+
 function runtimeSystemContract(input: {
   run: AgentRunInput;
   workspace: WorkspaceDefinition;
@@ -131,12 +154,21 @@ export class ContextBuilder {
             manifest: input.workspace.manifest,
             instructions: input.workspace.instructions,
             toolInstructions: input.workspace.toolInstructions,
-            memoryPolicy: input.workspace.memoryPolicy,
-            tools: currentTools
+            memoryPolicy: input.workspace.memoryPolicy
           },
           availableWorkspaces
         }, null, 2),
         sortOrder: 20
+      },
+      {
+        segmentType: "tools",
+        title: "Callable Tools",
+        content: JSON.stringify({
+          activeWorkspaceId: input.workspace.id,
+          toolCount: currentTools.length,
+          tools: toolContext(currentTools)
+        }, null, 2),
+        sortOrder: 25
       },
       {
         segmentType: "memory",
@@ -189,7 +221,7 @@ export class PromptAssembler {
         return fallback;
       }
     };
-    const systemContent = ["system", "workspace"]
+    const systemContent = ["system", "workspace", "tools"]
       .map((key) => byType.get(key as ContextSegment["segmentType"]))
       .filter(Boolean)
       .map((segment) => `## ${segment!.title}\n${segment!.content}`)
