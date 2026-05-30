@@ -568,7 +568,7 @@ function ConceptIntroTab() {
           <div className="identity-plus">+</div>
           <div className="identity-node dynamic">
             <strong>Dynamic Workspace State</strong>
-            <span>工具 / 局部记忆 / 任务上下文 / 工具证据</span>
+            <span>工具 / 局部记忆 / 持续本地记录 / 工具证据</span>
           </div>
         </div>
       </section>
@@ -611,13 +611,13 @@ function ConceptIntroTab() {
           <div className="map-main">
             <strong>Main Workspace</strong>
             <span>理解目标、选择 workspace、整合结果</span>
-            <small>可见 workspace manifest；不直接拥有子 workspace 工具</small>
+            <small>实际调度 workspace；整合子空间 handoff 建议</small>
           </div>
           <div className="map-branches">
             {[
-              ["File", "文件搜索和检查", "searchFiles"],
-              ["CLI", "命令行任务", "runCommand"],
-              ["MCP", "外部能力扩展", "stdio / Streamable HTTP"]
+              ["File", "知道 CLI/MCP 存在，但只用文件工具", "searchFiles"],
+              ["CLI", "知道 File/MCP 存在，但只用命令工具", "runCommand"],
+              ["MCP", "知道其他 workspace，可建议 main handoff", "stdio / Streamable HTTP"]
             ].map(([name, desc, tools]) => (
               <div className="map-workspace" key={name}>
                 <strong>{name} Workspace</strong>
@@ -686,7 +686,7 @@ function ConceptIntroTab() {
             ["workspace", "当前 workspace 说明、manifest、memory policy"],
             ["tools", "请求 tools 数组的可检查快照；不复制进 system prompt"],
             ["memory", "impression、event、skill 分区召回"],
-            ["history", "本地对话片段、任务包、完成结果、近期工具证据"],
+            ["history", "同 workspace 持续本地记录、任务包、完成结果、近期工具证据"],
             ["user", "干净用户消息"],
             ["tool_result", "后续调用收到的工具结果"],
             ["final_messages", "真实发送给 provider 的 messages 快照"]

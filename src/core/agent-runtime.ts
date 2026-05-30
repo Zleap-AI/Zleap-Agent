@@ -41,6 +41,22 @@ function summarizeToolResultForChat(content: string, maxLength = 700): string {
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
 }
 
+function parseJsonValue<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function llmResponseSnapshot(completion: ChatCompletionOutput, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...(completion.raw && typeof completion.raw === "object" ? completion.raw as Record<string, unknown> : { raw: completion.raw }),
+    message: completion.message,
+    ...extra
+  };
+}
+
 export class AgentRuntime {
   private readonly contextBuilder = new ContextBuilder();
   private readonly promptAssembler = new PromptAssembler();
@@ -73,7 +89,7 @@ export class AgentRuntime {
         tools: prepared.callableTools,
         temperature: prepared.llm.temperature
       });
-      this.repos.markLlmCallCompleted(prepared.llmCallId, completion.raw);
+      this.repos.markLlmCallCompleted(prepared.llmCallId, llmResponseSnapshot(completion));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.repos.markLlmCallFailed(prepared.llmCallId, message);
@@ -564,7 +580,7 @@ export class AgentRuntime {
       ...input.activeSession.localContext.recalledEventMemories,
       ...input.activeSession.localContext.recalledSkillMemories
     ];
-    const history = this.selectLocalHistory(input.input.conversationId, input.workspaceId);
+    const history = this.selectLocalHistory(input.input.conversationId, input.workspaceId, input.input.userId, input.input.userRole);
     const callableTools = this.toolRegistry.getCallableTools(input.workspaceId);
     const toolsJson = JSON.stringify(callableTools, null, 2);
     const baseSegments = this.contextBuilder.build({
@@ -657,12 +673,60 @@ export class AgentRuntime {
       .filter((toolCall) => toolCall.function.name);
   }
 
-  private selectLocalHistory(conversationId: string, workspaceId: string): Array<{ role: string; content: string }> {
-    if (workspaceId !== "main") return [];
-    return this.repos.listMessages(conversationId, 12).map((message) => ({
+  private selectLocalHistory(conversationId: string, workspaceId: string, userId: string, userRole: AgentRunInput["userRole"]): Array<{ role: string; content: string }> {
+    if (workspaceId === "main") return this.repos.listMessages(conversationId, 12).map((message) => ({
       role: message.role,
       content: message.content
     }));
+
+    const trace = this.repos.getTrace(conversationId, userId, userRole);
+    const workspaceCallIds = new Set(
+      trace.contextSegments
+        .filter((segment) => segment.segmentType === "workspace")
+        .filter((segment) => {
+          const payload = parseJsonValue<{ currentWorkspace?: { id?: string } }>(segment.content, {});
+          return payload.currentWorkspace?.id === workspaceId;
+        })
+        .map((segment) => segment.llmCallId)
+    );
+    const localMessages: Array<{ role: string; content: string }> = [];
+    for (const call of [...trace.llmCalls].reverse().filter((item) => workspaceCallIds.has(item.id))) {
+      const payload = parseJsonValue<{ message?: LLMMessage; assistantMessage?: string }>(call.responseJson, {});
+      const message = payload.message;
+      if (payload.assistantMessage?.trim()) {
+        localMessages.push({ role: "assistant", content: payload.assistantMessage });
+      }
+      if (message?.content?.trim()) {
+        localMessages.push({ role: "assistant", content: message.content });
+      }
+      if (message?.tool_calls?.length) {
+        localMessages.push({
+          role: "assistant",
+          content: `调用工具：${message.tool_calls.map((toolCall) => toolCall.function.name).join(", ")}`
+        });
+      }
+    }
+    for (const segment of trace.contextSegments.filter((item) => item.segmentType === "final_messages" && workspaceCallIds.has(item.llmCallId))) {
+      const messages = parseJsonValue<LLMMessage[]>(segment.content, []);
+      for (const message of messages) {
+        if (message.role === "assistant" && message.content?.trim()) {
+          localMessages.push({ role: "assistant", content: message.content });
+        }
+        if (message.role === "assistant" && message.tool_calls?.length) {
+          localMessages.push({
+            role: "assistant",
+            content: `调用工具：${message.tool_calls.map((toolCall) => toolCall.function.name).join(", ")}`
+          });
+        }
+        if (message.role === "tool" && message.name && !message.name.startsWith("runtime_context.")) {
+          localMessages.push({
+            role: "tool",
+            content: `${message.name}: ${summarizeToolResultForChat(message.content ?? "", 500)}`
+          });
+        }
+      }
+    }
+    return localMessages.slice(-12);
   }
 
   private async executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): Promise<{ toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string }> {
@@ -1025,11 +1089,10 @@ export class AgentRuntime {
               tools: prepared.callableTools,
               temperature: prepared.llm.temperature
             });
-            this.repos.markLlmCallCompleted(exitRequest.llmCallId, {
-              ...(completion.raw && typeof completion.raw === "object" ? completion.raw as Record<string, unknown> : { raw: completion.raw }),
+            this.repos.markLlmCallCompleted(exitRequest.llmCallId, llmResponseSnapshot(completion, {
               toolLoopRound: round,
               afterRequiredWorkspaceExit: true
-            });
+            }));
             continue;
           } catch (error) {
             const errorText = error instanceof Error ? error.message : String(error);
@@ -1073,10 +1136,9 @@ export class AgentRuntime {
           tools: prepared.callableTools,
           temperature: prepared.llm.temperature
         });
-        this.repos.markLlmCallCompleted(llmCallId, {
-          ...(completion.raw && typeof completion.raw === "object" ? completion.raw as Record<string, unknown> : { raw: completion.raw }),
+        this.repos.markLlmCallCompleted(llmCallId, llmResponseSnapshot(completion, {
           toolLoopRound: round
-        });
+        }));
       } catch (error) {
         const errorText = error instanceof Error ? error.message : String(error);
         this.repos.markLlmCallFailed(llmCallId, errorText);

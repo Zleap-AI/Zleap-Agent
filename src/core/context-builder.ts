@@ -80,6 +80,7 @@ function workspaceDecisionContract(input: {
     ]
     : [
       `- 你当前在子 workspace：${input.workspace.id}。子 workspace 是一个专门能力环境，只能使用当前暴露的工具和当前局部上下文。`,
+      "- 子 workspace 也会看到可用 workspace manifest 清单，用于判断是否需要其他能力；但子 workspace 不能直接进入其他 workspace，也不会暴露 enterWorkspace。",
       "- 子 workspace 自己决定何时退出：任务完成、失败、阻塞、需要用户信息、需要审批、或发现当前工具无法继续满足目标时，都应调用 exitWorkspace。",
       "- 如果需要另一个 workspace 的工具，不要在子 workspace 里直接切换；用 exitWorkspace 把已完成内容、困难、缺失能力和建议下一步交给 main，由 main 决定是否进入其他 workspace。"
     ];
@@ -120,9 +121,7 @@ export class ContextBuilder {
   }): ContextSegment[] {
     const partitionedMemory = memoryPartition(input.memories);
     const currentTools = parseTools(input.toolsJson);
-    const availableWorkspaces = input.workspace.id === "main"
-      ? input.workspaceRegistry.map((workspace) => workspace.manifest)
-      : undefined;
+    const availableWorkspaces = input.workspaceRegistry.map((workspace) => workspace.manifest);
     const completedWorkspaceResults = input.workspaceTrace
       .filter((session) => session.status !== "running")
       .map((session) => session.result);

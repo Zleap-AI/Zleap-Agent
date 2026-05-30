@@ -1557,7 +1557,8 @@ async function testRuntimeContextAndTools() {
   assert.equal(firstSystemMessage.includes("\"id\": \"file\""), true);
   assert.equal(firstSystemMessage.includes("\"id\": \"cli\""), true);
   const childWorkspaceRegistry = childInput?.messages[0]?.content ?? "";
-  assert.equal(childWorkspaceRegistry.includes("\"id\": \"cli\""), false);
+  assert.equal(childWorkspaceRegistry.includes("\"id\": \"cli\""), true);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "enterWorkspace"), false);
   assert.equal((lastInput?.messages[0]?.content ?? "").includes("\"id\": \"cli\""), true);
   assert.equal(childInput?.messages[0]?.content?.includes("memoryPolicy"), true);
   assert.equal(childInput?.messages[0]?.content?.includes("maxEventMemories"), true);
@@ -2077,7 +2078,8 @@ async function testWorkspaceSessionLocalToolCallsAreSessionScoped() {
 
   const secondFileInput = fake.inputs[3];
   const localConversationToolMessage = secondFileInput.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
-  const localConversationPayload = JSON.parse(localConversationToolMessage?.content ?? "{}") as { recentToolEvidence: unknown[] };
+  const localConversationPayload = JSON.parse(localConversationToolMessage?.content ?? "{}") as { messages: Array<{ content: string }>; recentToolEvidence: unknown[] };
+  assert.equal(localConversationPayload.messages.some((message) => message.content.includes("exitWorkspace")), true);
   assert.equal(localConversationPayload.recentToolEvidence.length, 0);
 
   const trace = repos.getTrace("conv-session-scope", "creator", "creator");

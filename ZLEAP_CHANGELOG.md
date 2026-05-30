@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:57 +08:00
+
+Purpose:
+- Make child workspaces aware of sibling workspace capabilities without allowing them to switch workspaces directly, and preserve workspace-local continuity across switches.
+
+Changed:
+- Runtime now includes the workspace manifest list in child workspace context so a child can recommend a sibling handoff through `exitWorkspace.suggestedNextSteps`.
+- Child workspaces still do not receive `enterWorkspace`; only `main` can schedule the next workspace.
+- Child workspace local conversation context now restores bounded prior records from the same workspace within the conversation, so returning to a workspace behaves like switching back to the same software rather than starting a memoryless sub-agent.
+- LLM call completion snapshots now persist the assistant message alongside raw provider metadata, which lets workspace-local history recover previous tool-call decisions.
+- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, and the concept intro copy to reflect this software-switching model.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:53 +08:00
 
 Purpose:
