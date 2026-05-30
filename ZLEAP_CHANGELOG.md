@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:18 +08:00
+
+Purpose:
+- Stop exposing internal tool-loop limits as a per-workspace operation limit in user-facing chat.
+
+Changed:
+- Raised the default runtime tool-loop circuit breaker to 100 rounds and made it configurable with `ZLEAP_MAX_TOOL_ROUNDS`.
+- Replaced the user-facing "连续操作轮次" fallback with natural wording that asks whether to continue or clarify the goal.
+- Updated tests so loop-limit coverage verifies the audit/circuit-breaker behavior without requiring the old internal wording, and workspace-tool fake LLMs exit child workspaces through the normal `exitWorkspace` protocol.
+- Updated `ZLEAP_MASTER_PLAN.md` to clarify that the loop guard is a high global safety circuit breaker, not a per-workspace product limit.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:14 +08:00
 
 Purpose:

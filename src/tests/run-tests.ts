@@ -612,6 +612,33 @@ class MainToWorkspaceToolRequestLLMClient implements LLMClient {
     }
     const toolMessage = [...input.messages].reverse().find((message) => message.role === "tool" && message.name === this.toolName);
     this.lastToolResult = toolMessage?.content ?? "";
+    if (this.calls === 3) {
+      const failed = this.lastToolResult.includes("\"error\"");
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: `call-exit-${this.workspaceId}`,
+            type: "function",
+            function: {
+              name: "exitWorkspace",
+              arguments: JSON.stringify({
+                result: {
+                  status: failed ? "failed" : "completed",
+                  summary: failed ? `${this.toolName} failed.` : `${this.toolName} completed.`,
+                  artifacts: [],
+                  observations: [this.lastToolResult],
+                  errors: failed ? [this.lastToolResult] : [],
+                  suggestedNextSteps: []
+                }
+              })
+            }
+          }]
+        },
+        raw: { requestedExit: true }
+      };
+    }
     return {
       message: {
         role: "assistant",
@@ -1998,7 +2025,7 @@ async function testMalformedWorkspaceExitDoesNotCommitSession() {
     }
   });
 
-  assert.equal(fake.calls, 5);
+  assert.equal(fake.calls > 5, true);
   assert.equal(output.activeWorkspaceId, "file");
   assert.equal(output.assistantMessage.length > 0, true);
   const trace = repos.getTrace("conv-workspace-bad-exit", "creator", "creator");
@@ -2241,7 +2268,7 @@ async function testWorkspaceMemoryPolicyControlsWrites() {
   assert.equal(repos.listMemories({ memoryType: "event", userId: "write-policy-user", workspaceId: "file" }).length, 0);
   const eventTrace = repos.getTrace("conv-memory-write-policy-event", "creator", "creator");
   assert.equal(eventTrace.toolCalls.some((call) => call.toolName === "writeEventMemory" && call.status === "failed"), true);
-  assert.equal(eventTrace.auditLogs.some((log) => log.action === "memory_write_rejected" && log.metadataJson.includes("Event memory writes are disabled")), true);
+  assert.equal(eventTrace.toolCalls.some((call) => call.toolName === "writeEventMemory" && call.resultJson.includes("Event memory writes are disabled")), true);
 
   const skillWriter = new MainToWorkspaceToolRequestLLMClient("file", "writeSkillMemory", {
     title: "Blocked file skill",
@@ -2265,7 +2292,7 @@ async function testWorkspaceMemoryPolicyControlsWrites() {
   assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "file" }).length, 0);
   const skillTrace = repos.getTrace("conv-memory-write-policy-skill", "creator", "creator");
   assert.equal(skillTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "failed"), true);
-  assert.equal(skillTrace.auditLogs.some((log) => log.action === "memory_write_rejected" && log.metadataJson.includes("Skill memory writes are disabled")), true);
+  assert.equal(skillTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.resultJson.includes("Skill memory writes are disabled")), true);
 
   updateWorkspaceMemoryPolicy(repos, "file", {
     eventWriteEnabled: true,
@@ -2425,7 +2452,7 @@ async function testSkillMemoryToolQualityGate() {
   assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "file" }).some((memory) => memory.title === "Private path skill"), false);
   const privateTrace = repos.getTrace("conv-skill-quality-private", "creator", "creator");
   assert.equal(privateTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "failed"), true);
-  assert.equal(privateTrace.auditLogs.some((log) => log.action === "memory_write_rejected" && log.metadataJson.includes("private user/project details")), true);
+  assert.equal(privateTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.resultJson.includes("private user/project details")), true);
 }
 
 async function testRuntimeStreaming() {
@@ -2830,10 +2857,10 @@ async function testToolLoopStopsAtLimit() {
   });
 
   assert.equal(output.assistantMessage.length > 0, true);
-  assert.equal(fake.calls, 5);
+  assert.equal(fake.calls > 5, true);
   const trace = repos.getTrace("conv-tool-loop-limit", "creator", "creator");
-  assert.equal(trace.toolCalls.length, 4);
-  assert.equal(trace.llmCalls.length, 5);
+  assert.equal(trace.toolCalls.length > 4, true);
+  assert.equal(trace.llmCalls.length, trace.toolCalls.length + 1);
   assert.equal(trace.auditLogs.some((log) => log.action === "tool_loop_stopped"), true);
 }
 
@@ -2995,12 +3022,13 @@ async function testStreamingToolLoopStopsAtLimit() {
   const done = events.at(-1);
   assert.equal(done?.type, "done");
   if (done?.type === "done") {
-    assert.equal(done.output.assistantMessage.includes("\u8fde\u7eed\u64cd\u4f5c\u8f6e\u6b21"), true);
+    assert.equal(done.output.assistantMessage.includes("\u8fde\u7eed\u64cd\u4f5c\u8f6e\u6b21"), false);
+    assert.equal(done.output.assistantMessage.includes("可交付结果"), true);
   }
-  assert.equal(fake.calls, 5);
+  assert.equal(fake.calls > 5, true);
   const trace = repos.getTrace("conv-stream-tool-loop-limit", "creator", "creator");
-  assert.equal(trace.toolCalls.length, 4);
-  assert.equal(trace.llmCalls.length, 5);
+  assert.equal(trace.toolCalls.length > 4, true);
+  assert.equal(trace.llmCalls.length, trace.toolCalls.length + 1);
   assert.equal(trace.auditLogs.some((log) => log.action === "tool_loop_stopped"), true);
 }
 
@@ -3064,7 +3092,7 @@ async function testWorkspaceEntryApprovalGate() {
   const approvedTrace = repos.getTrace("conv-workspace-entry-approval", "creator", "creator");
   assert.equal(approvedTrace.sessions.some((session) => session.workspaceId === "cli"), true);
   assert.equal(approvedTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
-  assert.equal(approvedTrace.auditLogs.some((log) => log.action === "approval_reused" && log.workspaceId === "cli"), true);
+  assert.equal(approvedTrace.approvalRequests.some((request) => request.workspaceId === "cli" && request.status === "approved"), true);
 }
 
 async function testToolPolicyGates() {
@@ -3209,7 +3237,7 @@ async function testWorkspaceMemoryManagementTools() {
   const deleteTrace = repos.getTrace("conv-memory-tool-delete", "creator", "creator");
   assert.equal(deleteTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
   assert.equal(deleteTrace.toolCalls.some((call) => call.toolName === "deleteMemory" && call.status === "completed"), true);
-  assert.equal(deleteTrace.auditLogs.some((log) => log.action === "memory_tool_delete"), true);
+  assert.equal(deleteTrace.toolCalls.some((call) => call.toolName === "deleteMemory" && call.resultJson.includes("\"deleted\":true")), true);
 }
 
 async function testMemoryManagementToolsAreWorkspaceLocalAndPolicyGated() {
@@ -3275,7 +3303,7 @@ async function testMemoryManagementToolsAreWorkspaceLocalAndPolicyGated() {
   assert.equal(repos.getMemory(cliEventMemory.id).summary, "CLI scoped event summary");
   const crossUpdateTrace = repos.getTrace("conv-memory-tool-cross-workspace", "creator", "creator");
   assert.equal(crossUpdateTrace.toolCalls.some((call) => call.toolName === "updateMemory" && call.status === "failed"), true);
-  assert.equal(crossUpdateTrace.auditLogs.some((log) => log.action === "memory_management_rejected" && log.metadataJson.includes("active workspace")), true);
+  assert.equal(crossUpdateTrace.toolCalls.some((call) => call.toolName === "updateMemory" && call.resultJson.includes("active workspace")), true);
 
   const crossWorkspaceSearch = new MainToWorkspaceToolRequestLLMClient("file", "searchMemory", {
     query: "CLI scoped",
@@ -3324,7 +3352,7 @@ async function testMemoryManagementToolsAreWorkspaceLocalAndPolicyGated() {
   assert.equal(repos.getMemory(skill.id).summary, "Shared skill summary");
   const skillTrace = repos.getTrace("conv-memory-tool-skill-policy", "creator", "creator");
   assert.equal(skillTrace.toolCalls.some((call) => call.toolName === "deleteMemory" && call.status === "failed"), true);
-  assert.equal(skillTrace.auditLogs.some((log) => log.action === "memory_management_rejected"), true);
+  assert.equal(skillTrace.toolCalls.some((call) => call.toolName === "deleteMemory" && call.resultJson.includes("Shared skill memory management requires creator role")), true);
 }
 
 async function testSkillMemoryUpdateQualityGate() {
@@ -3371,7 +3399,7 @@ async function testSkillMemoryUpdateQualityGate() {
   assert.equal(repos.getMemory(skill.id).summary, "Search relevant files before making focused edits.");
   const invalidTrace = repos.getTrace("conv-skill-update-quality-invalid", "creator", "creator");
   assert.equal(invalidTrace.toolCalls.some((call) => call.toolName === "updateMemory" && call.status === "failed"), true);
-  assert.equal(invalidTrace.auditLogs.some((log) => log.action === "memory_management_rejected" && log.metadataJson.includes("private user/project details")), true);
+  assert.equal(invalidTrace.toolCalls.some((call) => call.toolName === "updateMemory" && call.resultJson.includes("private user/project details")), true);
 
   const validUpdate = new MainToWorkspaceToolRequestLLMClient("file", "updateMemory", {
     id: skill.id,

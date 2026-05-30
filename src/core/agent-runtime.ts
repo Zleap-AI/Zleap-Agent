@@ -13,7 +13,12 @@ import { ToolRegistry } from "./tool-registry";
 
 type LLMToolCall = NonNullable<LLMMessage["tool_calls"]>[number];
 type ToolCallAccumulator = Partial<LLMToolCall> & { function: { name: string; arguments: string } };
-const MAX_TOOL_ROUNDS = 4;
+const DEFAULT_MAX_TOOL_ROUNDS = 100;
+const configuredMaxToolRounds = Number.parseInt(process.env.ZLEAP_MAX_TOOL_ROUNDS ?? "", 10);
+const MAX_TOOL_ROUNDS = Number.isFinite(configuredMaxToolRounds) && configuredMaxToolRounds > 0
+  ? configuredMaxToolRounds
+  : DEFAULT_MAX_TOOL_ROUNDS;
+const TOOL_LOOP_LIMIT_USER_MESSAGE = "这一步还没有形成稳定的可交付结果。我先暂停在这里；你可以让我继续推进，或者补充更具体的目标。";
 
 function summarizeAssistantMessage(value: string, maxLength = 500): string {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -233,7 +238,7 @@ export class AgentRuntime {
               requestedToolCount: toolCalls.length,
               streamed: true
             });
-            assistantMessage = "\u6211\u5df2\u7ecf\u5b8c\u6210\u4e86\u5f53\u524d\u5141\u8bb8\u7684\u8fde\u7eed\u64cd\u4f5c\u8f6e\u6b21\u3002\u8bf7\u786e\u8ba4\u4e0b\u4e00\u6b65\u8981\u7ee7\u7eed\u6267\u884c\u54ea\u4e00\u90e8\u5206\u3002";
+            assistantMessage = TOOL_LOOP_LIMIT_USER_MESSAGE;
             if (prepared.activeWorkspaceId === "main") {
               this.commitMainAssistantResponse(prepared, assistantMessage, { source: "streamedToolLoopLimit", stoppedBy: "maxToolRounds" });
             }
@@ -1089,7 +1094,7 @@ export class AgentRuntime {
       completion = {
         message: {
           role: "assistant",
-          content: "我已经完成了当前允许的连续操作轮次。请确认下一步要继续执行哪一部分。"
+          content: TOOL_LOOP_LIMIT_USER_MESSAGE
         },
         raw: { stoppedBy: "maxToolRounds", maxToolRounds: MAX_TOOL_ROUNDS }
       };
