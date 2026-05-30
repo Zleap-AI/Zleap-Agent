@@ -45,6 +45,7 @@
   - Context assembly uses an explicit `AttentionBudgetManager` before prompt assembly. Budgeting must preserve valid JSON for structured runtime partitions such as memory, task, history, workspace results, and tool results, so context trimming does not silently erase parsed payloads.
   - `PromptAssembler` produces OpenAI-compatible chat messages.
   - User messages stay clean. System prompt, personality prompt, and internal runtime strategy are merged into the single `system` context segment and the single OpenAI-compatible system message.
+  - Callable tools must be sent to the LLM through the OpenAI-compatible request `tools` array. The `tools` context segment is an inspectable runtime/UI snapshot of that array, not content to be duplicated inside the system prompt.
   - The system prompt must teach the agent the internal workspace model: workspace is an internal capability boundary; `main` plans and integrates; child workspaces specialize with limited tools; child workspaces decide when to call `exitWorkspace` after completion, failure, blockage, missing tools, needed user input, needed approval, or a need for another workspace. The final user-facing answer still hides these mechanics.
   - Final user-facing assistant replies must not expose runtime, workspace, context stack, memory injection, or tool orchestration details. Those mechanics are internal unless the user explicitly asks to inspect them.
   - The default personality prompt guides natural human-like replies. It must not mention workspace/context/runtime internals.
@@ -286,6 +287,7 @@
   - Child workspace context does not include the full workspace registry. Only `main` sees sibling workspace manifests inside its workspace contract; child workspace prompts see their own active workspace instructions and tool definitions, then return structured results to `main`.
   - Every follow-up LLM call after function-call execution stores inspectable `tool_result` and `final_messages` context segments, not only the initial turn context.
   - Active workspace context includes the single workspace explanation, manifest metadata, and memory policy in the `workspace` category. Current callable tool definitions, schemas, risk level, runtime/MCP binding metadata, and active workspace id are stored in the separate `tools` category so each LLM call shows exactly which function calls were exposed.
+  - The `tools` category is persisted and displayed for traceability, while provider tool calling uses the top-level request `tools` array. Full tool schemas must not be copied into the system message just to make function calling work.
   - The context stack after `enterWorkspace` is rebuilt around the child workspace and includes the `enterWorkspace` tool result plus the target workspace task/result.
   - The context stack after `exitWorkspace` is rebuilt around `main` and includes the child workspace's returned structured result.
   - Malformed `exitWorkspace` calls keep the active workspace unchanged and are only surfaced as failed tool results in trace/context.

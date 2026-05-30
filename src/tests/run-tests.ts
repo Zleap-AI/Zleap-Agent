@@ -1572,8 +1572,9 @@ async function testRuntimeContextAndTools() {
   const childLocalConversationPayload = JSON.parse(childLocalConversationToolMessage?.content ?? "{}") as { messages: unknown[]; recentToolEvidence: unknown[] };
   assert.equal(childLocalConversationPayload.messages.length, 0);
   assert.equal(childLocalConversationPayload.recentToolEvidence.length, 0);
-  assert.equal(childInput?.messages[0]?.content?.includes("\"name\": \"searchFiles\""), true);
-  assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"runtime\""), true);
+  assert.equal(childInput?.messages[0]?.content?.includes("\"name\": \"searchFiles\""), false);
+  assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"runtime\""), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
   const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceEventMemory: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.length, 1);

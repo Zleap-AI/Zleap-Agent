@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 06:53 +08:00
+
+Purpose:
+- Keep callable tool schemas in the OpenAI-compatible `tools` request array instead of duplicating them into the system prompt.
+
+Changed:
+- Updated `PromptAssembler` so the system message only includes `system` and `workspace` context segments.
+- Kept the `tools` context segment as an inspectable snapshot for the Web UI and trace logs.
+- Added regression coverage that child workspace tool schemas appear in the request `tools` array but not inside the system message.
+- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, and the concept intro copy to clarify this boundary.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 06:51 +08:00
 
 Purpose:

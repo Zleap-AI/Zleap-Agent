@@ -221,7 +221,7 @@ export class PromptAssembler {
         return fallback;
       }
     };
-    const systemContent = ["system", "workspace", "tools"]
+    const systemContent = ["system", "workspace"]
       .map((key) => byType.get(key as ContextSegment["segmentType"]))
       .filter(Boolean)
       .map((segment) => `## ${segment!.title}\n${segment!.content}`)

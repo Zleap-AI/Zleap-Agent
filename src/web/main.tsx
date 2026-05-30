@@ -684,7 +684,7 @@ function ConceptIntroTab() {
           {[
             ["system", "系统提示词、人格提示词、内部运行策略"],
             ["workspace", "当前 workspace 说明、manifest、memory policy"],
-            ["tools", "本次真实暴露的 function call、schema、MCP/runtime 绑定"],
+            ["tools", "请求 tools 数组的可检查快照；不复制进 system prompt"],
             ["memory", "impression、event、skill 分区召回"],
             ["history", "本地对话片段、任务包、完成结果、近期工具证据"],
             ["user", "干净用户消息"],
