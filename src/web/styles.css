@@ -356,40 +356,6 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.llm-checkpoints {
-  display: grid;
-  gap: 8px;
-}
-
-.llm-checkpoints button {
-  display: grid;
-  gap: 3px;
-  width: 100%;
-  padding: 9px 10px;
-  border: 1px solid #dce2e8;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #24313d;
-  text-align: left;
-  cursor: pointer;
-}
-
-.llm-checkpoints button:hover,
-.llm-checkpoints button:focus-visible,
-.llm-checkpoints button.active {
-  border-color: #1967d2;
-  box-shadow: 0 0 0 2px rgba(25, 103, 210, 0.12);
-}
-
-.llm-checkpoints strong {
-  font-size: 13px;
-}
-
-.llm-checkpoints span {
-  font-size: 12px;
-  color: #7b8792;
-}
-
 .message.failed {
   border-color: #f5b5b0;
   background: #fff7f7;
@@ -540,28 +506,6 @@ textarea {
   color: #3f6f53;
   font-size: 12px;
   line-height: 1.4;
-}
-
-.turn-badge {
-  display: grid;
-  gap: 6px;
-  padding: 10px;
-  border-radius: 6px;
-  background: #f8fafb;
-  border: 1px solid #dce2e8;
-}
-
-.turn-badge strong {
-  font-size: 12px;
-  color: #4a5662;
-}
-
-.turn-badge span {
-  color: #172026;
-  font-size: 13px;
-  line-height: 1.45;
-  max-height: 76px;
-  overflow: auto;
 }
 
 .llm-debug-card {

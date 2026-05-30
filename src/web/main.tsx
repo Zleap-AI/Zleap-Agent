@@ -174,11 +174,6 @@ function workspaceIdForLlmCall(segments: ContextSegment[]): string {
   return typeof parsed?.currentWorkspace?.id === "string" ? parsed.currentWorkspace.id : "未知";
 }
 
-function llmCallLabel(call: LLMCallSnapshot, segments: ContextSegment[], index: number): string {
-  const workspaceId = workspaceIdForLlmCall(segments);
-  return `#${index + 1} · ${workspaceId} · ${call.status}`;
-}
-
 function inferMessageLlmCallId(
   item: ChatMessage,
   index: number,
@@ -1135,7 +1130,7 @@ function ChatTab() {
             </article>
             );
           })}
-          {messages.length === 0 && <div className="empty">发送一条消息，右侧会展示本轮上下文窗口和工作空间轨迹。</div>}
+          {messages.length === 0 && <div className="empty">发送一条消息，右侧会展示当前工作空间、上下文窗口堆栈和记忆写入。</div>}
         </div>
         {error && (
           <div className="error">
@@ -1155,55 +1150,10 @@ function ChatTab() {
       </section>
 
       <aside className="panel context-panel">
-        <h2>正在查看</h2>
-        <div className="turn-badge">
-          {inspectedMessage ? (
-            <>
-              <strong>{messageRoleLabel(inspectedMessage)}</strong>
-              <span>{inspectedMessage.content || processMessageSummary(inspectedMessage)}</span>
-            </>
-          ) : (
-            <>
-              <strong>最新一轮</strong>
-              <span>未选择具体消息</span>
-            </>
-          )}
-          {inspectedLlmCall && <small>LLM 调用：{inspectedLlmCall.id}</small>}
-        </div>
-        <h2>当前查看工作空间</h2>
+        <h2>当前工作空间</h2>
         <div className="workspace-badge">
           <strong>{workspaceView.primary}</strong>
           {workspaceView.detail && <span>{workspaceView.detail}</span>}
-          {workspaceView.involved.length > 1 && <small>本轮涉及：{workspaceView.involved.join(" → ")}</small>}
-        </div>
-        <h2>工作空间轨迹</h2>
-        <div className="stack">
-          {visibleOutput?.workspaceTrace.map((session) => (
-            <details key={session.id} open>
-              <summary>{session.workspaceId} · {session.status}</summary>
-              <pre>{JSON.stringify(session, null, 2)}</pre>
-            </details>
-          ))}
-        </div>
-        <h2>LLM 调用检查点</h2>
-        <div className="llm-checkpoints">
-          {llmCalls.length === 0 && <div className="empty">暂无已保存的 LLM 调用。发送消息后会在这里按真实请求列出。</div>}
-          {llmCalls.map((call, index) => {
-            const segments = segmentsForLlmCall(traceSegments, call.id);
-            return (
-              <button
-                key={call.id}
-                className={inspectedLlmCallId === call.id ? "active" : ""}
-                onClick={() => {
-                  setSelectedLlmCallId(call.id);
-                  setSelectedTurnId("");
-                }}
-              >
-                <strong>{llmCallLabel(call, segments, index)}</strong>
-                <span>{call.createdAt}</span>
-              </button>
-            );
-          })}
         </div>
         <h2>上下文窗口堆栈</h2>
         {inspectedMessage && !inspectedContextSegments.length

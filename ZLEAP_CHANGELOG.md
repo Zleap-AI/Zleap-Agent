@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:13 +08:00
+
+Purpose:
+- Simplify the Chat right sidebar so it does not duplicate the central timeline and only shows the inspection essentials.
+
+Changed:
+- Removed the right-sidebar `正在查看` block because the selected message/turn is already clear in the middle conversation timeline.
+- Removed raw `工作空间轨迹` and `LLM 调用检查点` blocks from the Chat sidebar.
+- Kept the sidebar focused on `当前工作空间`, `上下文窗口堆栈`, and `本轮记忆写入`.
+- Updated `ZLEAP_MASTER_PLAN.md` to make this simplified right-panel structure the UI contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 07:10 +08:00
 
 Purpose:
