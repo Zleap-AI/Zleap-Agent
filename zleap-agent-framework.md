@@ -77,10 +77,12 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 职责：接收用户输入、理解目标、选择 workspace、整合结果。Main 不直接拥有所有子 workspace 的工具。
 
 - Main 和子 workspace 都会通过 runtime 注入的 workspace manifest 清单知道有哪些可用工作空间。
+- 这份清单是跨 workspace 共享的环境记忆 / 能力地图：就像一个人在使用某个软件时仍然知道还有别的软件存在。
 - Main 不需要、也不应该调用 `listWorkspaces` 工具。
 - Main-only 编排工具包括 `enterWorkspace`、`askUser`、`finishTask`。
 - `exitWorkspace` 是 child workspace 退出回 main 的工具，不是 main 的普通工具。
 - 子 workspace 可以在 `suggestedNextSteps` 中告诉 main 需要哪个 sibling workspace 的能力，但不能直接进入 sibling workspace。
+- 子 workspace 看见 sibling manifest 不等于获得 sibling tools；它只获得“知道有哪些能力存在”的认知，不获得直接调用权。
 
 **Capability Workspaces（执行层）**
 

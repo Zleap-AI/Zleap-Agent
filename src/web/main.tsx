@@ -592,6 +592,7 @@ function ConceptIntroTab() {
             <ul>
               <li>按 workspace 暴露当前真正需要的工具。</li>
               <li>Main 负责编排，子 workspace 负责专业执行。</li>
+              <li>Workspace manifest 是共享能力地图，不是共享工具权限。</li>
               <li>Impression、Event、Skill 分层存储和召回。</li>
               <li>每次 LLM 调用都能检查真实 context stack。</li>
             </ul>
@@ -608,7 +609,7 @@ function ConceptIntroTab() {
           <div className="map-main">
             <strong>Main Workspace</strong>
             <span>理解目标、选择 workspace、整合结果</span>
-            <small>实际调度 workspace；整合子空间 handoff 建议</small>
+            <small>持有调度权；整合子空间 handoff 建议</small>
           </div>
           <div className="map-branches">
             {[
@@ -1639,7 +1640,7 @@ function contextSegmentLabel(segment: ContextSegment): string {
 function contextSubsectionLabel(key: string): string {
   const labels: Record<string, string> = {
     currentWorkspace: "当前工作空间说明",
-    availableWorkspaces: "主工作空间可用工作空间清单",
+    availableWorkspaces: "共享工作空间能力地图",
     activeWorkspaceId: "当前工作空间",
     toolCount: "工具数量",
     tools: "本次可调用工具",

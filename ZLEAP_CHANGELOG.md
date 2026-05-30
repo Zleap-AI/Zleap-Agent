@@ -2,6 +2,24 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 07:10 +08:00
+
+Purpose:
+- Clarify why child workspaces should know sibling workspace existence: the manifest list is shared environment memory / a capability map, not shared execution authority.
+
+Changed:
+- Updated the runtime prompt contract so child workspace awareness is described as a cross-workspace shared capability map similar to knowing other software exists while using one application.
+- Updated `ZLEAP_MASTER_PLAN.md` and `zleap-agent-framework.md` to distinguish workspace awareness from tool access and direct switching authority.
+- Updated the concept introduction UI labels/copy so the workspace manifest is presented as a shared capability map rather than a main-only list.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 07:04 +08:00
 
 Purpose:
