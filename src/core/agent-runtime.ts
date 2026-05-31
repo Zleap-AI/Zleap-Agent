@@ -924,35 +924,38 @@ export class AgentRuntime {
     return new Set(this.toolRegistry.getCallableTools(workspaceId).map((tool) => tool.name));
   }
 
-  private createParentToChildHandoff(input: AgentRunInput, prepared: AgentRunPrepared, session: WorkspaceSession, toolMessages: LLMMessage[]): WorkspaceHandoffContext {
-    const parentSession = this.findActiveWorkspaceSession(prepared);
-    const recentMessages = [{
+  private createParentToChildHandoff(input: AgentRunInput, prepared: AgentRunPrepared, session: WorkspaceSession, _toolMessages: LLMMessage[]): WorkspaceHandoffContext {
+    const recentUserMessages = this.repos.listMessages(input.conversationId, 30)
+      .filter((message) => message.role === "user" && message.content.trim().length > 0);
+    if (recentUserMessages.length > 0 && recentUserMessages[recentUserMessages.length - 1].content.trim() === input.message.trim()) {
+      recentUserMessages.pop();
+    }
+    const referenceMessages = recentUserMessages.slice(-6).map((message, index) => ({
+      kind: "message" as const,
+      role: "user",
+      title: `用户原话参考 ${index + 1}`,
+      content: truncateHandoffContent(message.content, 700),
+      workspaceId: prepared.activeWorkspaceId
+    }));
+    const currentMessage = {
       kind: "message" as const,
       role: "user",
       title: "当前用户请求",
       content: truncateHandoffContent(input.message, 900),
       workspaceId: prepared.activeWorkspaceId
-    }];
-    const toolResultItems = toolMessages
-      .filter((message) => message.name === "enterWorkspace")
-      .map((message) => ({
-        kind: "tool_result" as const,
-        role: "tool",
-        title: "进入工作空间结果",
-        content: truncateHandoffContent(message.content ?? "", 1200),
-        workspaceId: prepared.activeWorkspaceId,
-        toolName: message.name
-      }));
-    const parentEvidence = parentSession?.localContext.recentToolCalls.slice(0, 4).map((toolCall) => ({
-      kind: "tool_evidence" as const,
-      title: `父工作空间工具结果 ${toolCall.toolName}`,
+    };
+    const taskItem = {
+      kind: "message" as const,
+      role: "system",
+      title: "总体要求与工作空间入口任务",
       content: truncateHandoffContent(JSON.stringify({
-        result: parseJsonValue(toolCall.resultJson, toolCall.resultJson),
-        status: toolCall.status
-      }), 1200),
-      workspaceId: parentSession.workspaceId,
-      toolName: toolCall.toolName
-    })) ?? [];
+        objective: session.task.objective,
+        constraints: session.task.constraints,
+        expectedOutput: session.task.expectedOutput,
+        parentContextSummary: session.task.parentContextSummary
+      }, null, 2), 1200),
+      workspaceId: session.workspaceId
+    };
     return {
       id: createId("handoff"),
       direction: "parent_to_child",
@@ -960,7 +963,7 @@ export class AgentRuntime {
       toWorkspaceId: session.workspaceId,
       reason: "workspace_enter",
       createdAt: nowIso(),
-      items: [...recentMessages, ...toolResultItems, ...parentEvidence].slice(-14)
+      items: [taskItem, ...referenceMessages, currentMessage]
     };
   }
 
@@ -1269,13 +1272,13 @@ export class AgentRuntime {
     const agent = this.repos.getAgent(input.agentId);
     const llmCallId = createId("llm");
     const workspaceTrace = [...prepared.workspaceTrace, session];
+    session.task.parentContextSummary = `从 ${prepared.activeWorkspaceId} 进入 ${session.workspaceId}，runtime 携带总体要求、当前用户请求和少量用户原话参考；这些只是交接参考，不是当前子 workspace 的本地对话，也不包含父 workspace 工具协议、assistant 执行记录或 sibling workspace 记录。`;
+    session.localContext.parentContextSummary = session.task.parentContextSummary;
     const handoffContext = this.createParentToChildHandoff(input, prepared, session, toolMessages);
     session.localContext.handoffContext = [
       handoffContext,
       ...(session.localContext.handoffContext ?? [])
     ].slice(0, 6);
-    session.task.parentContextSummary = `从 ${handoffContext.fromWorkspaceId} 进入 ${handoffContext.toWorkspaceId}，runtime 已携带 ${handoffContext.items.length} 条父级结果/近期上下文。`;
-    session.localContext.parentContextSummary = session.task.parentContextSummary;
     this.repos.updateWorkspaceSessionLocalContext(session);
     const context = this.buildLlmContext({
       input,

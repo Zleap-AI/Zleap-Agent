@@ -2014,10 +2014,11 @@ function contextSubsectionLabel(key: string): string {
     currentWorkspaceResultEvents: "当前工作空间结果事件记忆",
     currentWorkspaceRelevantProcessEvents: "当前工作空间相关过程事件记忆",
     currentWorkspaceSkillMemory: "当前工作空间经验记忆",
-    messages: "本地对话消息",
+    messages: "当前工作空间本地对话",
     currentTask: "当前结构化任务",
-    completedWorkspaceResults: "已完成工作空间结果",
-    recentToolEvidence: "近期工具证据"
+    completedWorkspaceResults: "当前工作空间历史结果",
+    crossWorkspaceHandoffContext: "交接上下文（非本地对话）",
+    recentToolEvidence: "当前工作空间近期工具证据"
   };
   return labels[key] ?? key;
 }
@@ -2296,6 +2297,11 @@ function jsonFieldLabel(key: string): string {
     tools: "工具",
     parameters: "参数",
     parametersJson: "参数",
+    crossWorkspaceHandoffContext: "交接上下文（非本地对话）",
+    fromWorkspaceId: "来源工作空间",
+    toWorkspaceId: "目标工作空间",
+    direction: "方向",
+    reason: "原因",
     inputSchema: "输入结构",
     function: "函数",
     binding: "绑定",

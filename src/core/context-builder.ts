@@ -175,7 +175,7 @@ function workspaceDecisionContract(input: {
     "- 每次 user message 保持干净。系统/人格/策略/工作空间说明在 system message；记忆和本地对话由 runtime 作为工具结果注入。",
     "- 选择 workspace 的核心标准是能力匹配：当前工具能解决就继续；当前工具不足、目标属于其他专业能力、或需要组合多个能力时，回到 main 重新编排。",
     "- 工作空间有产物责任边界：当前 workspace 只能交付自己工具和说明真实支持的结果；不能因为知道用户最终想要什么，就在错误 workspace 中生成文件、网页、报告或其他下游产物。",
-    "- runtime 会在 workspace 切换时自动注入有限的 handoffContext：进入子 workspace 时携带 main 的相关近期上下文；返回 main 时只携带子 workspace 的结果上下文、最后助手结论和关键工具结果，不携带工具调用参数或冗长中间过程。模型不要自己伪造这些交叉上下文，也不要在最终答复里解释它。",
+    "- runtime 会在 workspace 切换时自动注入有限的 handoffContext：进入子 workspace 时携带总体要求、当前用户请求和少量用户原话参考；这些原话只作为理解任务的参考，不是当前子 workspace 的本地对话。进入交接包不携带父 workspace 工具协议、assistant 执行记录或 sibling workspace 记录；返回 main 时只携带子 workspace 的结果上下文、最后助手结论和关键工具结果，不携带工具调用参数或冗长中间过程。模型不要自己伪造这些交叉上下文，也不要在最终答复里解释它。",
     "- 像软件之间交付产物一样对待 handoffContext：不需要复述子 workspace 的完整操作过程，但必须忠于子 workspace 交付的 WorkspaceResult、最终结论和关键工具结果。不要把这些结果再随意压缩、改写或遗漏关键事实。",
     ...roleRule,
     "- exitWorkspace 的输出必须是 WorkspaceResult：status、summary、artifacts、observations、errors、suggestedNextSteps。",
@@ -275,7 +275,7 @@ export class ContextBuilder {
           messages: input.history,
           currentTask: input.activeSession.task,
           completedWorkspaceResults,
-          handoffContext: input.activeSession.localContext.handoffContext ?? [],
+          crossWorkspaceHandoffContext: input.activeSession.localContext.handoffContext ?? [],
           recentToolEvidence: input.activeSession.localContext.recentToolCalls
         }, null, 2),
         sortOrder: 40
@@ -379,7 +379,7 @@ export class PromptAssembler {
           messages: [],
           currentTask: {},
           completedWorkspaceResults: [],
-          handoffContext: [],
+          crossWorkspaceHandoffContext: [],
           recentToolEvidence: []
         }), null, 2)
       },

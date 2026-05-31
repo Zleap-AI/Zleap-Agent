@@ -43,6 +43,8 @@ Runtime MCP 执行不是占位概念。MCP-bound tool 使用官方 TypeScript SD
 
 进入子 workspace 只表示 runtime 创建了 `WorkspaceTask`、召回了局部 memory、绑定了当前工具，并开始一个 `running` 的 `WorkspaceSession`。这时子 workspace 还没有向 main workspace 交付结果。
 
+进入子 workspace 的交接上下文不是空的，也不是把父级执行过程整包塞过去。Runtime 会带上总体要求、当前用户请求和少量用户原话参考，让子 workspace 理解任务背景；这些原话只作为参考，不属于子 workspace 本地对话。交接包不得携带父级 assistant 执行记录、`enterWorkspace` 协议 tool result、父级 recent tool evidence 或 sibling workspace 记录。
+
 同样，进入 main workspace 也只表示主编排 session 开始运行。main session 不应在 LLM 产出前被标记为 completed；只有 `askUser`、`finishTask` 或 main 的最终自然语言答复形成后，runtime 才提交 main `WorkspaceResult` 并记录审计事件。
 
 子 workspace 退出到 main workspace 的唯一正常路径是调用 `exitWorkspace`，并提交完整的 `WorkspaceResult`：

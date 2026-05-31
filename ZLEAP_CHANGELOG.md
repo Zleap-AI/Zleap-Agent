@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 05:08 +08:00
+
+目的：
+- 修正子工作空间上下文隔离的边界：进入子空间需要有任务背景，但不能混入父级 assistant/tool 执行记录或 sibling workspace 记录。
+- 让上下文窗口 UI 明确区分“当前工作空间本地对话”和“交接上下文”，避免把参考包误读为 Search/Dev 自己的本地历史。
+
+变更：
+- `AgentRuntime.createParentToChildHandoff` 改为生成受控参考包：总体要求与入口任务、少量用户原话参考、当前用户请求；不再传 `enterWorkspace` 原始结果、父级 recent tool evidence 或 assistant 执行记录。
+- `ContextBuilder` 的 `runtime_context.local_conversation` 将跨空间包命名为 `crossWorkspaceHandoffContext`，同时更新系统提示词，说明用户原话只是交接参考，不是子工作空间本地对话。
+- Chat 右侧结构化上下文标签改为“当前工作空间本地对话”“当前工作空间历史结果”“交接上下文（非本地对话）”，降低误判。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/02-workspace-runtime.md`、`docs/07-context-and-prompt-contracts.md` 和 `zleap-agent-framework.md`，把进入子空间 handoff 的新边界合并进概念文档。
+- 增加回归断言，验证子空间 handoff 保留用户原话参考，但不包含父级 assistant 回复、`enterWorkspace` 或父工作空间工具结果。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- `c2cb602` 修正子工作空间交接上下文隔离。
+
 ## 2026-06-01 04:40 +08:00
 
 目的：

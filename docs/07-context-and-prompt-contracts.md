@@ -20,7 +20,7 @@
 - `workspace`：当前工作空间说明、instructions、manifest、memory policy 和可用工作空间 manifest 清单。
 - `tools`：本次 LLM 请求实际暴露的 OpenAI-compatible callable tool array，包括 schemas、active workspace metadata、bindings 和 risk flags。这是 provider `tools` 数组的可检查快照，不是复制进 system prompt 的文本。
 - `memory`：跨工作空间 impression memory、当前工作空间 result events、当前工作空间相关 process events，以及当前工作空间 skill memory。
-- `history`：本地对话消息、当前结构化任务、已完成工作空间结果，以及最近本地工具证据。
+- `history`：当前工作空间本地对话消息、当前结构化任务、同工作空间已完成结果、交接上下文引用，以及最近本地工具证据。
 - `user`：干净的当前用户消息。
 - `tool_result`：function execution 后的 follow-up LLM calls 使用，包含累积的 assistant function-call protocol messages 和实际返回循环的 tool-result messages。
 
@@ -44,7 +44,7 @@ main workspace 可以看到的返回内容包括完整 `WorkspaceResult`：`stat
 
 子 workspace 内部保留的内容包括完整 tool call 参数、冗长中间过程、召回的 event/skill、局部 scratch/evidence、审计日志和 memory 提取证据。这些内容进入 trace/debug UI，而不是默认进入 main workspace 的 prompt。这样 main workspace 得到的是可决策的交付物和必要结果上下文，不会被子 workspace 的全部执行噪声污染。
 
-反过来也成立：子 workspace 的 `history` 不能把 main planning 对话、sibling workspace 对话、或 main-only 编排工具协议消息当成本地对话回放。子 workspace 可以看到共享 workspace manifest 以理解能力地图，也可以通过 `handoffContext` 获得 main 程序化交付的当前请求和必要结果证据，但普通 `messages`、`completedWorkspaceResults`、`recentToolEvidence` 必须按当前 workspace 隔离。`completedWorkspaceResults` 在 main 中用于编排整合；在子 workspace 中只表示同一 workspace 的持续本地记录。
+反过来也成立：子 workspace 的 `history` 不能把 main planning 对话、sibling workspace 对话、或 main-only 编排工具协议消息当成本地对话回放。子 workspace 可以看到共享 workspace manifest 以理解能力地图，也可以通过 `crossWorkspaceHandoffContext` 获得 runtime 程序化交付的总体要求、当前请求和少量用户原话参考。这里的用户原话是相对原始的任务参考，不是当前子 workspace 的本地对话；进入子 workspace 的交接包不得包含 `enterWorkspace` 原始 tool result、父 workspace recent tool evidence、父级 assistant 执行记录或 sibling workspace 记录。普通 `messages`、`completedWorkspaceResults`、`recentToolEvidence` 必须按当前 workspace 隔离。`completedWorkspaceResults` 在 main 中用于编排整合；在子 workspace 中只表示同一 workspace 的持续本地记录。
 
 完整 workspace registry 是跨 workspace 共享的能力地图。main 和子 workspace 都可以知道有哪些 sibling workspace 存在；区别是只有 main 拥有 `enterWorkspace` 调度权。子 workspace 如果判断需要其他 workspace，应该把这个判断写进 `suggestedNextSteps`，由 main workspace 决定下一次切换。
 
