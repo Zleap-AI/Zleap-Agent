@@ -2111,31 +2111,6 @@ td button {
   font-size: 12px;
 }
 
-.prompt-assembly-lane {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.prompt-assembly-lane > div {
-  display: grid;
-  gap: 7px;
-  padding: 12px;
-  border: 1px solid #dce2e8;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.prompt-assembly-lane strong {
-  color: #172026;
-}
-
-.prompt-assembly-lane span {
-  color: #4a5662;
-  line-height: 1.45;
-}
-
 .lifecycle-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2190,8 +2165,7 @@ td button {
   .memory-triad,
   .lifecycle-grid,
   .module-grid,
-  .memory-detail-grid,
-  .prompt-assembly-lane {
+  .memory-detail-grid {
     grid-template-columns: 1fr;
   }
 

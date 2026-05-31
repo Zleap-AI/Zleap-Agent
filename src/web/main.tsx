@@ -1028,32 +1028,6 @@ function ConceptIntroTab() {
             </article>
           ))}
         </div>
-        <div className="prompt-assembly-lane">
-          <div>
-            <strong>Provider request</strong>
-            <span>system message</span>
-            <span>synthetic tool results: workspace / memory / local_conversation</span>
-            <span>clean user message</span>
-          </div>
-          <div>
-            <strong>Function calling</strong>
-            <span>顶层 tools 数组暴露 schema</span>
-            <span>assistant tool_calls</span>
-            <span>tool messages 回到 follow-up call</span>
-          </div>
-          <div>
-            <strong>UI trace only</strong>
-            <span>原始 messagesJson / toolsJson</span>
-            <span>response/status/endpoint/model</span>
-            <span>final_messages 只是日志，不是上下文层</span>
-          </div>
-        </div>
-        <p className="concept-note">
-          原始日志是 UI/trace 里的调试快照，用来按同一个 llmCallId 查看发给 provider 的 messages、tools 和返回状态；它不是新的上下文层，也不会被再次塞回 LLM。
-        </p>
-        <p className="concept-note">
-          可解析的 JSON 会在界面里变成表格或字段视图。特别是 tools 数组，要能直接看清每次调用暴露了哪些 function、参数结构、绑定来源和风险信息。
-        </p>
       </section>
 
       <section className="concept-section">

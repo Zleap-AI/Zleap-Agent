@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 06:41 +08:00
+
+目的：
+- 移除 `概念介绍` 上下文窗口堆栈区域里不属于真实堆栈层的说明卡片，避免把 Provider request、Function calling 和 UI trace only 误解成上下文层。
+
+变更：
+- 删除概念页上下文窗口堆栈下方的 `Provider request`、`Function calling`、`UI trace only` 三张卡片。
+- 删除同一区域里关于原始日志和 JSON 结构化渲染的附加说明，让该板块只展示真实上下文窗口堆栈。
+- 清理对应 CSS，并更新主计划与框架概念文档，明确 provider 请求、function-calling 协议、原始日志和 UI trace metadata 不应作为堆栈图里的额外卡片出现。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+- 浏览器验证通过：刷新 `http://localhost:4173/` 并打开 `概念介绍`，页面只保留 7 个真实上下文层卡片，`Provider request`、`Function calling`、`UI trace only` 和 `.prompt-assembly-lane` 均不存在，memory 子分区仍在第 4 层内部。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 06:38 +08:00
 
 目的：

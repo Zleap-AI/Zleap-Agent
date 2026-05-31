@@ -387,6 +387,8 @@ memory 分区必须在概念介绍和上下文检查 UI 中展开呈现，而不
 - `currentWorkspaceRelevantProcessEvents`：当前 workspace 里与当前任务相关的过程事件索引，通过 FTS / 未来向量少量召回，只注入 id、title、summary 和读取提示，不注入 detail/detailSnippet。
 - `currentWorkspaceSkillMemory`：当前 workspace 的共享经验索引，默认展示近 N 条名称和简介；只有当简介与当前任务高度相关时，模型才调用 `readSkill(skillId)` 读取完整 procedure、appliesWhen 和 avoidWhen。
 
+Provider request、function calling protocol、raw logs 和 UI trace metadata 不是上下文窗口堆栈的一级层，也不应在概念介绍的堆栈图里被画成额外卡片。它们属于调试和实现说明，可以出现在日志、原始日志或开发文档中，但不能混进“模型上下文窗口层级”的视觉解释里。
+
 `final_messages` 不是上下文堆栈的一层，而是 UI/trace 里的原始 messages 快照：它记录 prompt assembly 后发给 OpenAI-compatible provider 的 messages，用于调试和验收，不会被再次注入下一次 LLM 请求。
 
 上下文堆栈是给人验收和排查用的界面，不应该把可解析 JSON 直接当原始文本倾倒出来。`tools`、`memory`、`history`、`tool_result` 等结构化内容应被解析成表格或字段视图；尤其是 `tools` 数组，要能清楚看到每次 LLM 调用实际暴露了哪些 function、参数 schema、绑定来源和风险信息。原始日志模式不是额外追加的一栏，也不是把 1/2/3/4/5/6/7 分区逐个 raw 化，而是隐藏结构化编号堆栈，直接展示当前选中 `llmCallId` 对应的原始 LLM request/response 日志：messages、tools、状态、endpoint/model 和 response。它不做结构化表格渲染，也不需要再次展开；长行必须在面板内自动换行，不能依赖 X 轴滚动。
