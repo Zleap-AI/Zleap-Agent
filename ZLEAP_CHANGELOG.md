@@ -708,7 +708,7 @@ Verification:
 - Verified the local SQLite seed refreshed the `searchMemory` tool description and default agent system prompt.
 
 Git:
-- Pending in this work session.
+- Recorded in commit `099c37e fix: constrain search memory prompting`.
 
 ## 2026-05-31 19:13 +08:00
 
