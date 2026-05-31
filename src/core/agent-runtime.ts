@@ -1233,6 +1233,14 @@ export class AgentRuntime {
 
   private saveFollowUpLlmCall(input: AgentRunInput, prepared: AgentRunPrepared, messages: LLMMessage[], toolMessages: LLMMessage[] = []): string {
     const llmCallId = createId("llm");
+    const baseSegments = prepared.contextSegments
+      .filter((segment) => segment.segmentType !== "tool_result" && segment.segmentType !== "final_messages")
+      .map((segment) => ({
+        ...segment,
+        id: createId("ctx"),
+        llmCallId,
+        conversationId: input.conversationId
+      }));
     const snapshot: LLMCallSnapshot = {
       id: llmCallId,
       conversationId: input.conversationId,
@@ -1246,15 +1254,30 @@ export class AgentRuntime {
       responseJson: "{}",
       createdAt: nowIso()
     };
-    const segments: ContextSegment[] = [];
-    if (toolMessages.length > 0) {
-      const content = this.attentionBudget.fitSegment("tool_result", JSON.stringify(toolMessages, null, 2));
+    const segments: ContextSegment[] = [...baseSegments];
+    const actualToolResults = messages.filter((message) => (
+      message.role === "tool" &&
+      !(message.name ?? "").startsWith("runtime_context.")
+    ));
+    const assistantToolCalls = messages
+      .filter((message) => message.role === "assistant" && message.tool_calls?.length)
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+        tool_calls: message.tool_calls
+      }));
+    const followUpToolContext = {
+      assistantToolCalls,
+      toolResults: actualToolResults.length > 0 ? actualToolResults : toolMessages
+    };
+    if (followUpToolContext.assistantToolCalls.length > 0 || followUpToolContext.toolResults.length > 0) {
+      const content = this.attentionBudget.fitSegment("tool_result", JSON.stringify(followUpToolContext, null, 2));
       segments.push({
         id: createId("ctx"),
         llmCallId,
         conversationId: input.conversationId,
         segmentType: "tool_result",
-        title: "Tool Results For Follow-up LLM Call",
+        title: "Function Calls And Tool Results For Follow-up LLM Call",
         content,
         tokenEstimate: estimateTokens(content),
         sortOrder: 75

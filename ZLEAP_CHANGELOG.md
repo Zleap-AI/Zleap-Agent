@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 19:48 +08:00
+
+Purpose:
+- Fix follow-up LLM context snapshots after tool execution so the model and UI keep the full active context instead of collapsing to only callable tools and tool results.
+
+Changed:
+- Tool-loop follow-up LLM calls now clone the active base context stack (`system`, `workspace`, `tools`, `memory`, `history`, and clean `user`) before appending function-call/tool-result evidence.
+- The follow-up `tool_result` segment now records accumulated assistant function calls and actual tool result messages, excluding synthetic runtime context tool messages.
+- Added regression coverage for non-streaming and streaming multi-step tool loops to ensure follow-up context stacks remain complete.
+- Updated the master plan and context contract doc with the full follow-up context snapshot requirement.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
+
+Git:
+- Recorded by the Git commit titled `fix: preserve follow-up context stack`.
+
 ## 2026-05-31 19:41 +08:00
 
 Purpose:

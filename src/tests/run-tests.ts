@@ -12,7 +12,7 @@ import { McpToolExecutor } from "../core/mcp-executor";
 import { parseActor, parseActorFromSearchParams } from "../server/actor";
 import type { ChatCompletionInput, ChatCompletionOutput, LLMClient, LLMStreamEvent } from "../core/llm-client";
 import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "../core/llm-client";
-import type { MemoryRow } from "../types";
+import type { ContextSegment, MemoryRow } from "../types";
 
 class FakeLLMClient implements LLMClient {
   lastInput: ChatCompletionInput | undefined;
@@ -32,6 +32,22 @@ class FakeLLMClient implements LLMClient {
     this.lastInput = input;
     yield "fake ";
     yield "stream";
+  }
+}
+
+function assertFollowUpContextStacksIncludeBaseSegments(trace: ReturnType<Repositories["getTrace"]>): void {
+  const followUpSegments = trace.contextSegments.filter((segment) => segment.segmentType === "tool_result");
+  assert.equal(followUpSegments.length > 0, true);
+  const requiredTypes: ContextSegment["segmentType"][] = ["system", "workspace", "tools", "memory", "history", "user", "tool_result", "final_messages"];
+  for (const followUpSegment of followUpSegments) {
+    const segmentsForCall = trace.contextSegments.filter((segment) => segment.llmCallId === followUpSegment.llmCallId);
+    const segmentTypes = new Set(segmentsForCall.map((segment) => segment.segmentType));
+    for (const requiredType of requiredTypes) {
+      assert.equal(segmentTypes.has(requiredType), true, `follow-up ${followUpSegment.llmCallId} missing ${requiredType}`);
+    }
+    assert.equal(followUpSegment.content.includes("assistantToolCalls"), true);
+    assert.equal(followUpSegment.content.includes("toolResults"), true);
+    assert.equal(followUpSegment.content.includes("writeUserImpression"), true);
   }
 }
 
@@ -3077,6 +3093,7 @@ async function testMultiStepToolLoop() {
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("toolLoopRound")), true);
   assert.equal(trace.contextSegments.filter((segment) => segment.segmentType === "tool_result").length, 2);
   assert.equal(trace.contextSegments.filter((segment) => segment.segmentType === "final_messages").length, 3);
+  assertFollowUpContextStacksIncludeBaseSegments(trace);
 }
 
 async function testToolLoopStopsAtLimit() {
@@ -3237,6 +3254,7 @@ async function testStreamingMultiStepToolLoop() {
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("toolLoopRound")), true);
   assert.equal(trace.contextSegments.filter((segment) => segment.segmentType === "tool_result").length, 2);
   assert.equal(trace.contextSegments.filter((segment) => segment.segmentType === "final_messages").length, 3);
+  assertFollowUpContextStacksIncludeBaseSegments(trace);
 }
 
 async function testStreamingToolLoopStopsAtLimit() {

@@ -7,21 +7,26 @@ Context stack should be clear to inspect in the Web UI. The top-level categories
 ```text
 1. system
 2. workspace
-3. memory
-4. history
-5. user
-6. tool_result for follow-up calls
+3. tools
+4. memory
+5. history
+6. user
+7. tool_result for follow-up calls
 ```
 
 Second-level sections live inside those categories:
 
 - `system`: base system prompt, personality prompt, and internal runtime strategy. Runtime policy is not a separate top-level context category.
-- `workspace`: active workspace description, instructions, tool instructions, manifest, memory policy, current callable tool definitions, and for `main` only the available workspace manifest list.
+- `workspace`: active workspace description, instructions, manifest, memory policy, and the available workspace manifest list.
+- `tools`: the exact OpenAI-compatible callable tool array exposed to this LLM request, including schemas, active workspace metadata, bindings, and risk flags. This is an inspectable snapshot of the provider `tools` array, not text duplicated into the system prompt.
 - `memory`: cross-workspace impression memory, current-workspace result events, current-workspace relevant process events, and current-workspace skill memory.
 - `history`: local conversation messages, current structured task, completed workspace results, and recent local tool evidence.
 - `user`: the clean current user message.
+- `tool_result`: for follow-up LLM calls after function execution, the accumulated assistant function-call protocol messages and actual tool-result messages returned into the loop.
 
-`WorkspaceSession.localContext` remains an internal persisted trace object, but it should not be shown or injected as its own top-level context category. Its parts are distributed into the clearer categories above: recalled memory goes to `memory`, available tools go to `workspace`, and current task / recent tool evidence / completed workspace results go to `history`.
+Every follow-up LLM call after a tool execution must persist the full active base stack again: `system`, `workspace`, `tools`, `memory`, `history`, and clean `user`, followed by `tool_result` and the raw `final_messages` log. A follow-up call that only shows callable tools plus tool results is incomplete; the model also needs the active task, workspace contract, memory, history, and clean user request to avoid losing intent and looping.
+
+`WorkspaceSession.localContext` remains an internal persisted trace object, but it should not be shown or injected as its own top-level context category. Its parts are distributed into the clearer categories above: recalled memory goes to `memory`, available tools go to `tools`, and current task / recent tool evidence / completed workspace results go to `history`.
 
 The synthetic tool results follow the same simplified structure: `runtime_context.memory` mirrors the `memory` category, and `runtime_context.local_conversation` mirrors the `history` category. The model still receives a clean final user message.
 
