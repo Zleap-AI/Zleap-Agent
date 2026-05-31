@@ -2,6 +2,28 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 08:06 +08:00
+
+Purpose:
+- Fix Chat context inspection so clicking a user message shows that message's own clean user input instead of a stale/earlier turn such as `我是谁`.
+
+Changed:
+- Updated `src/web/main.tsx` so user messages prefer their own saved `turnOutput.contextSegments[0].llmCallId` over cached `inspectLlmCallId`.
+- Cleared stale selected LLM call state when sending a new message.
+- Changed stream completion binding to derive the current turn's first call from `payload.output.contextSegments`, then select only LLM calls from that point forward for the assistant's final-call binding.
+- Added `llmCallId` to streamed workspace/process events and persisted it onto visible workspace/process chat messages, so model-initiated intermediate replies can inspect the exact LLM call that produced them.
+- Updated assistant-message fallback binding so a final assistant reply resolves to the final LLM call of its own current turn, while intermediate model-generated workspace messages use their streamed `llmCallId`.
+- Updated `ZLEAP_MASTER_PLAN.md` to record that user messages bind to their own sent-turn context and AI replies bind to the concrete model call that produced that visible response, including model-initiated multi-round calls.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
+
+Git:
+- Recorded in the Git commit titled `fix: bind chat context to current turn`.
+
 ## 2026-05-31 07:56 +08:00
 
 Purpose:

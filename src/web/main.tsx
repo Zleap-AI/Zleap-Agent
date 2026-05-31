@@ -178,15 +178,26 @@ function workspaceIdForLlmCall(segments: ContextSegment[]): string {
 function inferMessageLlmCallId(
   item: ChatMessage,
   index: number,
+  messages: ChatMessage[],
   llmCalls: LLMCallSnapshot[],
   contextSegments: ContextSegment[]
 ): string {
-  if (item.inspectLlmCallId) return item.inspectLlmCallId;
   const fromTurn = item.turnOutput?.contextSegments?.[0]?.llmCallId;
   if (item.role === "用户" && fromTurn) return fromTurn;
+  if (item.inspectLlmCallId) return item.inspectLlmCallId;
   if (llmCalls.length === 0) return fromTurn ?? "";
 
-  if (item.role === "助手") return llmCalls.at(-1)?.id ?? "";
+  if (item.role === "助手") {
+    const previousUser = messages
+      .slice(0, index)
+      .reverse()
+      .find((candidate) => candidate.role === "用户");
+    const previousUserFirstCallId = previousUser?.turnOutput?.contextSegments?.[0]?.llmCallId
+      ?? previousUser?.inspectLlmCallId
+      ?? "";
+    const turnCalls = llmCallsForTurn(previousUserFirstCallId, llmCalls);
+    return turnCalls.at(-1)?.id ?? previousUserFirstCallId ?? "";
+  }
 
   if (item.toolNames?.length) {
     const toolName = item.toolNames[0];
@@ -205,6 +216,12 @@ function inferMessageLlmCallId(
   }
 
   return llmCalls[Math.min(index, llmCalls.length - 1)]?.id ?? fromTurn ?? "";
+}
+
+function llmCallsForTurn(firstCallId: string, llmCalls: LLMCallSnapshot[]): LLMCallSnapshot[] {
+  if (!firstCallId) return [];
+  const firstIndex = llmCalls.findIndex((call) => call.id === firstCallId);
+  return firstIndex >= 0 ? llmCalls.slice(firstIndex) : [];
 }
 
 const SYSTEM_TOOL_NAMES = new Set([
@@ -894,6 +911,7 @@ function ChatTab() {
     setError("");
     setRetryMessage("");
     setSelectedTurnId(userMessageId);
+    setSelectedLlmCallId("");
     setMessage("");
     setMessages((items) => [
       ...removeFailedRetryPair(items, cleanMessage),
@@ -920,6 +938,7 @@ function ChatTab() {
         text: string;
         status?: string;
         toolNames?: string[];
+        llmCallId?: string;
       }) => {
         const workspaceMessageId = createLocalId(`workspace-${payload.workspaceId}`);
         const baseContent = payload.text.trim()
@@ -934,6 +953,7 @@ function ChatTab() {
             title: payload.title,
             toolNames: payload.toolNames,
             status: payload.status,
+            inspectLlmCallId: payload.llmCallId,
             content: baseContent
           }));
           return;
@@ -943,6 +963,7 @@ function ChatTab() {
           role: "工作空间",
           workspaceId: payload.workspaceId,
           eventKind: payload.eventKind,
+          inspectLlmCallId: payload.llmCallId,
           content: "",
           streaming: true
         }));
@@ -1013,9 +1034,10 @@ function ChatTab() {
             setOutput(payload.output);
             const loadedTrace = await loadConversationTrace(payload.output.conversationId);
             const calls = (loadedTrace?.llmCalls ?? []).slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-            const firstCallId = calls[0]?.id ?? payload.output.contextSegments[0]?.llmCallId ?? "";
-            const finalCallId = calls.at(-1)?.id ?? firstCallId;
-            setSelectedLlmCallId(finalCallId);
+            const firstCallId = payload.output.contextSegments[0]?.llmCallId ?? "";
+            const turnCalls = llmCallsForTurn(firstCallId, calls);
+            const finalCallId = turnCalls.at(-1)?.id ?? firstCallId;
+            setSelectedLlmCallId(firstCallId);
             setMessages((items) => items.map((item) => item.id === userMessageId ? { ...item, turnOutput: payload.output, inspectLlmCallId: firstCallId } : item));
             setMessages((items) => {
               return items.map((item) => item.id === assistantMessageId
@@ -1125,7 +1147,7 @@ function ChatTab() {
         </div>
         <div className="message-list">
           {messages.map((item, index) => {
-            const inferredLlmCallId = inferMessageLlmCallId(item, index, llmCalls, traceSegments);
+            const inferredLlmCallId = inferMessageLlmCallId(item, index, messages, llmCalls, traceSegments);
             const clickable = Boolean(inferredLlmCallId || item.turnOutput);
             return (
             <article

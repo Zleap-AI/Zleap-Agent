@@ -193,7 +193,8 @@ export class AgentRuntime {
                   workspaceId: prepared.activeWorkspaceId,
                   eventKind: "assistant",
                   title: `${prepared.activeWorkspaceId} 工作空间 LLM`,
-                  text: roundText
+                  text: roundText,
+                  llmCallId: currentLlmCallId
                 };
               }
               const exitRequest = this.requireChildWorkspaceExit(input, prepared, messages, {
@@ -304,7 +305,8 @@ export class AgentRuntime {
               workspaceId: activeWorkspaceBeforeTools,
               eventKind: "assistant",
               title: `${activeWorkspaceBeforeTools} 工作空间 LLM`,
-              text: roundText
+              text: roundText,
+              llmCallId: currentLlmCallId
             };
           }
           if (activeWorkspaceBeforeTools !== "main" && toolCalls.length > 0) {
@@ -314,6 +316,7 @@ export class AgentRuntime {
               eventKind: "tool_call",
               title: `${activeWorkspaceBeforeTools} 工具调用`,
               text: `调用工具：${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}`,
+              llmCallId: currentLlmCallId,
               toolNames: toolCalls.map((toolCall) => toolCall.function.name)
             };
           }
@@ -327,7 +330,8 @@ export class AgentRuntime {
               title: `${activeWorkspaceBeforeTools} 工具结果`,
               text: toolExecution.toolMessages
                 .map((message) => `${message.name ?? "tool"}：${summarizeToolResultForChat(message.content ?? "")}`)
-                .join("\n\n")
+                .join("\n\n"),
+              llmCallId: currentLlmCallId
             };
           }
           const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
@@ -339,6 +343,7 @@ export class AgentRuntime {
               eventKind: "entered",
               title: `进入 ${toolExecution.enteredWorkspaceSession.workspaceId} 工作空间`,
               text: toolExecution.enteredWorkspaceSession.objective,
+              llmCallId: transition?.llmCallId ?? currentLlmCallId,
               status: toolExecution.enteredWorkspaceSession.status
             };
           }
@@ -349,6 +354,7 @@ export class AgentRuntime {
               eventKind: "exit",
               title: `${toolExecution.exitedWorkspaceSession.workspaceId} 工作空间返回 main`,
               text: toolExecution.exitedWorkspaceSession.summary,
+              llmCallId: transition?.llmCallId ?? currentLlmCallId,
               status: toolExecution.exitedWorkspaceSession.status
             };
           }

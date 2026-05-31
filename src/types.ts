@@ -83,6 +83,7 @@ export type AgentStreamEvent =
       eventKind: "entered" | "assistant" | "tool_call" | "tool_result" | "exit";
       title: string;
       text: string;
+      llmCallId?: string;
       status?: WorkspaceStatus;
       toolNames?: string[];
     }

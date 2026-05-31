@@ -360,8 +360,8 @@
   - Markdown in chat messages renders without unsafe HTML injection.
   - Failed chat requests can be retried.
   - Clearing the current conversation resets messages, trace, and conversation id without clearing saved LLM settings or API key.
-  - Clicking a previous user message switches the right context panel to that turn's saved context stack.
-  - Clicking assistant messages, workspace process messages, or function-call/result process blocks switches the right context panel to the associated saved LLM call context stack.
+  - Clicking a previous user message switches the right context panel to that turn's saved initial LLM context stack. User messages must bind to the first LLM call of their own turn from that turn's saved `contextSegments`, never to the first call of the whole conversation or to a stale selected/cached LLM call id.
+  - Clicking assistant messages, workspace process messages, or function-call/result process blocks switches the right context panel to the associated saved LLM call context stack. Assistant replies must bind to the concrete LLM call that produced that visible response. For the final user-facing assistant reply this is usually the final LLM call of the current turn; for model-initiated workspace/tool-loop messages it may be an intermediate LLM call that was not directly triggered by a new user message. It must never fall back to the latest call in the whole conversation unless no better turn/message binding exists.
   - Chat composer sends on Enter and inserts a newline on Ctrl+Enter.
   - Chat right panel shows memory records written by the selected/latest turn.
   - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact callable tools exposed to that LLM request and the exact tool result messages returned into the model loop. The raw `final_messages` provider payload is available only when the whole stack is switched into raw-log mode.
