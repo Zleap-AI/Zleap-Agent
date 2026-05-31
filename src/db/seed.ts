@@ -123,7 +123,7 @@ const toolSchemas = {
   writeUserImpression: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么这是值得长期保存的用户印象。" },
+      reason: { type: "string", description: "为什么这是值得长期保存的当前用户印象；例如用户自述、用户纠正，或用户授权搜索/工具结果确认了稳定身份、背景、偏好或约束。" },
       title: { type: "string" },
       summary: { type: "string" },
       detail: { type: "string" }
@@ -285,7 +285,7 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-run-command", "runCommand", "运行经过允许的命令行命令。", JSON.stringify(toolSchemas.runCommand), "high", now, now);
   insertTool.run("tool-search-memory", "searchMemory", "低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
   insertTool.run("tool-read-skill", "readSkill", "读取当前 active workspace 中一条已召回 skill 的完整经验详情。", JSON.stringify(toolSchemas.readSkill), "low", now, now);
-  insertTool.run("tool-write-user-impression", "writeUserImpression", "只为当前用户写入长期偏好、背景、身份、称呼或约束；不要记录 agent 自己。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
+  insertTool.run("tool-write-user-impression", "writeUserImpression", "为当前用户写入长期偏好、背景、身份、称呼、约束、工作习惯或用户授权搜索确认的稳定公开信息；不要记录 agent 自己或一次性任务细节。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
   insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
   insertTool.run("tool-write-skill-memory", "writeSkillMemory", "为当前 active workspace 写入脱敏后的可复用经验。", JSON.stringify(toolSchemas.writeSkillMemory), "medium", now, now);
 
@@ -301,7 +301,7 @@ export function seedDefaults(db: Database.Database): void {
   updateTool.run("低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", now, "tool-search-memory");
   updateTool.run("读取当前 active workspace 中一条已召回 skill 的完整经验详情。", now, "tool-read-skill");
   updateTool.run("只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", now, "tool-write-agent-self-impression");
-  updateTool.run("只为当前用户写入长期偏好、背景、身份、称呼或约束；不要记录 agent 自己。", now, "tool-write-user-impression");
+  updateTool.run("为当前用户写入长期偏好、背景、身份、称呼、约束、工作习惯或用户授权搜索确认的稳定公开信息；不要记录 agent 自己或一次性任务细节。", now, "tool-write-user-impression");
   updateTool.run("为当前 active workspace 写入脱敏后的可复用经验。", now, "tool-write-skill-memory");
 
   const updateToolSchema = db.prepare("UPDATE tool_definitions SET parametersJson = ?, updatedAt = ? WHERE id = ?");

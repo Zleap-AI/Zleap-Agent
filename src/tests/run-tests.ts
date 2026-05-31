@@ -1750,7 +1750,11 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("记忆写入协议"), true);
   assert.equal(systemMessage.includes("writeUserImpression"), true);
   assert.equal(systemMessage.includes("稳定长期偏好"), true);
+  assert.equal(systemMessage.includes("不需要等用户说“记住”"), true);
+  assert.equal(systemMessage.includes("用户授权的搜索/工具结果确认"), true);
   assert.equal(systemMessage.includes("不要把 agent 自己的名字、身份、职责、人格、能力边界写进 user impression"), true);
+  const writeUserImpressionTool = lastInput?.tools.find((tool) => tool.name === "writeUserImpression");
+  assert.equal(JSON.stringify(writeUserImpressionTool).includes("用户授权搜索"), true);
   assert.equal(systemMessage.includes("writeSkillMemory"), true);
   assert.equal(systemMessage.includes("readSkill"), true);
   assert.equal(systemMessage.includes("searchMemory 是低频补查工具"), true);

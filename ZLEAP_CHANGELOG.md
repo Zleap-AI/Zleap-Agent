@@ -2,6 +2,27 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 05:16 +08:00
+
+目的：
+- 提高 user impression 的主动写入倾向，避免用户身份/背景已经被对话或搜索确认后，Agent 仍然只回答不沉淀长期印象。
+
+变更：
+- 强化系统提示词里的 `writeUserImpression` 规则：用户问身份、纠正身份、授权搜索关于自己的信息，且当前上下文或工具/工作空间结果确认稳定用户信息时，应主动写入紧凑 user impression，不必等待“记住”指令。
+- 明确禁止把原始搜索结果、网页原文、一次性任务细节、未经确认的猜测或敏感隐私写成 impression。
+- 更新 `writeUserImpression` 工具说明和参数 schema 描述，让模型知道用户授权搜索确认的稳定公开信息也属于可写入范围。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/03-memory-model.md` 和 `zleap-agent-framework.md`，把 user impression 的主动触发边界合并到概念文档。
+- 增加系统提示词和工具 schema 断言，防止以后把主动写入规则删掉。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 本轮待提交。
+
 ## 2026-06-01 05:12 +08:00
 
 目的：
