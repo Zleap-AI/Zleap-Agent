@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 05:45 +08:00
+
+目的：
+- 按新的记忆策略，让 user impression 除了 Agent 主动 `writeUserImpression` 外，也能由 `afterAgentTurn` hook 做保守防漏写入，避免明确稳定用户信息被遗漏。
+
+变更：
+- 新增 `afterAgentTurn` user impression hook 候选提取：识别用户明确陈述的姓名/称呼、稳定身份背景、长期偏好、长期约束、工作习惯或长期项目。
+- hook 只写紧凑 user impression；遇到短期任务事实、一次性素材、scope 不清或没有稳定信息时直接跳过。
+- hook 写入继续走当前 `userId` scope、relationId 去重、policy 检查和 metadata `sourceRefs`，不设置 `workspaceId`，不保存原始日志。
+- 新增 `hook.afterUserImpressionExtracted` 审计记录，方便在日志里看到 hook 确实写入了 user impression。
+- 更新主计划、memory 模型文档、hook 生命周期文档、概念介绍和 Web UI 概念 tab 文案。
+- 增加测试：短期任务事实不写 impression；稳定姓名/长期偏好可被 hook 写入；重复候选不会重复写入。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 本工作会话中待记录。
+
 ## 2026-06-01 05:38 +08:00
 
 目的：

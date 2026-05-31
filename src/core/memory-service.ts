@@ -8,6 +8,13 @@ const DEFAULT_EVENT_WINDOW_SIZE = 20;
 const PROCESS_EVENT_DETAIL_LIMIT = 900;
 
 type MemoryWriteInput = Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail">;
+type UserImpressionCandidate = {
+  title: string;
+  summary: string;
+  detail: string;
+  category: "identity" | "preference" | "constraint" | "background";
+  sourceText: string;
+};
 
 function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
@@ -19,6 +26,97 @@ function stableId(value: string): string {
 
 function compactText(value: string, maxLength: number): string {
   return truncate(value.replace(/\s+/g, " ").trim(), maxLength);
+}
+
+function cleanImpressionValue(value: string): string {
+  return value
+    .replace(/^[：:，,。.\s]+/, "")
+    .replace(/[。.!！?？；;，,]\s*$/g, "")
+    .trim();
+}
+
+function isLikelyEphemeralUserFact(text: string): boolean {
+  return /(这次|本次|这一轮|临时|短期|一次性|当前任务|这个任务|不用记|不要记|别记|不是长期|不是记忆)/i.test(text);
+}
+
+function candidateFromMatch(input: {
+  title: string;
+  category: UserImpressionCandidate["category"];
+  prefix: string;
+  match?: RegExpMatchArray | null;
+  sourceText: string;
+  detailSource: string;
+}): UserImpressionCandidate | undefined {
+  const value = cleanImpressionValue(String(input.match?.[1] ?? ""));
+  if (!value || value.length < 2 || value.length > 80) return undefined;
+  if (/[?？]/.test(value)) return undefined;
+  const summary = `${input.prefix}${value}`;
+  return {
+    title: input.title,
+    summary: truncate(summary, 180),
+    detail: truncate(`${input.detailSource}：${summary}`, 360),
+    category: input.category,
+    sourceText: truncate(input.sourceText, 180)
+  };
+}
+
+function extractUserImpressionCandidate(userMessage: string, assistantMessage: string): UserImpressionCandidate | undefined {
+  const userText = compactText(userMessage, 500);
+  if (!userText || isLikelyEphemeralUserFact(userText)) return undefined;
+  const directCandidates = [
+    candidateFromMatch({
+      title: "用户称呼",
+      category: "identity",
+      prefix: "用户希望被称为：",
+      match: userText.match(/(?:我叫|我的名字是|你可以叫我|叫我|以后叫我)\s*([^\n，。,.；;!?？]{2,40})/),
+      sourceText: userText,
+      detailSource: "来源为用户明确陈述"
+    }),
+    candidateFromMatch({
+      title: "用户身份背景",
+      category: "background",
+      prefix: "用户的稳定身份/背景是：",
+      match: userText.match(/(?:我的身份是|我的职业是|我的工作是|我是一个|我是一名|我是)\s*([^\n。；;!?？]{2,60})/),
+      sourceText: userText,
+      detailSource: "来源为用户明确陈述"
+    }),
+    candidateFromMatch({
+      title: "用户偏好",
+      category: "preference",
+      prefix: "用户偏好：",
+      match: userText.match(/(?:我喜欢|我偏好|我更喜欢|我希望你)\s*([^\n。；;!?？]{2,80})/),
+      sourceText: userText,
+      detailSource: "来源为用户明确陈述"
+    }),
+    candidateFromMatch({
+      title: "用户长期约束",
+      category: "constraint",
+      prefix: "用户长期要求：",
+      match: userText.match(/(?:以后请|以后你要|请以后|以后不要|以后别)\s*([^\n。；;!?？]{2,80})/),
+      sourceText: userText,
+      detailSource: "来源为用户明确陈述"
+    }),
+    candidateFromMatch({
+      title: "用户项目背景",
+      category: "background",
+      prefix: "用户长期项目/工作背景：",
+      match: userText.match(/(?:我的项目是|我正在做|我在做|我长期在做)\s*([^\n。；;!?？]{2,80})/),
+      sourceText: userText,
+      detailSource: "来源为用户明确陈述"
+    })
+  ].find(Boolean);
+  if (directCandidates) return directCandidates;
+
+  const assistantText = compactText(assistantMessage, 700);
+  if (!assistantText || !/(你是|你叫|你的名字是|可以称呼你|关于你的稳定信息)/.test(assistantText)) return undefined;
+  return candidateFromMatch({
+    title: "用户身份背景",
+    category: "background",
+    prefix: "当前用户的稳定身份/背景是：",
+    match: assistantText.match(/(?:你是|你叫|你的名字是|可以称呼你为|关于你的稳定信息是)\s*([^\n。；;!?？]{2,80})/),
+    sourceText: assistantText,
+    detailSource: "来源为本轮助手基于当前上下文或工具结果确认"
+  });
 }
 
 function compactLines(label: string, values: string[], maxItems = 4, maxItemLength = 180): string {
@@ -386,6 +484,8 @@ export class MemoryService {
     if (eventSkill) writes.push(eventSkill);
     const skill = this.maybeWriteSkillMemory(input.run, input.activeWorkspaceId, input.assistantMessage);
     if (skill) writes.push(skill);
+    const userImpression = this.maybeWriteUserImpressionFromHook(input.run, input.activeWorkspaceId, input.assistantMessage);
+    if (userImpression) writes.push(userImpression);
     this.auditMemoryHooks(input.run, input.activeWorkspaceId, writes);
     return writes;
   }
@@ -1055,6 +1155,54 @@ export class MemoryService {
     }, run.userId, run.userRole);
   }
 
+  private maybeWriteUserImpressionFromHook(run: AgentRunInput, activeWorkspaceId: string, assistantMessage: string): MemoryRow | undefined {
+    const candidate = extractUserImpressionCandidate(run.message, assistantMessage);
+    if (!candidate) return undefined;
+    const recentMessages = this.repos.listMessagesDetailed(run.conversationId, 12);
+    const evidenceMessages = recentMessages
+      .filter((message) => (
+        message.role === "user" && message.content === run.message
+      ) || (
+        message.role === "assistant" && message.content === assistantMessage
+      ))
+      .slice(-2);
+    const fingerprint = stableId(`${candidate.title}:${candidate.summary}`);
+    const relationId = `impression:user:${run.userId}:hook:${fingerprint}`;
+    const relationScope = this.memoryRelationScope({
+      memoryType: "impression",
+      userId: run.userId,
+      title: "",
+      summary: "",
+      detail: ""
+    });
+    if (this.repos.getMemoryByRelation("impression", relationId, relationScope)) return undefined;
+    const duplicate = this.repos.listMemories({ memoryType: "impression", userId: run.userId })
+      .some((memory) => compactText(memory.summary, 180).toLowerCase() === compactText(candidate.summary, 180).toLowerCase());
+    if (duplicate) return undefined;
+
+    return this.createOrSkip({
+      memoryType: "impression",
+      userId: run.userId,
+      relationId,
+      title: candidate.title,
+      summary: candidate.summary,
+      detail: candidate.detail,
+      metadataJson: JSON.stringify({
+        source: "afterAgentTurnUserImpressionCandidate",
+        impressionKind: "userImpression",
+        impressionCategory: candidate.category,
+        conversationId: run.conversationId,
+        activeWorkspaceId,
+        autoGenerated: true,
+        confidence: 0.62,
+        sourceTextSnippet: candidate.sourceText,
+        sourceRefs: [
+          sourceRef("messages", evidenceMessages.map((message) => message.id))
+        ]
+      })
+    }, run.userId, run.userRole);
+  }
+
   private maybeWriteSkillFromEventBatch(
     run: AgentRunInput,
     workspaceId: string,
@@ -1626,6 +1774,17 @@ export class MemoryService {
           evidenceEventIds: metadata.evidenceEventIds,
           confidence: metadata.confidence,
           qualityGate: metadata.qualityGate
+        });
+      }
+      if (memory.memoryType === "impression" && metadata.source === "afterAgentTurnUserImpressionCandidate") {
+        this.repos.audit(run.userId, "system", "hook.afterUserImpressionExtracted", "memory", memory.id, {
+          ...base,
+          hook: "afterUserImpressionExtracted",
+          relationId: memory.relationId,
+          version: memory.version,
+          impressionCategory: metadata.impressionCategory,
+          confidence: metadata.confidence,
+          evidenceMessageIds: sourceRefIds(metadata, "messages")
         });
       }
     }

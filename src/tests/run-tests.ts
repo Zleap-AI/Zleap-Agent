@@ -2977,6 +2977,42 @@ async function testMemoryLifecycleHooks() {
   assert.equal(impressionOutput.memoryWrites.some((memory) => memory.memoryType === "impression" && memory.userId === "user-memory"), false);
   assert.equal(repos.listMemories({ memoryType: "impression", userId: "user-memory" }).length, 0);
 
+  const hookImpressionOutput = await runtime.run({
+    agentId: "default-agent",
+    userId: "user-memory",
+    userRole: "user",
+    conversationId: "conv-memory-hook-impression",
+    message: "我叫 Jomy，以后请用中文简洁回答。",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  const hookImpression = hookImpressionOutput.memoryWrites.find((memory) => memory.memoryType === "impression" && memory.userId === "user-memory");
+  assert.equal(Boolean(hookImpression), true);
+  assert.equal(Boolean(hookImpression!.workspaceId), false);
+  assert.equal(hookImpression!.summary.includes("Jomy"), true);
+  assert.equal(metadataOf(hookImpression!).source, "afterAgentTurnUserImpressionCandidate");
+  assert.equal(metadataOf(hookImpression!).impressionKind, "userImpression");
+  assert.equal(metadataSourceIds(hookImpression!, "messages").length > 0, true);
+  const hookTrace = repos.getTrace("conv-memory-hook-impression", "creator", "creator");
+  assert.equal(hookTrace.auditLogs.some((log) => log.action === "hook.afterUserImpressionExtracted"), true);
+
+  const duplicateHookOutput = await runtime.run({
+    agentId: "default-agent",
+    userId: "user-memory",
+    userRole: "user",
+    conversationId: "conv-memory-hook-impression-repeat",
+    message: "我叫 Jomy，以后请用中文简洁回答。",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(duplicateHookOutput.memoryWrites.some((memory) => memory.memoryType === "impression" && memory.userId === "user-memory"), false);
+
   const skillOutput = await runtime.run({
     agentId: "default-agent",
     userId: "user-memory",

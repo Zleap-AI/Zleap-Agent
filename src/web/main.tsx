@@ -870,7 +870,7 @@ function ConceptIntroTab() {
           <article>
             <strong>Impression</strong>
             <span>记人和 Agent 自我</span>
-            <p>Agent 自主判断是否写入稳定偏好、背景和长期约束；召回时固定注入最新 20 条投影视图。</p>
+            <p>Agent 主动写入稳定偏好、背景和长期约束；afterAgentTurn hook 做保守防漏，没有明确稳定信息就跳过。</p>
           </article>
           <article>
             <strong>Event</strong>

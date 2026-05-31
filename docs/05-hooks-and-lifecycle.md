@@ -82,6 +82,9 @@ type RuntimeHook =
 - 记录 token 使用情况。
 - 判断是否需要触发对话窗口级 event 提取。
 - 判断 agent 是否调用了记忆写入工具。
+- 保守检查本轮是否出现明确稳定的 user impression 候选；有则写入紧凑投影，没有则跳过。
+
+user impression hook 是防漏机制，不是强制总结器。它只处理姓名/称呼、稳定身份背景、长期偏好、长期约束、工作习惯或长期项目这类信息；短期任务事实、一次性素材、未经确认的猜测、敏感隐私和 scope 不清的信息不能写入。hook 写入必须沿用当前 run 的 `userId`，不能设置 `workspaceId`，metadata 只能保存 compact sourceRefs 和少量来源字段。
 
 ## beforeWorkspaceEnter
 
