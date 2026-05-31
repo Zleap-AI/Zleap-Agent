@@ -1759,6 +1759,11 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("不要中英混杂或随意切换语言"), true);
   assert.equal(systemMessage.includes("必须忠于子 workspace 交付的 WorkspaceResult"), true);
   assert.equal(systemMessage.includes("workspace 是内部能力边界"), true);
+  assert.equal(systemMessage.includes("产物责任边界"), true);
+  assert.equal(systemMessage.includes("不能因为知道用户最终想要什么，就在错误 workspace 中生成文件、网页、报告或其他下游产物"), true);
+  const childSystemMessage = childInput?.messages[0]?.content ?? "";
+  assert.equal(childSystemMessage.includes("搜索类 workspace 搜索完就返回搜索结果、来源、可信度和建议"), true);
+  assert.equal(childSystemMessage.includes("不要伪造当前工具没有真实产出的 artifacts"), true);
   assert.equal(systemMessage.includes("enterWorkspace"), true);
   assert.equal(systemMessage.includes("exitWorkspace"), true);
   assert.equal(systemMessage.includes("suggestedNextSteps"), true);
@@ -1813,6 +1818,8 @@ async function testRuntimeContextAndTools() {
   assert.equal(repos.getWorkspace("dev").manifest.capabilities.length > 0, true);
   assert.equal(repos.getWorkspace("dev").memoryPolicy.eventRecallEnabled, true);
   assert.equal(output.workspaceTrace[1].task.workspaceId, "dev");
+  assert.equal(output.workspaceTrace[1].task.constraints.some((constraint) => constraint.includes("只完成当前 workspace 能力范围内的任务切片")), true);
+  assert.equal(output.workspaceTrace[1].task.constraints.some((constraint) => constraint.includes("不要声明当前工具没有真实产出的文件、网页、报告或其他 artifacts")), true);
   assert.equal(output.workspaceTrace[1].result.workspaceId, "dev");
   assert.equal(output.workspaceTrace[1].result.suggestedNextSteps.length > 0, true);
   assert.equal(output.workspaceTrace[1].localContext.recalledEventMemories.some((memory) => memory.title === "Runtime file search event"), true);

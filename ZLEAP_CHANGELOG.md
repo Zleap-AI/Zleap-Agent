@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-05-31 22:44 +08:00
+
+目的：
+- 强化子工作空间的职责边界，避免搜索类工作空间完成搜索后继续代做生成网页、写文件等下游产物任务。
+
+变更：
+- 在 `ContextBuilder` 的内部 workspace 决策契约中加入“产物责任边界”：当前 workspace 只能交付自己工具和说明真实支持的结果，不能因为理解最终目标就越界生成文件、网页、报告或其他下游产物。
+- 子工作空间 prompt 明确要求：完成当前能力切片后调用 `exitWorkspace`，搜索类 workspace 只返回搜索结果、来源、可信度、缺口和建议下一步；生成网页、写文件、运行命令等交给 main 再调度到对应 workspace。
+- `WorkspaceRuntime` 为子工作空间任务增加持久化 constraints，要求只完成当前 workspace 能力范围内的任务切片，不声明当前工具没有真实产出的 artifacts。
+- 更新默认 main workspace seed 说明，强调多阶段任务要按能力切片调度。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/02-workspace-runtime.md`、`docs/07-context-and-prompt-contracts.md` 和 `zleap-agent-framework.md`，把产物责任边界融合到正式概念中。
+- 增加测试断言，确保 system prompt 和 `WorkspaceTask.constraints` 中都能看到这条边界。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 本轮待提交。
+
 ## 2026-05-31 22:39 +08:00
 
 目的：

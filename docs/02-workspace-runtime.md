@@ -20,6 +20,8 @@
 
 `main` 和子工作空间都可以看到可用工作空间 manifest 清单，把它作为共享能力地图；区别是只有 `main` 收到 `enterWorkspace`，子工作空间只能通过 `exitWorkspace.suggestedNextSteps` 建议由 `main` 调度到其他工作空间。
 
+工作空间信息还必须表达产物责任边界。子工作空间不是“理解了最终目标就可以继续代做”的自由 agent，而是当前能力切片的执行环境。它只能交付自己工具和说明真实支持的结果；如果下一步需要别的能力，就把已完成内容、证据、缺口和建议写入 `WorkspaceResult`，然后退出给 `main`。例如搜索工作空间完成搜索后应交付搜索结果、来源、可信度和下一步建议，而不是直接生成网页或写文件；网页生成和文件写入应由 `main` 再调度到开发/文件类工作空间完成。
+
 ## 工作空间优先的工具注册与 MCP 执行
 
 MCP 配置是 server-first，不是 tool-first。一个工作空间拥有一个或多个 MCP Server 定义。每个 server 可以是本地 stdio（`command`、`args`、`env`、`cwd`），也可以是远程 Streamable HTTP（`url`、`headers`）。UI 先保存 server，再对选中的 server 调用 `client.listTools()` 做发现，然后让 creator 选择把哪些发现到的工具挂载到同一个工作空间中。

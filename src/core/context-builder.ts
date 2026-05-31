@@ -155,14 +155,18 @@ function workspaceDecisionContract(input: {
     ? [
       "- 你当前在 main workspace。main 是任务编排者和结果整合者，不直接拥有所有专业工具。",
       "- main 会看到可用 workspace 清单。需要文件、命令行、外部 MCP 能力或其他专门工具时，选择最合适的 workspace 并调用 enterWorkspace。",
+      "- main 负责拆分多阶段任务：例如先进入搜索类 workspace 获取资料，再根据返回的搜索证据进入开发/文件类 workspace 生成网页或写文件。不要期待一个子 workspace 顺手完成另一个 workspace 的产物。",
       "- 子 workspace 返回 WorkspaceResult 后，main 负责整合结果：继续进入其他 workspace、请求用户补充信息，或给用户自然语言最终答复。"
     ]
     : [
       `- 你当前在子 workspace：${input.workspace.id}。子 workspace 是一个专门能力环境，只能使用当前暴露的工具和当前局部上下文。`,
       "- 子 workspace 也会看到可用 workspace manifest 清单；这是一份跨 workspace 共享的环境记忆/能力地图，类似一个人使用某个软件时也知道还有别的软件存在。",
       "- 这份能力地图只用于判断是否需要其他能力；子 workspace 不能直接进入其他 workspace，也不会暴露 enterWorkspace。",
-    "- 子 workspace 自己决定何时退出：任务完成、失败、阻塞、需要用户信息、需要审批、或发现当前工具无法继续满足目标时，都应调用 exitWorkspace。",
-    "- 如果需要另一个 workspace 的工具，不要在子 workspace 里直接切换；用 exitWorkspace 把已完成内容、困难、缺失能力和建议下一步交给 main，由 main 决定是否进入其他 workspace。"
+      "- 子 workspace 只负责完成自己能力范围内的那一段任务。完成当前能力切片后，必须调用 exitWorkspace，把结果、证据、限制和建议下一步交回 main。",
+      "- 不要在子 workspace 里继续做下游产物任务。搜索类 workspace 搜索完就返回搜索结果、来源、可信度和建议；生成网页、写文件、运行本地命令等属于其他 workspace 时，应写入 suggestedNextSteps，由 main 调度到对应 workspace。",
+      "- 不要伪造当前工具没有真实产出的 artifacts。只有当前 workspace 的工具实际创建、修改或导出的文件/网页/报告，才能作为 artifacts 返回；否则只能作为 observations 或 suggestedNextSteps。",
+      "- 子 workspace 自己决定何时退出：任务完成、失败、阻塞、需要用户信息、需要审批、或发现当前工具无法继续满足目标时，都应调用 exitWorkspace。",
+      "- 如果需要另一个 workspace 的工具，不要在子 workspace 里直接切换；用 exitWorkspace 把已完成内容、困难、缺失能力和建议下一步交给 main，由 main 决定是否进入其他 workspace。"
     ];
 
   return [
@@ -170,6 +174,7 @@ function workspaceDecisionContract(input: {
     "- workspace 是内部能力边界，不是面向用户解释的概念。用户只看到一条连续任务线；不要在最终答复里解释 workspace、runtime、context stack 或 tool orchestration。",
     "- 每次 user message 保持干净。系统/人格/策略/工作空间说明在 system message；记忆和本地对话由 runtime 作为工具结果注入。",
     "- 选择 workspace 的核心标准是能力匹配：当前工具能解决就继续；当前工具不足、目标属于其他专业能力、或需要组合多个能力时，回到 main 重新编排。",
+    "- 工作空间有产物责任边界：当前 workspace 只能交付自己工具和说明真实支持的结果；不能因为知道用户最终想要什么，就在错误 workspace 中生成文件、网页、报告或其他下游产物。",
     "- runtime 会在 workspace 切换时自动注入有限的 handoffContext：进入子 workspace 时携带 main 的相关近期上下文；返回 main 时只携带子 workspace 的结果上下文、最后助手结论和关键工具结果，不携带工具调用参数或冗长中间过程。模型不要自己伪造这些交叉上下文，也不要在最终答复里解释它。",
     "- 像软件之间交付产物一样对待 handoffContext：不需要复述子 workspace 的完整操作过程，但必须忠于子 workspace 交付的 WorkspaceResult、最终结论和关键工具结果。不要把这些结果再随意压缩、改写或遗漏关键事实。",
     ...roleRule,

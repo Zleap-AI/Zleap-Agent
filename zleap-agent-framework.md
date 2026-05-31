@@ -83,6 +83,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 - `exitWorkspace` 是 child workspace 退出回 main 的工具，不是 main 的普通工具。
 - 子 workspace 可以在 `suggestedNextSteps` 中告诉 main 需要哪个 sibling workspace 的能力，但不能直接进入 sibling workspace。
 - 子 workspace 看见 sibling manifest 不等于获得 sibling tools；它只获得“知道有哪些能力存在”的认知，不获得直接调用权。
+- 子 workspace 还有产物责任边界：它只能交付自己工具真实产生、或自身说明明确支持的结果。搜索类 workspace 搜索完应返回搜索结果、来源、可信度、缺口和下一步建议，然后退出给 main；生成网页、写文件、运行本地命令等下游产物任务，应由 main 再调度到开发/文件类 workspace。`artifacts` 只能声明当前 workspace 工具实际创建、修改或导出的产物，不能靠自然语言伪造。
 
 **Capability Workspaces（执行层）**
 
@@ -97,7 +98,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 1. **Main Workspace 接收任务**：理解用户目标，读取 runtime 注入的可用 workspace manifest。
 2. **构造 WorkspaceTask**：包含 `objective`、`constraints`、`expectedOutput`、`parentContextSummary`。
 3. **进入子 Workspace**：runtime 创建 workspace session，召回 memory，恢复同 workspace 的本地记录，绑定当前 workspace 工具。
-4. **执行 Workspace 任务**：模型在当前 workspace 的上下文里循环调用允许的工具。
+4. **执行 Workspace 任务**：模型在当前 workspace 的上下文里循环调用允许的工具，只完成当前能力切片，不代做 sibling workspace 的产物任务。
 5. **退出 Workspace**：子 workspace 调用 `exitWorkspace`，返回结构化 `WorkspaceResult`；runtime 同时生成有限的结果型 handoffContext。
 6. **Hook 提取记忆**：runtime 根据 workspace session、工具证据和结果提取 event，并谨慎生成 skill。
 7. **Main Workspace 整合结果**：决定继续进入其他 workspace、询问用户，或生成最终答复。

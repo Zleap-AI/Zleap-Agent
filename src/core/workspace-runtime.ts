@@ -63,7 +63,13 @@ export class WorkspaceRuntime {
   private createTask(run: AgentRunInput, workspaceId: string, objective: string): WorkspaceTask {
     const constraints = workspaceId === "main"
       ? ["只编排 workspace，不直接使用子 workspace 底层工具。"]
-      : ["只使用当前 workspace 注册的工具。", "将结果以 WorkspaceResult 结构返回给 main workspace。"];
+      : [
+        "只使用当前 workspace 注册的工具。",
+        "只完成当前 workspace 能力范围内的任务切片。",
+        "如果下一步需要其他 workspace 的能力，不要继续代做；通过 exitWorkspace.suggestedNextSteps 交回 main 调度。",
+        "不要声明当前工具没有真实产出的文件、网页、报告或其他 artifacts。",
+        "将结果以 WorkspaceResult 结构返回给 main workspace。"
+      ];
     return {
       taskId: createId("task"),
       userId: run.userId,
