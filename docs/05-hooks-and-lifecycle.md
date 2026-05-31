@@ -313,6 +313,7 @@ searchMemory
 
 - 当前 prompt 或 `searchMemory` 已经看到某条 impression/event 的 id、标题、摘要或片段。
 - 用户主动要求回忆，或者摘要不足以支撑回答。
+- 用户在一次基于召回摘要的回答后追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”等，且上下文里已有相关 memory id。
 - Agent 需要核对某条普通记忆的完整 detail，而不是凭摘要脑补。
 
 限制：
@@ -320,6 +321,7 @@ searchMemory
 - 只接受 `memoryId`。
 - userId、workspaceId、memoryType、relationId、version 都由 runtime 代码绑定或检查。
 - 不能读取其他用户的 impression/event，不能跨 active workspace 读取 event/skill，也不能读取 creator 控制的 agent self impression。
+- 没有 `readMemory` 返回的 detail 时，只能基于摘要简述，不能把紧凑投影扩写成看似完整的事实。
 
 ### readSkill
 

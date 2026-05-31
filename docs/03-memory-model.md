@@ -458,9 +458,9 @@ Zleap 的 memory 系统要解决的不是“无限记住”，而是“在正确
 
 运行时模型调用这些工具时，event/skill 记忆必须被当前 active workspace 约束：在默认 `dev` workspace 中只能搜索、写入或读取 `dev` 的 event/skill 记忆，不能越权操作其他 MCP workspace 的 event/skill。user impression 和 agent self impression 仍然是跨 workspace 的身份层记忆，但写入和管理继续受 userId/creator policy 限制。
 
-自动召回和 `searchMemory` 都遵循渐进式披露。自动上下文只注入 impression/event 的紧凑投影和 skill 简介；`searchMemory` 也只返回 id、标题、摘要、片段、类型和读取提示，不默认返回完整 `detail` 或原始 metadata。这样旧记忆不会因为一次搜索就把大量历史细节塞回 prompt。
+自动召回和 `searchMemory` 都遵循渐进式披露。自动上下文只注入 impression/event 的紧凑投影和 skill 简介；普通记忆投影必须明确标出 `disclosure=summary_only`、`detailInjected=false`、`detailAvailable=true` 和读取工具。`searchMemory` 也只返回 id、标题、摘要、片段、类型、披露状态和读取提示，不默认返回完整 `detail` 或原始 metadata。这样旧记忆不会因为一次搜索就把大量历史细节塞回 prompt。
 
-当用户主动要求回忆、摘要不足以回答，或者模型需要核对某条 impression/event 的完整内容时，应调用 `readMemory(memoryId)` 读取该条记忆详情。`readMemory` 只接受 `memoryId`，不允许模型传 `userId`、`workspaceId`、`memoryType` 等 scope 字段；当前用户、active workspace 和 agent scope 都由 runtime 注入并强制检查。Skill 仍使用 `readSkill(skillId)` 读取完整 procedure/appliesWhen/avoidWhen，因为 skill 详情有专门结构。
+当用户主动要求回忆、摘要不足以回答，或者模型需要核对某条 impression/event 的完整内容时，应调用 `readMemory(memoryId)` 读取该条记忆详情。尤其是模型刚刚基于自动召回摘要回答后，用户继续追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”之类的问题时，如果上下文里已经有相关 memory id，就必须先读详情再展开回答，不能把 summary/snippet 脑补成更长的事实。`readMemory` 只接受 `memoryId`，不允许模型传 `userId`、`workspaceId`、`memoryType` 等 scope 字段；当前用户、active workspace 和 agent scope 都由 runtime 注入并强制检查。Skill 仍使用 `readSkill(skillId)` 读取完整 procedure/appliesWhen/avoidWhen，因为 skill 详情有专门结构。
 
 runtime memory tool 的归属由代码绑定，不由 AI 自己传参决定。function-call schema 不应暴露 `userId`、`agentId`、`workspaceId` 这类 scope 字段；`readMemory` 只能接收 `memoryId`；`readSkill` 和 `writeSkillMemory` 的 `workspaceId` 必须来自当前 active workspace，`writeUserImpression` 的 `userId` 必须来自当前 run，`writeAgentSelfImpression` 的 `agentId` 必须来自当前 agent。模型如果幻觉传入这些 scope 字段，runtime 必须拒绝该 tool call。
 

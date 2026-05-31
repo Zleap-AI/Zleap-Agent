@@ -108,5 +108,5 @@ Agent = LLM
 8. memory 不是独立 workspace；memory tools 由 runtime 挂载到每个 workspace。
 9. main workspace 通过 runtime 注入的 manifest 了解所有 workspace，不通过 `listWorkspaces` 工具发现。
 10. 代码负责身份、scope、权限、工具可见性和持久化边界；模型只在当前暴露的边界内做选择。
-11. 上下文只注入真实需要的投影视图：impression 固定最新 20 条，旧对话通过约 50 条 result event 和少量相关 process event 承接，原始明细留在日志和数据库。Memory row 只保存语义投影和来源引用；完整消息、LLM 调用、上下文堆栈、工具调用、工作空间会话和审计分别保存在对应 SQLite 表里，必要时通过 Web UI 的“数据表”只读查看器追溯。模型需要某条普通记忆详情时，通过 `readMemory(memoryId)` 渐进读取，而不是把所有 detail 默认塞进 prompt。
+11. 上下文只注入真实需要的投影视图：impression 固定最新 20 条，旧对话通过约 50 条 result event 和少量相关 process event 承接，原始明细留在日志和数据库。Memory row 只保存语义投影和来源引用；完整消息、LLM 调用、上下文堆栈、工具调用、工作空间会话和审计分别保存在对应 SQLite 表里，必要时通过 Web UI 的“数据表”只读查看器追溯。模型需要某条普通记忆详情时，通过 `readMemory(memoryId)` 渐进读取，而不是把所有 detail 默认塞进 prompt；用户追问“详细说说”等详情问题时，模型必须先读取详情，不能把摘要扩写成事实。
 12. `final_messages` 是原始 provider messages 快照，不是正常结构化上下文堆栈的一层；Web UI 的“显示原始日志”应隐藏编号堆栈，并按当前选中的 `llmCallId` 显示同一次 LLM 调用的原始 request/response 日志，包括 messages、tools、状态和响应元数据，不需要再点击展开，也不能出现横向滚动。

@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 05:58 +08:00
+
+目的：
+- 修复模型在用户追问“详细说说”等详情问题时，没有调用 `readMemory`，而是直接把自动召回的 impression 摘要扩写成回答的问题。
+
+变更：
+- 普通 impression/event 记忆投影增加 `disclosure=summary_only`、`detailAvailable=true`、`detailInjected=false` 和 `readInstruction`，明确告诉模型与 UI：当前只有摘要，没有注入完整详情。
+- `runtime_context.memory` 增加 `memoryDisclosureProtocol`，标出默认不注入详情，并识别当前用户消息是否像详情追问。
+- 强化 runtime 系统提示词和默认 seed 提示词：当用户基于召回摘要继续追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”等，且上下文里已有相关 memory id 时，必须先调用 `readMemory(memoryId)` 再展开回答。
+- 强化 `readMemory` 工具说明和参数 reason 描述，明确它用于详情追问、主动回忆和摘要不足场景。
+- 更新主计划、memory 模型、hook 生命周期、上下文契约、docs 索引、框架概念文档和 Web UI 概念介绍，统一“摘要不是详情，详情追问必须渐进读取”的设计准则。
+- 增加测试，覆盖系统提示词、memory 上下文投影、披露协议和工具说明。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- `57b2aef` 强化 readMemory 详情追问触发规则。
+
 ## 2026-06-01 05:45 +08:00
 
 目的：

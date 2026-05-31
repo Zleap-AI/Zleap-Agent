@@ -123,7 +123,7 @@ const toolSchemas = {
   readMemory: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么需要读取这条记忆的完整详情，而不是只看摘要。" },
+      reason: { type: "string", description: "为什么需要读取这条记忆的完整详情，而不是只看摘要；例如用户追问详细说说、要求展开或需要核对细节。" },
       memoryId: { type: "string", description: "要读取的 memory id，来自自动召回或 searchMemory 结果。" }
     },
     required: ["memoryId"],
@@ -177,7 +177,8 @@ const DEFAULT_SYSTEM_PROMPT = [
   "每一次 function call 都必须在参数里写清楚 reason：说明这次调用为什么必要、预期获得什么信息或产物。reason 是给 runtime/UI 调试看的，不要把它写进面向用户的回答。",
   "回复语言必须跟随用户当前消息的主要语言：用户用中文就用中文，用户用英文就用英文；除非用户明确要求翻译或指定另一种语言，不要中英混杂或随意切换语言。",
   "searchMemory 是低频补查工具；每轮上下文已经自动召回主要记忆，只有自动上下文不足、用户明确追问旧记忆，或任务依赖旧事件/偏好/经验证据时才调用。",
-  "Memory 采用渐进式披露：上下文和搜索结果只适合先看 id、标题、摘要或片段；当用户主动要求回忆、摘要不足以回答、或需要核对某条 impression/event 的详情时，调用 readMemory(memoryId) 读取完整 detail，不要凭摘要脑补。",
+  "Memory 采用渐进式披露：上下文和搜索结果只适合先看 id、标题、摘要或片段，默认不注入完整 detail；当用户主动要求回忆、摘要不足以回答、或需要核对某条 impression/event 的详情时，调用 readMemory(memoryId) 读取完整 detail，不要凭摘要脑补。",
+  "如果用户在你基于自动召回摘要回答后继续追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”等，且上下文里已有相关 memory id，这是 readMemory 的典型触发场景；必须先读详情，再展开回答。",
   "Skill 记忆采用渐进式披露：上下文只给名称和简介；当某条 Skill 明显相关并能减少失败时，先调用 readSkill 读取完整步骤再应用。",
   "当用户表达长期偏好、长期背景、自我认知更新或已脱敏的可复用经验时，可以通过对应记忆写入工具请求 runtime 写入；事件记忆由 runtime 生命周期 hook 自动提取。",
   "除非用户明确要求查看系统内部状态，否则像真人助手一样直接回答用户。"
@@ -294,7 +295,7 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-write-file", "writeFile", "覆盖写入仓库内 UTF-8 文件，适合创建或替换完整文件内容。", JSON.stringify(toolSchemas.writeFile), "medium", now, now);
   insertTool.run("tool-run-command", "runCommand", "运行经过允许的命令行命令。", JSON.stringify(toolSchemas.runCommand), "high", now, now);
   insertTool.run("tool-search-memory", "searchMemory", "低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
-  insertTool.run("tool-read-memory", "readMemory", "按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", JSON.stringify(toolSchemas.readMemory), "low", now, now);
+  insertTool.run("tool-read-memory", "readMemory", "按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户追问详细说说、主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", JSON.stringify(toolSchemas.readMemory), "low", now, now);
   insertTool.run("tool-read-skill", "readSkill", "读取当前 active workspace 中一条已召回 skill 的完整经验详情。", JSON.stringify(toolSchemas.readSkill), "low", now, now);
   insertTool.run("tool-write-user-impression", "writeUserImpression", "为当前用户写入长期偏好、背景、身份、称呼、约束、工作习惯或用户授权搜索确认的稳定公开信息；不要记录 agent 自己或一次性任务细节。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
   insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
@@ -310,7 +311,7 @@ export function seedDefaults(db: Database.Database): void {
   updateTool.run("覆盖写入仓库内 UTF-8 文件。适合创建或替换完整文件内容；不要用 runCommand/echo/python heredoc 代替普通文件写入。调用时必须填写 reason。", now, "tool-write-file");
   updateTool.run("运行最小必要命令。只用于测试、构建、脚本、诊断或用户明确要求终端操作；不要用它替代 searchFiles/readFile/writeFile，也不要无目的查询系统配置。调用时必须填写 reason、说明预期产出。", now, "tool-run-command");
   updateTool.run("低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", now, "tool-search-memory");
-  updateTool.run("按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", now, "tool-read-memory");
+  updateTool.run("按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户追问详细说说、主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", now, "tool-read-memory");
   updateTool.run("读取当前 active workspace 中一条已召回 skill 的完整经验详情。", now, "tool-read-skill");
   updateTool.run("只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", now, "tool-write-agent-self-impression");
   updateTool.run("为当前用户写入长期偏好、背景、身份、称呼、约束、工作习惯或用户授权搜索确认的稳定公开信息；不要记录 agent 自己或一次性任务细节。", now, "tool-write-user-impression");

@@ -921,7 +921,7 @@ function ConceptIntroTab() {
           <article>
             <strong>稳定印象</strong>
             <span>固定最新 20 条 + readMemory</span>
-            <p>Impression 不按 query 筛选；默认只注入紧凑投影。用户主动要求回忆或摘要不足时，再按 id 读取完整详情。</p>
+            <p>Impression 不按 query 筛选；默认只注入紧凑投影并标出详情未注入。用户追问“详细说说”或摘要不足时，必须按 id 调用 readMemory 再展开。</p>
           </article>
           <article>
             <strong>经验披露</strong>

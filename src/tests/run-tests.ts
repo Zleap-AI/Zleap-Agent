@@ -1763,6 +1763,8 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("优先用 memoryType 限定"), true);
   assert.equal(systemMessage.includes("readMemory(memoryId)"), true);
   assert.equal(systemMessage.includes("不要凭摘要脑补"), true);
+  assert.equal(systemMessage.includes("详细说说"), true);
+  assert.equal(systemMessage.includes("必须先读详情"), true);
   assert.equal(systemMessage.includes("渐进式披露"), true);
   assert.equal(systemMessage.includes("生命周期 hook"), true);
   assert.equal(systemMessage.includes("writeEventMemory"), false);
@@ -1824,8 +1826,22 @@ async function testRuntimeContextAndTools() {
   assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"runtime\""), false);
   assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
   const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
-  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceResultEvents: unknown[]; currentWorkspaceRelevantProcessEvents: unknown[]; currentWorkspaceSkillMemory: unknown[] };
+  const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as {
+    memoryDisclosureProtocol: { defaultDisclosure: string; detailInjectedByDefault: boolean; ordinaryMemoryReadTool: string; rules: string[] };
+    crossWorkspaceImpressionMemory: Array<Record<string, unknown>>;
+    currentWorkspaceResultEvents: unknown[];
+    currentWorkspaceRelevantProcessEvents: unknown[];
+    currentWorkspaceSkillMemory: unknown[];
+  };
+  assert.equal(memoryPayload.memoryDisclosureProtocol.defaultDisclosure, "summary_only");
+  assert.equal(memoryPayload.memoryDisclosureProtocol.detailInjectedByDefault, false);
+  assert.equal(memoryPayload.memoryDisclosureProtocol.ordinaryMemoryReadTool, "readMemory");
+  assert.equal(memoryPayload.memoryDisclosureProtocol.rules.some((rule) => rule.includes("必须先调用 readMemory")), true);
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.length, 1);
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory[0].disclosure, "summary_only");
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory[0].detailInjected, false);
+  assert.equal(memoryPayload.crossWorkspaceImpressionMemory[0].detailAvailable, true);
+  assert.equal(String(memoryPayload.crossWorkspaceImpressionMemory[0].readInstruction ?? "").includes("先调用 readMemory"), true);
   assert.equal(memoryPayload.currentWorkspaceResultEvents.length, 1);
   assert.equal(memoryPayload.currentWorkspaceRelevantProcessEvents.length, 0);
   assert.equal(memoryPayload.currentWorkspaceSkillMemory.length, 1);
@@ -4379,6 +4395,7 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(searchMemory?.description.includes("自动召回不足"), true);
   assert.equal(readMemory?.bindingType, "runtime");
   assert.equal(readMemory?.description.includes("完整详情"), true);
+  assert.equal(readMemory?.description.includes("详细说说"), true);
   assert.equal(readSkill?.bindingType, "runtime");
   assert.equal(repos.listTools().some((tool) => tool.name === "writeEventMemory"), false);
   assert.equal(repos.listTools().some((tool) => tool.name === "updateMemory"), false);
