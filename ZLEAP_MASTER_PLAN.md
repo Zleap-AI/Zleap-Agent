@@ -391,6 +391,8 @@
   - Legacy cached `https://api.302.ai` hostnames are rewritten through URL parsing before request logging and provider fetch.
   - Streaming Chat Completions parses content deltas and OpenAI-compatible `tool_calls` deltas.
   - Streaming Chat Completions can continue after tool-call deltas by sending tool results back into follow-up streamed LLM requests until a final content answer or the global circuit breaker is reached.
+  - LLM provider requests use a bounded automatic retry policy with up to 5 attempts for transient network/provider failures such as connection errors, 408/409/425, 429, and 5xx. Non-retryable 4xx request errors should surface immediately with the decoded provider message instead of blind repeated calls.
+  - LLM provider error bodies must be decoded before display/logging, including gzip, brotli, and deflate compressed responses, so the UI shows the real provider diagnostic rather than binary-looking text.
   - Main-workspace/internal tool-round narration should not be mixed into the final assistant answer. Child-workspace interaction text is different: it is streamed through explicit workspace process events so users can inspect what happened inside the active capability workspace.
   - API key is never persisted server-side. The UI may keep it in browser local storage/session state only because the user explicitly requested refresh survival.
   - Failed provider calls are marked failed in `llm_calls` with a visible diagnostic; successful calls are marked completed with response metadata.

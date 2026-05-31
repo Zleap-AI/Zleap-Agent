@@ -688,6 +688,27 @@ Verification:
 Git:
 - Pending in this work session.
 
+## 2026-05-31 19:05 +08:00
+
+Purpose:
+- Make LLM provider failures diagnosable and resilient after a streamed 400 response was displayed as compressed binary-looking text.
+
+Changed:
+- Added server-side provider retry with up to 5 attempts for transient LLM failures: network errors, 408/409/425, 429, and 5xx.
+- Kept non-retryable 4xx request errors immediate so invalid request payloads are not blindly repeated.
+- Added gzip, brotli, and deflate decoding for provider error responses before saving/displaying the error message.
+- Added tests proving 5-attempt retry, streamed 429 retry, and compressed 400 error decoding.
+- Updated `ZLEAP_MASTER_PLAN.md` with the retry and error-decoding LLM contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 09:02 +08:00
 
 Purpose:

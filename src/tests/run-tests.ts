@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import Database from "better-sqlite3";
 import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
@@ -10,7 +11,7 @@ import { WorkspaceRuntime } from "../core/workspace-runtime";
 import { McpToolExecutor } from "../core/mcp-executor";
 import { parseActor, parseActorFromSearchParams } from "../server/actor";
 import type { ChatCompletionInput, ChatCompletionOutput, LLMClient, LLMStreamEvent } from "../core/llm-client";
-import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl } from "../core/llm-client";
+import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "../core/llm-client";
 import type { MemoryRow } from "../types";
 
 class FakeLLMClient implements LLMClient {
@@ -4555,8 +4556,66 @@ async function testMainOrchestrationTools() {
   assert.equal(finishTrace.auditLogs.some((log) => log.action === "main_workspace_result_committed" && log.metadataJson.includes("completed")), true);
 }
 
+async function testOpenAIClientRetriesAndDecodesErrors() {
+  const originalFetch = globalThis.fetch;
+  const client = new OpenAICompatibleClient();
+  const input: ChatCompletionInput = {
+    baseUrl: "https://api.302ai.com",
+    apiKey: "test-key",
+    model: "gpt-5-mini",
+    messages: [{ role: "user", content: "hello" }],
+    tools: []
+  };
+
+  try {
+    let completeAttempts = 0;
+    globalThis.fetch = (async () => {
+      completeAttempts += 1;
+      if (completeAttempts < 5) {
+        return new Response(JSON.stringify({ error: { message: "temporary overload" } }), { status: 500 });
+      }
+      return new Response(JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "retried ok" } }]
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const completeOutput = await client.complete(input);
+    assert.equal(completeAttempts, 5);
+    assert.equal(completeOutput.message.content, "retried ok");
+
+    let streamAttempts = 0;
+    globalThis.fetch = (async () => {
+      streamAttempts += 1;
+      if (streamAttempts === 1) {
+        return new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 });
+      }
+      return new Response("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" }
+      });
+    }) as typeof fetch;
+    let streamed = "";
+    for await (const event of client.streamEvents(input)) {
+      if (event.type === "content") streamed += event.text;
+    }
+    assert.equal(streamAttempts, 2);
+    assert.equal(streamed, "ok");
+
+    globalThis.fetch = (async () => {
+      const body = gzipSync(Buffer.from(JSON.stringify({ error: { message: "bad request detail" } }), "utf8"));
+      return new Response(body, { status: 400, headers: { "content-encoding": "gzip" } });
+    }) as typeof fetch;
+    await assert.rejects(
+      () => client.complete(input),
+      /LLM 请求失败（400）：bad request detail/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 async function main() {
   await testDatabaseAndMemory();
+  await testOpenAIClientRetriesAndDecodesErrors();
   await testAgentUpdateRequiresCreatorRole();
   await testHttpActorParsingRequiresExplicitIdentity();
   await testTraceAndToolLogsAreUserScoped();
