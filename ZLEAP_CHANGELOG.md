@@ -2,6 +2,27 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 06:20 +08:00
+
+目的：
+- 重做 `概念介绍` 里的上下文窗口堆栈说明，让它能清楚展示一级分区、二级内容和 memory 内部多层投影，而不是只用“上下文概览”粗略描述。
+
+变更：
+- 将概念介绍中的“上下文概览”改为更详细的“上下文窗口堆栈”，逐层展示 `system`、`workspace`、`tools`、`memory`、本地对话片段、`user` 和 `tool_result`。
+- 在概念介绍中展开 `memory` 的二级分区：跨工作空间印象记忆、当前工作空间结果事件、相关过程事件、当前工作空间经验记忆，并标明 `summary_only`、`detailInjected=false`、`readMemory` 和 `readSkill` 的渐进披露路径。
+- 将概念 UI 中面向人的“history”表达改为“本地对话片段”，只说明内部 `segmentType` 是 `history`，避免把英文内部字段当成产品概念。
+- 更新 `zleap-agent-framework.md` 和主计划，使概念文档与 Web UI 的详细堆栈图保持一致。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+- 浏览器验证通过：刷新 `http://localhost:4173/` 并打开 `概念介绍`，可见“上下文窗口堆栈”、`memory` 分区展开、`runtime_context.local_conversation`、`readMemory(memoryId)` 和 `readSkill(skillId)`，页面不再出现“上下文概览”。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 06:17 +08:00
 
 目的：

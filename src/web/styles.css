@@ -1889,7 +1889,8 @@ td button {
   margin-top: 14px;
 }
 
-.context-stack-visual {
+.context-stack-visual,
+.context-stack-blueprint {
   display: grid;
   gap: 8px;
 }
@@ -1924,6 +1925,211 @@ td button {
 .context-layer span {
   color: #4a5662;
   line-height: 1.5;
+}
+
+.context-stack-blueprint {
+  gap: 10px;
+}
+
+.context-layer-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.context-layer-card b {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #172026;
+  color: #ffffff;
+  font-size: 13px;
+}
+
+.context-layer-card strong {
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 16px;
+}
+
+.context-layer-card code {
+  display: inline-block;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: #eef2f6;
+  color: #4a5662;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.context-layer-card p {
+  margin: 8px 0 0;
+  color: #4a5662;
+  line-height: 1.6;
+}
+
+.context-layer-card ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-layer-card li {
+  padding: 5px 8px;
+  border: 1px solid #dce2e8;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #4a5662;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.context-layer-card.system {
+  border-left: 4px solid #1967d2;
+}
+
+.context-layer-card.workspace {
+  border-left: 4px solid #0f766e;
+}
+
+.context-layer-card.tools {
+  border-left: 4px solid #8a4b00;
+}
+
+.context-layer-card.memory {
+  border-left: 4px solid #7c3aed;
+}
+
+.context-layer-card.local_conversation {
+  border-left: 4px solid #475569;
+}
+
+.context-layer-card.user {
+  border-left: 4px solid #16a34a;
+}
+
+.context-layer-card.tool_result {
+  border-left: 4px solid #c2410c;
+}
+
+.context-memory-detail {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.memory-detail-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 12px;
+}
+
+.memory-detail-heading strong {
+  font-size: 17px;
+}
+
+.memory-detail-heading span {
+  color: #5c6975;
+  font-size: 13px;
+}
+
+.memory-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.memory-detail-grid article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.memory-detail-grid article > div {
+  display: grid;
+  gap: 4px;
+}
+
+.memory-detail-grid strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.memory-detail-grid small {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.memory-detail-grid code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #4a5662;
+  font-size: 11px;
+}
+
+.memory-detail-grid p {
+  margin: 0;
+  color: #4a5662;
+  line-height: 1.55;
+}
+
+.progressive-disclosure {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.progressive-disclosure span {
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #31519b;
+  font-size: 12px;
+}
+
+.prompt-assembly-lane {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.prompt-assembly-lane > div {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.prompt-assembly-lane strong {
+  color: #172026;
+}
+
+.prompt-assembly-lane span {
+  color: #4a5662;
+  line-height: 1.45;
 }
 
 .lifecycle-grid {
@@ -1979,7 +2185,9 @@ td button {
   .compare-grid,
   .memory-triad,
   .lifecycle-grid,
-  .module-grid {
+  .module-grid,
+  .memory-detail-grid,
+  .prompt-assembly-lane {
     grid-template-columns: 1fr;
   }
 
@@ -2022,5 +2230,9 @@ td button {
 
   .context-layer span {
     grid-column: 2;
+  }
+
+  .memory-detail-heading {
+    display: grid;
   }
 }

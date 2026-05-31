@@ -933,25 +933,117 @@ function ConceptIntroTab() {
 
       <section className="concept-section">
         <div className="section-heading">
-          <span>上下文概览</span>
-          <h2>模型真实收到什么，UI 额外展示什么</h2>
+          <span>上下文窗口堆栈</span>
+          <h2>一级分区少而稳定，二级内容在分区里展开</h2>
         </div>
-        <div className="context-stack-visual">
+        <div className="context-stack-blueprint">
           {[
-            ["system", "系统提示词、人格提示词、内部运行策略"],
-            ["workspace", "当前 workspace 说明、manifest、memory policy"],
-            ["tools", "请求 tools 数组的可检查快照；不复制进 system prompt"],
-            ["memory", "impression 固定 20 条、结果事件时间线、相关过程事件、skill 分区投影"],
-            ["history", "同 workspace 持续本地记录、任务包、完成结果、近期工具证据"],
-            ["user", "干净用户消息"],
-            ["tool_result", "后续调用收到的工具结果"]
-          ].map(([name, desc], index) => (
-            <div className="context-layer" key={name}>
+            {
+              code: "system",
+              title: "系统提示词",
+              summary: "唯一 system message：基础系统提示词、人格提示词、内部运行策略、workspace 决策契约。",
+              items: ["不放 tools JSON", "不放 memory 原文", "要求最终回复隐藏 runtime/workspace 机制"]
+            },
+            {
+              code: "workspace",
+              title: "工作空间信息",
+              summary: "当前 workspace 的说明、manifest、instructions、memory policy，以及可用 workspace 能力地图。",
+              items: ["main 有调度权", "子 workspace 只有当前工具", "子 workspace 可知道其他 workspace 存在但不能直接切换"]
+            },
+            {
+              code: "tools",
+              title: "可调用工具",
+              summary: "OpenAI-compatible 顶层 tools 数组的可检查快照，不是写进 system prompt 的文本。",
+              items: ["function 名称与说明", "参数 schema", "runtime / MCP / risk / active workspace metadata"]
+            },
+            {
+              code: "memory",
+              title: "记忆投影",
+              summary: "runtime_context.memory 的分区投影视图，默认只注入 compact projection，不回灌原始 detail。",
+              items: ["跨工作空间印象记忆", "当前工作空间结果事件", "当前工作空间相关过程事件", "当前工作空间经验记忆"]
+            },
+            {
+              key: "local_conversation",
+              code: "runtime_context.local_conversation",
+              title: "本地对话片段",
+              summary: "UI 叫本地对话片段，内部 segmentType 是 history；它不是全局聊天记录。",
+              items: ["同 workspace 最近本地消息", "当前 WorkspaceTask", "同 workspace 已完成结果", "crossWorkspaceHandoffContext", "近期本地工具证据"]
+            },
+            {
+              code: "user",
+              title: "干净用户消息",
+              summary: "当前用户原文保持干净，只表达用户这一轮说了什么。",
+              items: ["不拼接系统策略", "不拼接记忆", "不拼接工具说明"]
+            },
+            {
+              code: "tool_result",
+              title: "工具结果",
+              summary: "只有工具执行后的 follow-up LLM call 才出现，包含 assistant tool_calls 与真实 tool messages。",
+              items: ["点击工具结果块时查看这一层", "结果长文本应摘要展示", "原始结果留在 tool_calls / 日志"]
+            }
+          ].map((layer, index) => (
+            <article className={`context-layer-card ${layer.key ?? layer.code}`} key={layer.key ?? layer.code}>
               <b>{index + 1}</b>
-              <strong>{name}</strong>
-              <span>{desc}</span>
-            </div>
+              <div>
+                <strong>{layer.title}</strong>
+                <code>{layer.code}</code>
+                <p>{layer.summary}</p>
+                <ul>
+                  {layer.items.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            </article>
           ))}
+        </div>
+        <div className="context-memory-detail">
+          <div className="memory-detail-heading">
+            <strong>memory 分区展开</strong>
+            <span>自动注入的是索引和摘要；详情靠 readMemory / readSkill 渐进读取</span>
+          </div>
+          <div className="memory-detail-grid">
+            {[
+              ["crossWorkspaceImpressionMemory", "跨工作空间印象记忆", "最新有效 20 条投影", "用户印象与 Agent 自我印象；默认不做 query 筛选，详情未注入，必要时用 readMemory。"],
+              ["currentWorkspaceResultEvents", "当前工作空间结果事件", "约 50 条旧结果时间线", "记录过去完成了什么、失败了什么、产出在哪里；不复制原始对话。"],
+              ["currentWorkspaceRelevantProcessEvents", "当前工作空间相关过程事件", "少量 FTS 相关过程索引", "只给 id/title/summary/readMemory 提示；过程 detail 不直接进入上下文。"],
+              ["currentWorkspaceSkillMemory", "当前工作空间经验记忆", "近 N 条名称和简介", "先看简介判断相关性；高度相关时调用 readSkill 读取 procedure/appliesWhen/avoidWhen。"]
+            ].map(([code, title, badge, desc]) => (
+              <article key={code}>
+                <div>
+                  <strong>{title}</strong>
+                  <small>{badge}</small>
+                </div>
+                <code>{code}</code>
+                <p>{desc}</p>
+              </article>
+            ))}
+          </div>
+          <div className="progressive-disclosure">
+            <span>summary_only</span>
+            <span>detailInjected=false</span>
+            <span>detailAvailable=true</span>
+            <span>readMemory(memoryId)</span>
+            <span>readSkill(skillId)</span>
+          </div>
+        </div>
+        <div className="prompt-assembly-lane">
+          <div>
+            <strong>Provider request</strong>
+            <span>system message</span>
+            <span>synthetic tool results: workspace / memory / local_conversation</span>
+            <span>clean user message</span>
+          </div>
+          <div>
+            <strong>Function calling</strong>
+            <span>顶层 tools 数组暴露 schema</span>
+            <span>assistant tool_calls</span>
+            <span>tool messages 回到 follow-up call</span>
+          </div>
+          <div>
+            <strong>UI trace only</strong>
+            <span>原始 messagesJson / toolsJson</span>
+            <span>response/status/endpoint/model</span>
+            <span>final_messages 只是日志，不是上下文层</span>
+          </div>
         </div>
         <p className="concept-note">
           原始日志是 UI/trace 里的调试快照，用来按同一个 llmCallId 查看发给 provider 的 messages、tools 和返回状态；它不是新的上下文层，也不会被再次塞回 LLM。
