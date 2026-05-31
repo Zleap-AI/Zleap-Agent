@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 08:27 +08:00
+
+Purpose:
+- Make existing and cached function-call/tool-result process messages show concrete parameters and result summaries instead of tool names only.
+
+Changed:
+- Updated `src/web/main.tsx` to reconstruct process preview items from the associated LLM response and `tool_calls` trace logs when cached messages do not already include structured process items.
+- Added argument/result summarizers for common tool payloads such as search queries, shell commands, stdout, summaries, snippets, and errors.
+- Updated process previews/details to use reconstructed items so collapsed rows can show what `metasoSearch` searched for and what each tool roughly returned.
+- Updated `ZLEAP_MASTER_PLAN.md` with the fallback trace reconstruction requirement for older cached process messages.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
+
+Git:
+- Recorded in the Git commit titled `fix: recover process event details`.
+
 ## 2026-05-31 08:23 +08:00
 
 Purpose:

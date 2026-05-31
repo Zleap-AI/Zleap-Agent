@@ -113,9 +113,116 @@ function messageRoleLabel(item: ChatMessage): string {
   return item.role;
 }
 
-function processMessageSummary(item: ChatMessage): string {
+function trimOneLine(value: string, maxLength = 180): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+function summarizeArgumentsPreview(argumentsJson: string | undefined): string {
+  if (!argumentsJson) return "";
+  try {
+    const parsed = JSON.parse(argumentsJson) as Record<string, unknown>;
+    const preferredKeys = ["query", "q", "keyword", "keywords", "command", "url", "path", "workspaceId", "summary", "title"];
+    for (const key of preferredKeys) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim()) return trimOneLine(value);
+      if (Array.isArray(value) && value.length > 0) return trimOneLine(value.map((item) => String(item)).join(", "));
+    }
+    return trimOneLine(JSON.stringify(parsed));
+  } catch {
+    return trimOneLine(argumentsJson);
+  }
+}
+
+function extractResultText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return value.length === 0 ? "空结果" : `${value.length} 条结果：${extractResultText(first)}`;
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const preferredKeys = ["error", "stdout", "output", "summary", "answer", "text", "content", "snippet", "description", "title", "url"];
+    for (const key of preferredKeys) {
+      const item = record[key];
+      if (typeof item === "string" && item.trim()) return item;
+    }
+    for (const item of Object.values(record)) {
+      const extracted = extractResultText(item);
+      if (extracted && extracted !== "{}") return extracted;
+    }
+    return JSON.stringify(record);
+  }
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function summarizeResultPreview(resultJson: string | undefined): string {
+  if (!resultJson) return "";
+  try {
+    return trimOneLine(extractResultText(JSON.parse(resultJson)), 220);
+  } catch {
+    return trimOneLine(resultJson, 220);
+  }
+}
+
+function processItemFromToolLog(log: ToolCallLog, eventKind?: string): WorkspaceProcessItem {
+  const argumentSummary = summarizeArgumentsPreview(log.argumentsJson);
+  const resultSummary = summarizeResultPreview(log.resultJson);
+  return {
+    toolName: log.toolName,
+    argumentsJson: log.argumentsJson,
+    resultJson: log.resultJson,
+    status: log.status,
+    summary: eventKind === "tool_result"
+      ? `${log.toolName}${resultSummary ? `: ${resultSummary}` : ""}`
+      : `${log.toolName}${argumentSummary ? ` ${argumentSummary}` : ""}`
+  };
+}
+
+function processItemsFromLlmCall(call: LLMCallSnapshot | undefined): WorkspaceProcessItem[] {
+  if (!call) return [];
+  const parsed = parseJsonText(call.responseJson) as { message?: { tool_calls?: Array<{ function?: { name?: unknown; arguments?: unknown } }> } };
+  const toolCalls = parsed?.message?.tool_calls;
+  if (!Array.isArray(toolCalls)) return [];
+  return toolCalls
+    .map((toolCall) => {
+      const toolName = typeof toolCall.function?.name === "string" ? toolCall.function.name : "tool";
+      const argumentsJson = typeof toolCall.function?.arguments === "string" ? toolCall.function.arguments : "";
+      return {
+        toolName,
+        argumentsJson,
+        summary: `${toolName}${summarizeArgumentsPreview(argumentsJson) ? ` ${summarizeArgumentsPreview(argumentsJson)}` : ""}`
+      };
+    });
+}
+
+function processItemsForMessage(
+  item: ChatMessage,
+  llmCallId: string,
+  llmCalls: LLMCallSnapshot[],
+  toolCalls: ToolCallLog[]
+): WorkspaceProcessItem[] {
+  if (item.processItems?.length) return item.processItems;
+  if (item.eventKind !== "tool_call" && item.eventKind !== "tool_result") return [];
+
+  if (item.eventKind === "tool_call") {
+    const fromLlm = processItemsFromLlmCall(llmCalls.find((call) => call.id === llmCallId));
+    if (fromLlm.length > 0) return fromLlm;
+  }
+
+  const names = item.toolNames ?? [];
+  const expectedCount = Math.max(1, names.length);
+  return toolCalls
+    .filter((log) => (!item.workspaceId || log.workspaceId === item.workspaceId)
+      && (names.length === 0 || names.includes(log.toolName)))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .slice(0, expectedCount)
+    .map((log) => processItemFromToolLog(log, item.eventKind));
+}
+
+function processMessageSummary(item: ChatMessage, processItems: WorkspaceProcessItem[] = []): string {
   const workspaceId = item.workspaceId ?? "main";
-  const toolCount = item.toolNames?.length ?? 0;
+  const toolCount = processItems.length || item.toolNames?.length || 0;
   if (item.eventKind === "entered") return `进入 ${workspaceId} 工作空间`;
   if (item.eventKind === "exit") return `${workspaceId} 工作空间已返回主流程`;
   if (item.eventKind === "tool_call") return `已运行 ${toolCount || 1} 条函数调用`;
@@ -138,15 +245,15 @@ function processItemLine(item: WorkspaceProcessItem, eventKind?: string): string
   return item.summary;
 }
 
-function processMessageDetail(item: ChatMessage): string {
-  if (item.processItems?.length) {
+function processMessageDetail(item: ChatMessage, processItems: WorkspaceProcessItem[] = []): string {
+  if (processItems.length) {
     const header = [
       item.title ? `标题：${item.title}` : "",
       item.workspaceId ? `工作空间：${item.workspaceId}` : "",
       item.eventKind ? `事件：${item.eventKind}` : "",
       item.status ? `状态：${item.status}` : ""
     ].filter(Boolean).join("\n");
-    const details = item.processItems.map((processItem, index) => {
+    const details = processItems.map((processItem, index) => {
       const content = item.eventKind === "tool_result"
         ? prettyJsonText(processItem.resultJson)
         : prettyJsonText(processItem.argumentsJson);
@@ -1185,6 +1292,7 @@ function ChatTab() {
         <div className="message-list">
           {messages.map((item, index) => {
             const inferredLlmCallId = inferMessageLlmCallId(item, index, messages, llmCalls, traceSegments);
+            const processItems = processItemsForMessage(item, inferredLlmCallId, llmCalls, trace?.toolCalls ?? []);
             const clickable = Boolean(inferredLlmCallId || item.turnOutput);
             return (
             <article
@@ -1209,14 +1317,14 @@ function ChatTab() {
                   <details className="process-details">
                     <summary>
                       <span className="process-icon">▻</span>
-                      <span>{processMessageSummary(item)}</span>
+                      <span>{processMessageSummary(item, processItems)}</span>
                       {item.workspaceId && <small>{item.workspaceId}</small>}
                     </summary>
-                    <pre>{processMessageDetail(item)}</pre>
+                    <pre>{processMessageDetail(item, processItems)}</pre>
                   </details>
-                  {item.processItems?.length ? (
+                  {processItems.length ? (
                     <div className="process-preview">
-                      {item.processItems.map((processItem, processIndex) => (
+                      {processItems.map((processItem, processIndex) => (
                         <div className="process-preview-row" key={`${processItem.toolName}-${processIndex}`}>
                           {processItemLine(processItem, item.eventKind)}
                         </div>
