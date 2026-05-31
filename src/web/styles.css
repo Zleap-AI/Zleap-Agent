@@ -664,6 +664,13 @@ textarea {
   background: #ffffff;
 }
 
+.raw-context-view {
+  border: 1px solid #d7dee7;
+  border-radius: 6px;
+  background: #0f1720;
+  overflow: hidden;
+}
+
 .context-substack details {
   border-color: #e6ebef;
 }
@@ -873,6 +880,9 @@ pre {
 
 .raw-json {
   white-space: pre;
+  color: #e8eef5;
+  background: transparent;
+  max-height: 520px;
 }
 
 .workspace-grid {

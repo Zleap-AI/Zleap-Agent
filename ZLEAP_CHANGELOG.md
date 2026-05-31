@@ -2,6 +2,25 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 08:14 +08:00
+
+Purpose:
+- Fix the Chat context inspector raw-log UI so raw mode shows only the original LLM messages log directly, instead of showing the numbered context stack or requiring another expand click.
+
+Changed:
+- Updated `src/web/main.tsx` so structured mode shows the numbered context stack without `final_messages`, while raw-log mode hides that stack and renders only the saved `final_messages` content in a direct raw text view.
+- Updated `src/web/styles.css` for the direct raw log panel.
+- Updated `ZLEAP_MASTER_PLAN.md`, `docs/07-context-and-prompt-contracts.md`, `docs/README.md`, and `zleap-agent-framework.md` to clarify that raw provider-log mode hides the structured stack and directly displays `final_messages`.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
+
+Git:
+- Recorded in the Git commit titled `fix: show raw llm log directly`.
+
 ## 2026-05-31 08:06 +08:00
 
 Purpose:

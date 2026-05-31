@@ -107,4 +107,4 @@ Stable Agent Identity = LLM
 9. main workspace 通过 runtime 注入的 manifest 了解所有 workspace，不通过 `listWorkspaces` 工具发现。
 10. 代码负责身份、scope、权限、工具可见性和持久化边界；模型只在当前暴露的边界内做选择。
 11. 上下文只注入真实需要的投影视图：impression 固定最新 20 条，旧对话通过约 50 条 result event 和少量相关 process event 承接，原始明细留在日志和数据库。
-12. `final_messages` 是原始 provider payload 日志，不是正常结构化上下文堆栈的一层；Web UI 的“显示原始日志”应把整个堆栈切换成原始文本模式，而不是额外追加一个 raw 日志栏。
+12. `final_messages` 是原始 provider payload 日志，不是正常结构化上下文堆栈的一层；Web UI 的“显示原始日志”应隐藏编号堆栈并直接显示这份原始 JSON/text，不需要再点击展开。
