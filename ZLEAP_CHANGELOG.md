@@ -220,7 +220,7 @@ Verification:
 - `npm run build` passed.
 
 Git:
-- Pending in this work session.
+- Recorded in commit `6f67690 fix: show skill disclosure in context`.
 
 ## 2026-05-31 07:25 +08:00
 
@@ -684,6 +684,27 @@ Verification:
 - `npm test` passed.
 - `npm run build` passed.
 - In-app browser verification could not complete because Browser Use rejected the localhost action under its URL policy.
+
+Git:
+- Pending in this work session.
+
+## 2026-05-31 09:02 +08:00
+
+Purpose:
+- Clarify whether Skill progressive disclosure is actually injected into the context stack and make the UI show that state directly.
+
+Changed:
+- Verified against the local SQLite trace that child workspace LLM calls can contain `currentWorkspaceSkillMemory` with `summary_only` and `readSkill`, while `main` calls may correctly show zero workspace-scoped Skill records.
+- Added a structured memory-context renderer in the Chat right panel.
+- Made the Skill memory section show the injected Skill title/summary, disclosure mode, `readSkill` tool hint, relation id, confidence, and id without requiring raw JSON reading.
+- Added an empty-state explanation for Skill memory when the selected LLM call has no active-workspace Skill recall.
+- Updated `ZLEAP_MASTER_PLAN.md` so context-stack Skill disclosure visibility is part of the UI contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- `/api/health` returned `{ "ok": true }` on `http://localhost:4173/`.
 
 Git:
 - Pending in this work session.

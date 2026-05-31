@@ -699,6 +699,110 @@ textarea {
   background: #fbfcfd;
 }
 
+.memory-context-view {
+  display: grid;
+  gap: 10px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.memory-context-section {
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  background: #fbfcfd;
+  overflow: hidden;
+}
+
+.memory-context-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  background: #f8fafb;
+  cursor: pointer;
+}
+
+.memory-context-section > summary span {
+  font-weight: 600;
+}
+
+.memory-context-section > summary small,
+.memory-context-note,
+.memory-context-empty,
+.skill-disclosure-meta {
+  color: #5c6975;
+}
+
+.memory-context-note {
+  margin: 10px 10px 8px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.memory-context-empty {
+  margin: 0 10px 10px;
+  padding: 10px;
+  border: 1px dashed #ccd5df;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.skill-disclosure-list {
+  display: grid;
+  gap: 8px;
+  margin: 0 10px 10px;
+}
+
+.skill-disclosure-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.skill-disclosure-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.skill-disclosure-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.skill-disclosure-head span {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: #174ea6;
+  font-size: 12px;
+}
+
+.skill-disclosure-card p {
+  margin: 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.skill-disclosure-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12px;
+}
+
+.skill-disclosure-meta code {
+  overflow-wrap: anywhere;
+}
+
 .json-object {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

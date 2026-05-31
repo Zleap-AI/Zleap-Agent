@@ -1884,6 +1884,9 @@ function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
     parsed
     && typeof parsed === "object"
   ) {
+    if (segment.segmentType === "memory" && isJsonRecord(parsed)) {
+      return <MemoryContextView memory={parsed} />;
+    }
     if (!Array.isArray(parsed) && ["workspace", "tools", "memory", "history"].includes(segment.segmentType)) {
       return (
         <div className="context-substack">
@@ -1901,6 +1904,85 @@ function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
     return <JsonValueView value={parsed} />;
   }
   return <pre>{segment.content}</pre>;
+}
+
+function MemoryContextView({ memory }: { memory: Record<string, unknown> }) {
+  const sections = [
+    {
+      key: "crossWorkspaceImpressionMemory",
+      title: "跨工作空间印象记忆",
+      note: "每轮强制载入最近有效印象，不做选择性召回。",
+      empty: "本次没有注入用户/Agent 印象记忆。"
+    },
+    {
+      key: "currentWorkspaceResultEvents",
+      title: "当前工作空间结果事件记忆",
+      note: "用于长对话的结果连续性，只注入压缩后的旧结果。",
+      empty: "本次没有注入旧结果事件。"
+    },
+    {
+      key: "currentWorkspaceRelevantProcessEvents",
+      title: "当前工作空间相关过程事件记忆",
+      note: "只召回与当前任务相关的过程片段，避免把无关旧过程塞进窗口。",
+      empty: "本次没有召回相关过程事件。"
+    },
+    {
+      key: "currentWorkspaceSkillMemory",
+      title: "当前工作空间经验记忆",
+      note: "渐进式披露：这里只注入 Skill 名称和简介；高度相关时由 Agent 调用 readSkill 读取完整步骤。",
+      empty: "当前 LLM 调用没有注入 Skill 简介。通常表示当前工作空间没有 Skill、策略关闭、上限为 0，或你正在查看 main 调用而 Skill 属于子工作空间。"
+    }
+  ];
+
+  return (
+    <div className="memory-context-view">
+      {sections.map((section) => {
+        const value = memory[section.key];
+        const rows = Array.isArray(value) ? value : [];
+        const isSkillSection = section.key === "currentWorkspaceSkillMemory";
+        return (
+          <details className="memory-context-section" key={section.key} open>
+            <summary>
+              <span>{section.title}</span>
+              <small>{rows.length} 条</small>
+            </summary>
+            <p className="memory-context-note">{section.note}</p>
+            {rows.length === 0
+              ? <div className="memory-context-empty">{section.empty}</div>
+              : isSkillSection
+                ? <SkillDisclosureList skills={rows} />
+                : <JsonValueView value={rows} />}
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+function SkillDisclosureList({ skills }: { skills: unknown[] }) {
+  return (
+    <div className="skill-disclosure-list">
+      {skills.map((skill, index) => {
+        const record = isJsonRecord(skill) ? skill : {};
+        return (
+          <div className="skill-disclosure-card" key={`${String(record.id ?? index)}-${index}`}>
+            <div className="skill-disclosure-head">
+              <strong>{String(record.title ?? `Skill ${index + 1}`)}</strong>
+              <span>{String(record.disclosure ?? "summary_only") === "summary_only" ? "只注入简介" : String(record.disclosure ?? "已注入")}</span>
+            </div>
+            <p>{String(record.summary ?? "没有简介。")}</p>
+            <div className="skill-disclosure-meta">
+              <span>读取详情工具：<code>{String(record.readTool ?? "readSkill")}</code></span>
+              {record.workspaceId !== undefined && <span>工作空间：<code>{String(record.workspaceId)}</code></span>}
+              {record.relationId !== undefined && <span>关系 ID：<code>{String(record.relationId)}</code></span>}
+              {record.confidence !== undefined && <span>置信度：<code>{String(record.confidence)}</code></span>}
+              {record.id !== undefined && <span>ID：<code>{String(record.id)}</code></span>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function RawContextLog({ segment }: { segment?: ContextSegment }) {
