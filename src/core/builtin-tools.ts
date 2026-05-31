@@ -6,6 +6,9 @@ import type { ToolExecutionResult } from "./tool-registry";
 const ignoredDirs = new Set([".git", "node_modules", "dist", "data"]);
 const maxSearchResults = 50;
 const maxFileBytes = 1024 * 1024;
+const maxReadFileBytes = 512 * 1024;
+const defaultCommandTimeoutMs = 30_000;
+const maxCommandTimeoutMs = 120_000;
 
 export async function executeSearchFiles(argumentsJson: string): Promise<ToolExecutionResult> {
   const args = safeJson(argumentsJson) as { query?: unknown };
@@ -59,24 +62,136 @@ export async function executeSearchFiles(argumentsJson: string): Promise<ToolExe
 }
 
 export async function executeRunCommand(argumentsJson: string): Promise<ToolExecutionResult> {
-  const args = safeJson(argumentsJson) as { command?: unknown };
+  const args = safeJson(argumentsJson) as { command?: unknown; cwd?: unknown; timeoutMs?: unknown; reason?: unknown };
   const command = typeof args.command === "string" ? args.command.trim() : "";
   if (!command) {
     return { ok: false, status: "failed", result: { error: "runCommand requires command." } };
   }
+  const root = process.cwd();
+  const cwdResult = resolveWorkspacePath(root, typeof args.cwd === "string" ? args.cwd : ".");
+  if (!cwdResult.ok) {
+    return { ok: false, status: "failed", result: { error: cwdResult.error } };
+  }
+  const requestedTimeout = typeof args.timeoutMs === "number" && Number.isFinite(args.timeoutMs) ? args.timeoutMs : defaultCommandTimeoutMs;
+  const timeoutMs = Math.max(1_000, Math.min(maxCommandTimeoutMs, Math.trunc(requestedTimeout)));
   const startedAt = new Date().toISOString();
-  const result = await runShellCommand(command);
+  const result = await runShellCommand(command, cwdResult.fullPath, timeoutMs);
   return {
     ok: result.exitCode === 0,
     status: result.exitCode === 0 ? "completed" : "failed",
     result: {
       command,
-      cwd: process.cwd(),
+      reason: typeof args.reason === "string" ? args.reason : undefined,
+      cwd: cwdResult.relativePath || ".",
       startedAt,
       completedAt: new Date().toISOString(),
+      timeoutMs,
       ...result
     }
   };
+}
+
+export async function executeReadFile(argumentsJson: string): Promise<ToolExecutionResult> {
+  const args = safeJson(argumentsJson) as { path?: unknown; startLine?: unknown; maxLines?: unknown; reason?: unknown };
+  const requestedPath = typeof args.path === "string" ? args.path.trim() : "";
+  if (!requestedPath) {
+    return { ok: false, status: "failed", result: { error: "readFile requires path." } };
+  }
+  const root = process.cwd();
+  const resolved = resolveWorkspacePath(root, requestedPath);
+  if (!resolved.ok) {
+    return { ok: false, status: "failed", result: { error: resolved.error } };
+  }
+  try {
+    const stat = await fs.stat(resolved.fullPath);
+    if (!stat.isFile()) {
+      return { ok: false, status: "failed", result: { error: "readFile path is not a file.", path: resolved.relativePath } };
+    }
+    if (stat.size > maxReadFileBytes) {
+      return {
+        ok: false,
+        status: "failed",
+        result: {
+          error: "readFile refuses very large files. Use searchFiles or a narrower file operation first.",
+          path: resolved.relativePath,
+          bytes: stat.size,
+          maxBytes: maxReadFileBytes
+        }
+      };
+    }
+    const content = await fs.readFile(resolved.fullPath, "utf8");
+    const lines = content.split(/\r?\n/);
+    const startLine = typeof args.startLine === "number" && Number.isFinite(args.startLine)
+      ? Math.max(1, Math.trunc(args.startLine))
+      : 1;
+    const maxLines = typeof args.maxLines === "number" && Number.isFinite(args.maxLines)
+      ? Math.max(1, Math.min(500, Math.trunc(args.maxLines)))
+      : 200;
+    const selected = lines.slice(startLine - 1, startLine - 1 + maxLines);
+    const lineEnd = startLine + selected.length - 1;
+    const truncated = lineEnd < lines.length;
+    return {
+      ok: true,
+      status: "completed",
+      result: {
+        path: resolved.relativePath,
+        reason: typeof args.reason === "string" ? args.reason : undefined,
+        bytes: stat.size,
+        startLine,
+        endLine: lineEnd,
+        totalLines: lines.length,
+        truncated,
+        content: selected.join("\n")
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "failed",
+      result: { error: error instanceof Error ? error.message : String(error), path: resolved.relativePath }
+    };
+  }
+}
+
+export async function executeWriteFile(argumentsJson: string): Promise<ToolExecutionResult> {
+  const args = safeJson(argumentsJson) as { path?: unknown; content?: unknown; createDirs?: unknown; reason?: unknown };
+  const requestedPath = typeof args.path === "string" ? args.path.trim() : "";
+  if (!requestedPath) {
+    return { ok: false, status: "failed", result: { error: "writeFile requires path." } };
+  }
+  if (typeof args.content !== "string") {
+    return { ok: false, status: "failed", result: { error: "writeFile requires string content.", path: requestedPath } };
+  }
+  const root = process.cwd();
+  const resolved = resolveWorkspacePath(root, requestedPath);
+  if (!resolved.ok) {
+    return { ok: false, status: "failed", result: { error: resolved.error } };
+  }
+  try {
+    const before = await fs.stat(resolved.fullPath).catch(() => undefined);
+    if (before && !before.isFile()) {
+      return { ok: false, status: "failed", result: { error: "writeFile path exists but is not a file.", path: resolved.relativePath } };
+    }
+    if (args.createDirs === true) await fs.mkdir(path.dirname(resolved.fullPath), { recursive: true });
+    await fs.writeFile(resolved.fullPath, args.content, "utf8");
+    return {
+      ok: true,
+      status: "completed",
+      result: {
+        path: resolved.relativePath,
+        reason: typeof args.reason === "string" ? args.reason : undefined,
+        bytes: Buffer.byteLength(args.content, "utf8"),
+        created: !before,
+        updated: Boolean(before)
+      }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "failed",
+      result: { error: error instanceof Error ? error.message : String(error), path: resolved.relativePath }
+    };
+  }
 }
 
 async function findContentMatch(filePath: string, lowerQuery: string): Promise<string | undefined> {
@@ -95,11 +210,11 @@ async function findContentMatch(filePath: string, lowerQuery: string): Promise<s
   }
 }
 
-function runShellCommand(command: string): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
+function runShellCommand(command: string, cwd: string, timeoutMs: number): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     exec(command, {
-      cwd: process.cwd(),
-      timeout: 30_000,
+      cwd,
+      timeout: timeoutMs,
       maxBuffer: 1024 * 1024,
       windowsHide: true
     }, (error, stdout, stderr) => {
@@ -113,6 +228,22 @@ function runShellCommand(command: string): Promise<{ exitCode: number; stdout: s
       });
     });
   });
+}
+
+function resolveWorkspacePath(root: string, requestedPath: string): { ok: true; fullPath: string; relativePath: string } | { ok: false; error: string } {
+  const fullPath = path.resolve(root, requestedPath);
+  const insideRoot = fullPath === root || fullPath.startsWith(root + path.sep);
+  if (!insideRoot) {
+    return {
+      ok: false,
+      error: `Path is outside the workspace root: ${requestedPath}`
+    };
+  }
+  return {
+    ok: true,
+    fullPath,
+    relativePath: path.relative(root, fullPath)
+  };
 }
 
 function safeJson(value: string): unknown {

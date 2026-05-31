@@ -66,6 +66,15 @@ function summarizeToolArgumentsForChat(argumentsJson: string, maxLength = 180): 
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
 }
 
+function extractToolReason(argumentsJson: string): string | undefined {
+  try {
+    const parsed = JSON.parse(argumentsJson) as Record<string, unknown>;
+    return typeof parsed.reason === "string" && parsed.reason.trim() ? parsed.reason.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function summarizeToolCallForChat(toolCall: LLMToolCall): string {
   const args = summarizeToolArgumentsForChat(toolCall.function.arguments);
   return args ? `${toolCall.function.name} ${args}` : toolCall.function.name;
@@ -371,6 +380,7 @@ export class AgentRuntime {
           if (activeWorkspaceBeforeTools !== "main" && toolCalls.length > 0) {
             const toolCallItems = toolCalls.map((toolCall) => ({
               toolName: toolCall.function.name,
+              reason: extractToolReason(toolCall.function.arguments),
               summary: summarizeToolCallForChat(toolCall),
               argumentsJson: toolCall.function.arguments
             }));
@@ -390,6 +400,7 @@ export class AgentRuntime {
           if (activeWorkspaceBeforeTools !== "main" && toolExecution.toolMessages.length > 0) {
             const toolResultItems = toolExecution.toolMessages.map((message) => ({
               toolName: message.name ?? "tool",
+              reason: extractToolReason(toolCalls.find((toolCall) => toolCall.id === message.tool_call_id)?.function.arguments ?? ""),
               summary: summarizeToolResultItemForChat(message),
               resultJson: message.content ?? ""
             }));

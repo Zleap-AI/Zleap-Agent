@@ -77,6 +77,7 @@ export type AgentRunPrepared = Omit<AgentRunOutput, "assistantMessage"> & {
 
 export type WorkspaceProcessItem = {
   toolName: string;
+  reason?: string;
   summary: string;
   argumentsJson?: string;
   resultJson?: string;

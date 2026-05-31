@@ -1,4 +1,5 @@
 ﻿import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import Database from "better-sqlite3";
@@ -4111,6 +4112,8 @@ async function testSearchMemoryToolUsesPolicyLayer() {
 async function testToolBindingsAndMcpReadiness() {
   const repos = createRepos();
   const searchFiles = repos.listTools().find((tool) => tool.name === "searchFiles");
+  const readFile = repos.listTools().find((tool) => tool.name === "readFile");
+  const writeFile = repos.listTools().find((tool) => tool.name === "writeFile");
   const runCommand = repos.listTools().find((tool) => tool.name === "runCommand");
   const exitWorkspace = repos.listTools().find((tool) => tool.name === "exitWorkspace");
   const writeUserImpression = repos.listTools().find((tool) => tool.name === "writeUserImpression");
@@ -4119,6 +4122,8 @@ async function testToolBindingsAndMcpReadiness() {
   const readSkill = repos.listTools().find((tool) => tool.name === "readSkill");
   assert.equal(searchFiles?.bindingType, "runtime");
   assert.equal(searchFiles?.mcpServerId, null);
+  assert.equal(readFile?.bindingType, "runtime");
+  assert.equal(writeFile?.bindingType, "runtime");
   assert.equal(runCommand?.bindingType, "runtime");
   assert.equal(runCommand?.mcpToolName, null);
   assert.equal(exitWorkspace?.bindingType, "runtime");
@@ -4151,8 +4156,16 @@ async function testToolBindingsAndMcpReadiness() {
   const writeSkillMemorySchema = JSON.parse(writeSkillMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
   assert.equal(Boolean(writeSkillMemorySchema.properties?.workspaceId), false);
   assert.equal(writeSkillMemorySchema.required?.includes("workspaceId"), false);
+  const runCommandSchema = JSON.parse(runCommand?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  assert.equal(runCommandSchema.required?.includes("reason"), true);
+  assert.equal(Boolean(runCommandSchema.properties?.cwd), true);
+  assert.equal(Boolean(runCommandSchema.properties?.timeoutMs), true);
+  const readFileSchema = JSON.parse(readFile?.parametersJson ?? "{}") as { required?: string[] };
+  const writeFileSchema = JSON.parse(writeFile?.parametersJson ?? "{}") as { required?: string[] };
+  assert.equal(readFileSchema.required?.includes("reason"), true);
+  assert.equal(writeFileSchema.required?.includes("reason"), true);
 
-  const builtinFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "searchFiles", { query: "runtime" });
+  const builtinFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "searchFiles", { reason: "验证 runtime 文件是否存在", query: "runtime" });
   const runtime = new AgentRuntime(repos, builtinFileTool);
   await runtime.run({
     agentId: "default-agent",
@@ -4174,7 +4187,50 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
   assert.equal(fileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status completed")), true);
 
-  const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("dev", "runCommand", { command: "node -e \"console.log('zleap-cli-ok')\"" });
+  const scratchDir = path.resolve("zleap-tool-scratch");
+  await fs.rm(scratchDir, { recursive: true, force: true });
+  const builtinWriteFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "writeFile", {
+    reason: "创建一个可被 readFile 验证的测试文件",
+    path: "zleap-tool-scratch/read-write-test.txt",
+    content: "zleap file tool ok",
+    createDirs: true
+  });
+  const writeFileRuntime = new AgentRuntime(repos, builtinWriteFileTool);
+  await writeFileRuntime.run({
+    agentId: "default-agent",
+    userId: "tool-binding-user",
+    userRole: "creator",
+    conversationId: "conv-tool-binding-write-file-runtime",
+    message: "write a test file",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(builtinWriteFileTool.lastToolResult.includes("\"created\":true"), true);
+
+  const builtinReadFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "readFile", {
+    reason: "读取刚写入的测试文件确认专用文件工具可用",
+    path: "zleap-tool-scratch/read-write-test.txt"
+  });
+  const readFileRuntime = new AgentRuntime(repos, builtinReadFileTool);
+  await readFileRuntime.run({
+    agentId: "default-agent",
+    userId: "tool-binding-user",
+    userRole: "creator",
+    conversationId: "conv-tool-binding-read-file-runtime",
+    message: "read the test file",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(builtinReadFileTool.lastToolResult.includes("zleap file tool ok"), true);
+  await fs.rm(scratchDir, { recursive: true, force: true });
+
+  const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("dev", "runCommand", { reason: "验证命令工具只承担终端执行任务", command: "node -e \"console.log('zleap-cli-ok')\"" });
   const cliRuntime = new AgentRuntime(repos, builtinCliTool);
   await cliRuntime.run({
     agentId: "default-agent",
@@ -4670,6 +4726,8 @@ async function testWorkspaceBoundary() {
   assert.equal(memoryTools.every((tool) => devTools.includes(tool)), true);
   assert.equal(["writeEventMemory", "updateMemory", "deleteMemory"].some((tool) => mainTools.includes(tool) || devTools.includes(tool)), false);
   assert.equal(devTools.includes("searchFiles"), true);
+  assert.equal(devTools.includes("readFile"), true);
+  assert.equal(devTools.includes("writeFile"), true);
   assert.equal(devTools.includes("runCommand"), true);
 }
 

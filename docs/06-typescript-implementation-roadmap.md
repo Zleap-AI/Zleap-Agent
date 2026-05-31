@@ -303,7 +303,8 @@ MVP 可以暂时简化：
 
 - 定义 ToolDefinition。
 - 实现 tool registry。
-- 实现 `dev` 工作空间里的文件搜索和命令执行基础工具。
+- 实现 `dev` 工作空间里的 `searchFiles`、`readFile`、`writeFile` 和 `runCommand` 基础工具，让搜索、读取、写入和命令执行分层，而不是让命令行工具承担所有文件操作。
+- 工具 schema 和 prompt 必须要求模型填写 `reason`，UI 和 `tool_calls` 记录要能看到每次调用的理由、参数和结果摘要。
 - 为 tool call 加入 policy hook。
 
 ### 阶段四：记忆 MVP

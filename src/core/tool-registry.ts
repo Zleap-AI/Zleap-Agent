@@ -4,7 +4,7 @@ import { MemoryService } from "./memory-service";
 import { PolicyEngine } from "./policy-engine";
 import { WorkspaceRuntime } from "./workspace-runtime";
 import { McpToolExecutor } from "./mcp-executor";
-import { executeRunCommand, executeSearchFiles } from "./builtin-tools";
+import { executeReadFile, executeRunCommand, executeSearchFiles, executeWriteFile } from "./builtin-tools";
 
 export type ToolExecutionResult = {
   ok: boolean;
@@ -161,6 +161,20 @@ export class ToolRegistry {
         return { ok: false, status: "failed", result: { error: "runCommand can only be called from dev workspace." } };
       }
       return executeRunCommand(argumentsJson);
+    }
+
+    if (toolName === "readFile") {
+      if (activeWorkspaceId !== "dev") {
+        return { ok: false, status: "failed", result: { error: "readFile can only be called from dev workspace." } };
+      }
+      return executeReadFile(argumentsJson);
+    }
+
+    if (toolName === "writeFile") {
+      if (activeWorkspaceId !== "dev") {
+        return { ok: false, status: "failed", result: { error: "writeFile can only be called from dev workspace." } };
+      }
+      return executeWriteFile(argumentsJson);
     }
 
     if (this.runtimeMemoryToolNames.has(toolName)) {

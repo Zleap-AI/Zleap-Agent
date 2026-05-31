@@ -140,6 +140,17 @@ function summarizeArgumentsPreview(argumentsJson: string | undefined): string {
   }
 }
 
+function extractToolReason(argumentsJson: string | undefined): string | undefined {
+  if (!argumentsJson) return undefined;
+  try {
+    const parsed = JSON.parse(argumentsJson) as Record<string, unknown>;
+    const reason = parsed.reason;
+    return typeof reason === "string" && reason.trim() ? reason.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function extractResultText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
@@ -176,6 +187,7 @@ function processItemFromToolLog(log: ToolCallLog, eventKind?: string): Workspace
   const resultSummary = summarizeResultPreview(log.resultJson);
   return {
     toolName: log.toolName,
+    reason: extractToolReason(log.argumentsJson),
     argumentsJson: log.argumentsJson,
     resultJson: log.resultJson,
     status: log.status,
@@ -196,6 +208,7 @@ function processItemsFromLlmCall(call: LLMCallSnapshot | undefined): WorkspacePr
       const argumentsJson = typeof toolCall.function?.arguments === "string" ? toolCall.function.arguments : "";
       return {
         toolName,
+        reason: extractToolReason(argumentsJson),
         argumentsJson,
         summary: `${toolName}${summarizeArgumentsPreview(argumentsJson) ? ` ${summarizeArgumentsPreview(argumentsJson)}` : ""}`
       };
@@ -246,8 +259,9 @@ function prettyJsonText(value: string | undefined): string {
 }
 
 function processItemLine(item: WorkspaceProcessItem, eventKind?: string): string {
-  if (eventKind === "tool_call") return `已运行 ${item.summary}`;
-  if (eventKind === "tool_result") return `结果 ${item.summary}`;
+  const reason = item.reason ? `｜理由：${trimOneLine(item.reason, 100)}` : "";
+  if (eventKind === "tool_call") return `已运行 ${item.summary}${reason}`;
+  if (eventKind === "tool_result") return `结果 ${item.summary}${reason}`;
   return item.summary;
 }
 
@@ -266,6 +280,7 @@ function processMessageDetail(item: ChatMessage, processItems: WorkspaceProcessI
       const label = item.eventKind === "tool_result" ? "结果" : "参数";
       return [
         `${index + 1}. ${processItem.toolName}`,
+        processItem.reason ? `理由：${processItem.reason}` : "",
         `摘要：${processItem.summary}`,
         content ? `${label}：\n${content}` : ""
       ].filter(Boolean).join("\n");
