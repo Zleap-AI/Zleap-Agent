@@ -2180,7 +2180,7 @@ function JsonValueView({ value, depth = 0 }: { value: unknown; depth?: number })
                     <td>{index + 1}</td>
                     {columns.map((column) => (
                       <td key={column}>
-                        <JsonTableCell value={row[column]} depth={depth + 1} />
+                        <JsonTableCell value={row[column]} />
                       </td>
                     ))}
                   </tr>
@@ -2228,32 +2228,34 @@ function JsonCell({ value, depth }: { value: unknown; depth: number }) {
   return <JsonValueView value={value} depth={depth} />;
 }
 
-function JsonTableCell({ value, depth }: { value: unknown; depth: number }) {
+function JsonTableCell({ value }: { value: unknown }) {
   const [open, setOpen] = useState(false);
   if (value === undefined) return <span className="json-muted">-</span>;
   const preview = tableCellPreview(value);
-  if (!isJsonScalar(value) || preview.length > 80) {
-    return (
-      <>
-        <button className="json-table-cell-preview-button" type="button" title="点击查看完整内容" onClick={() => setOpen(true)}>
-          <span className="json-table-cell-preview">{preview}</span>
-          <span className="json-cell-open-hint">查看</span>
-        </button>
-        {open && (
-          <div className="json-cell-modal-backdrop" role="presentation" onClick={() => setOpen(false)}>
-            <section className="json-cell-modal" role="dialog" aria-modal="true" aria-label="完整内容" onClick={(event) => event.stopPropagation()}>
-              <header>
-                <strong>完整内容</strong>
-                <button type="button" onClick={() => setOpen(false)}>关闭</button>
-              </header>
-              <pre>{fullJsonText(value)}</pre>
-            </section>
-          </div>
-        )}
-      </>
-    );
-  }
-  return <JsonCell value={value} depth={depth} />;
+  return (
+    <>
+      <button
+        className="json-table-cell-preview-button"
+        type="button"
+        title="点击查看完整内容"
+        aria-label={`查看完整内容：${preview}`}
+        onClick={() => setOpen(true)}
+      >
+        <span className={`json-table-cell-preview ${isJsonScalar(value) ? jsonScalarClass(value) : ""}`}>{preview}</span>
+      </button>
+      {open && (
+        <div className="json-cell-modal-backdrop" role="presentation" onClick={() => setOpen(false)}>
+          <section className="json-cell-modal" role="dialog" aria-modal="true" aria-label="完整内容" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <strong>完整内容</strong>
+              <button type="button" onClick={() => setOpen(false)}>关闭</button>
+            </header>
+            <pre>{fullJsonText(value)}</pre>
+          </section>
+        </div>
+      )}
+    </>
+  );
 }
 
 function tableCellPreview(value: unknown): string {
