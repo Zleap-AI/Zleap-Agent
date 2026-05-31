@@ -110,7 +110,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 - **输入**：用户请求或 main 转移过来的结构化 `WorkspaceTask`。
 - **输出**：结构化 `WorkspaceResult`，字段为 `status`、`summary`、`artifacts`、`observations`、`errors`、`suggestedNextSteps`。
 - **进入 handoff**：runtime 自动带总体要求、当前用户请求和少量用户原话参考进入子 workspace。用户原话是相对原始的任务参考，不是子 workspace 的本地对话；不携带父级 assistant 执行记录、`enterWorkspace` 协议结果、父级工具证据或 sibling workspace 记录。
-- **返回 handoff**：runtime 自动把完整 `WorkspaceResult`、子 workspace 最后助手结论和关键工具结果带回 main。类比软件工程中的产物交付：在 Photoshop 完成图片后放进 PPT，需要的是完整结果图片和必要导出信息，而不是 P 图历史。
+- **返回 handoff**：runtime 自动把完整 `WorkspaceResult`、子 workspace AI 回复摘要、最后助手结论和关键工具结果带回 main。AI 回复摘要只整理子 workspace 已经产生的自然语言 assistant 内容，防止 main 在继续编排时忽略这些已表达的关键判断；它不是完整本地对话，也不是工具执行过程日志。类比软件工程中的产物交付：在 Photoshop 完成图片后放进 PPT，需要的是完整结果图片和必要导出信息，而不是 P 图历史。
 - **忠于结果**：main 整合时必须把子 workspace 的 `WorkspaceResult` 和结果上下文当成权威证据，不能再随意删减、改写或遗漏关键事实。
 - **隔离**：完整 tool call 参数、冗长中间过程、召回的 event/skill、局部证据保留在 trace/debug UI、tool_calls、audit_logs、workspace_sessions 中，不直接污染 main context。子 workspace 的本地对话片段也必须只来自同一个 workspace；main 的编排对话、sibling workspace 的执行记录和 main-only 工具协议消息不能作为普通 history 混进来，只能通过 handoffContext 的受控结果包出现。
 

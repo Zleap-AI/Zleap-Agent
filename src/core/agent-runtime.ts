@@ -971,7 +971,7 @@ export class AgentRuntime {
     };
   }
 
-  private createChildToMainHandoff(input: AgentRunInput, session: WorkspaceSession, toolMessages: LLMMessage[]): WorkspaceHandoffContext {
+  private createChildToMainHandoff(input: AgentRunInput, session: WorkspaceSession, assistantToolMessage: LLMMessage, toolMessages: LLMMessage[]): WorkspaceHandoffContext {
     const tailItems = this.selectWorkspaceRawTail(input.conversationId, session.workspaceId, input.userId, input.userRole, 10);
     const resultItem = {
       kind: "workspace_result" as const,
@@ -979,6 +979,7 @@ export class AgentRuntime {
       content: JSON.stringify(session.result, null, 2),
       workspaceId: session.workspaceId
     };
+    const assistantSummaryItem = this.createWorkspaceAssistantSummaryItem(input, session, assistantToolMessage);
     const exitToolResultItems = toolMessages
       .filter((message) => message.name === "exitWorkspace")
       .map((message) => ({
@@ -999,6 +1000,14 @@ export class AgentRuntime {
       workspaceId: session.workspaceId,
       toolName: toolCall.toolName
     }));
+    const essentialItems = [
+      resultItem,
+      ...(assistantSummaryItem ? [assistantSummaryItem] : [])
+    ];
+    const supportingLimit = Math.max(0, 14 - essentialItems.length);
+    const supportingItems = supportingLimit > 0
+      ? [...tailItems, ...exitToolResultItems, ...toolEvidence].slice(-supportingLimit)
+      : [];
     return {
       id: createId("handoff"),
       direction: "child_to_parent",
@@ -1006,8 +1015,64 @@ export class AgentRuntime {
       toWorkspaceId: "main",
       reason: "workspace_exit",
       createdAt: nowIso(),
-      items: [resultItem, ...tailItems, ...exitToolResultItems, ...toolEvidence].slice(-14)
+      items: [...essentialItems, ...supportingItems]
     };
+  }
+
+  private createWorkspaceAssistantSummaryItem(
+    input: AgentRunInput,
+    session: WorkspaceSession,
+    assistantToolMessage: LLMMessage
+  ): WorkspaceHandoffContext["items"][number] | undefined {
+    const priorTexts = this.selectWorkspaceAssistantTexts(input.conversationId, session.workspaceId, input.userId, input.userRole, 6);
+    const currentText = assistantToolMessage.role === "assistant" && assistantToolMessage.content?.trim()
+      ? assistantToolMessage.content
+      : "";
+    const uniqueTexts: string[] = [];
+    const seen = new Set<string>();
+    for (const text of [...priorTexts, currentText]) {
+      const normalized = summarizeAssistantMessage(text, 700);
+      if (!normalized) continue;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueTexts.push(normalized);
+    }
+    if (uniqueTexts.length === 0) return undefined;
+    const payload = {
+      replyCount: uniqueTexts.length,
+      latestAssistantReplies: uniqueTexts.slice(-5)
+    };
+    return {
+      kind: "message",
+      role: "assistant",
+      title: "子工作空间 AI 回复摘要",
+      content: truncateHandoffContent(JSON.stringify(payload, null, 2), 1800),
+      workspaceId: session.workspaceId
+    };
+  }
+
+  private selectWorkspaceAssistantTexts(conversationId: string, workspaceId: string, userId: string, userRole: AgentRunInput["userRole"], limit: number): string[] {
+    const trace = this.repos.getTrace(conversationId, userId, userRole);
+    const workspaceCallIds = new Set(
+      trace.contextSegments
+        .filter((segment) => segment.segmentType === "workspace")
+        .filter((segment) => {
+          const payload = parseJsonValue<{ currentWorkspace?: { id?: string } }>(segment.content, {});
+          return payload.currentWorkspace?.id === workspaceId;
+        })
+        .map((segment) => segment.llmCallId)
+    );
+    const texts: string[] = [];
+    for (const segment of trace.contextSegments.filter((item) => item.segmentType === "final_messages" && workspaceCallIds.has(item.llmCallId))) {
+      const messages = parseJsonValue<LLMMessage[]>(segment.content, []);
+      for (const message of messages) {
+        if (message.role === "assistant" && message.content?.trim()) {
+          texts.push(message.content);
+        }
+      }
+    }
+    return texts.slice(-limit);
   }
 
   private selectWorkspaceRawTail(conversationId: string, workspaceId: string, userId: string, userRole: AgentRunInput["userRole"], limit: number): WorkspaceHandoffContext["items"] {
@@ -1325,7 +1390,7 @@ export class AgentRuntime {
     if (!mainSession) return undefined;
     const agent = this.repos.getAgent(input.agentId);
     const llmCallId = createId("llm");
-    const handoffContext = this.createChildToMainHandoff(input, session, toolMessages);
+    const handoffContext = this.createChildToMainHandoff(input, session, assistantToolMessage, toolMessages);
     mainSession.localContext.handoffContext = [
       handoffContext,
       ...(mainSession.localContext.handoffContext ?? [])

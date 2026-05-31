@@ -161,7 +161,7 @@ class MainToFileExitToMainLLMClient implements LLMClient {
       return {
         message: {
           role: "assistant",
-          content: null,
+          content: "我已经检查 dev 工作空间的证据能力，确认可以把搜索结论和后续建议交回 main。",
           tool_calls: [{
             id: "call-exit-file",
             type: "function",
@@ -2187,6 +2187,8 @@ async function testWorkspaceExitReturnsToMain() {
   const returnedMainPayload = JSON.parse(returnedMainLocalMessage?.content ?? "{}") as { crossWorkspaceHandoffContext?: Array<{ direction: string; items: Array<{ kind: string; title: string; content: string }> }> };
   assert.equal(returnedMainPayload.crossWorkspaceHandoffContext?.some((packet) => packet.direction === "child_to_parent"), true);
   assert.equal(JSON.stringify(returnedMainPayload.crossWorkspaceHandoffContext).includes("File workspace inspected available evidence"), true);
+  assert.equal(JSON.stringify(returnedMainPayload.crossWorkspaceHandoffContext).includes("子工作空间 AI 回复摘要"), true);
+  assert.equal(JSON.stringify(returnedMainPayload.crossWorkspaceHandoffContext).includes("确认可以把搜索结论和后续建议交回 main"), true);
   assert.equal(JSON.stringify(returnedMainPayload.crossWorkspaceHandoffContext).includes("\"kind\":\"tool_call\""), false);
   assert.equal(JSON.stringify(returnedMainPayload.crossWorkspaceHandoffContext).includes("enterWorkspace"), false);
   assert.equal(output.assistantMessage, "main integrated file result");

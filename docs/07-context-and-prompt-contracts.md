@@ -42,7 +42,7 @@ Provider messages 必须保持同样边界。System message 只包含 system/per
 
 子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时模型只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`，runtime 再自动附加有上限的结果型 `handoffContext`。
 
-main workspace 可以看到的返回内容包括完整 `WorkspaceResult`：`status`、`summary`、`artifacts`、`observations`、`errors`、`suggestedNextSteps`，以及 runtime 生成的结果上下文尾巴：最后助手结论和关键工具结果。这些字段用于继续编排、决定是否进入下一个 workspace、向用户提问，或生成最终答复。main 必须忠于这些结果上下文，不能随意再做一层删减导致事实损耗。
+main workspace 可以看到的返回内容包括完整 `WorkspaceResult`：`status`、`summary`、`artifacts`、`observations`、`errors`、`suggestedNextSteps`，以及 runtime 生成的结果上下文尾巴：AI 回复摘要、最后助手结论和关键工具结果。AI 回复摘要只整理当前子 workspace 已经产生的自然语言 assistant 内容，帮助 main 不遗漏子 workspace 已表达过的关键判断；它不是子 workspace 的完整本地对话，也不是工具执行过程日志。这些字段用于继续编排、决定是否进入下一个 workspace、向用户提问，或生成最终答复。main 必须忠于这些结果上下文，不能随意再做一层删减导致事实损耗。
 
 子 workspace 内部保留的内容包括完整 tool call 参数、冗长中间过程、召回的 event/skill、局部 scratch/evidence、审计日志和 memory 提取证据。这些内容进入 trace/debug UI，而不是默认进入 main workspace 的 prompt。这样 main workspace 得到的是可决策的交付物和必要结果上下文，不会被子 workspace 的全部执行噪声污染。
 

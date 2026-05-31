@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 06:17 +08:00
+
+目的：
+- 让子工作空间返回 main 的 `handoffContext` 不只包含结构化结果和工具证据，也包含 AI 已经在子工作空间里回复过的信息摘要，减少 main 继续编排时的信息损耗。
+
+变更：
+- `createChildToMainHandoff` 新增“子工作空间 AI 回复摘要”交接项，从同一子工作空间已保存的 assistant 内容和本次 `exitWorkspace` assistant message 中程序化整理有上限摘要。
+- 调整 handoff 裁剪逻辑，保证 `WorkspaceResult` 和 AI 回复摘要不会被尾部工具证据挤掉。
+- 更新系统运行策略提示词、主计划、工作空间 runtime 文档、上下文契约文档和概念框架文档，统一说明 AI 回复摘要属于结果型 handoff，不是完整本地历史或工具过程日志。
+- 增加 runtime 测试，确认返回 main 的 `crossWorkspaceHandoffContext` 能看到子工作空间 AI 回复摘要。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 06:09 +08:00
 
 目的：
