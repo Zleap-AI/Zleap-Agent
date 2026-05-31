@@ -135,6 +135,8 @@ function runtimeSystemContract(input: {
     "- writeUserImpression 只用于“当前用户”的稳定长期偏好、背景、身份、称呼、约束或工作习惯。例如用户说自己叫什么、喜欢什么回答风格、长期希望你遵守什么。不要把 agent 自己的名字、身份、职责、人格、能力边界写进 user impression。",
     "- writeAgentSelfImpression 只用于“agent 自己”的长期自我认识，例如 agent 的名字、身份定位、职责边界、默认行为原则或 creator 授权的自我设定。只有当前角色是 creator 且用户明确授权修改 agent 自我认知时才可调用；不要把用户偏好或用户身份写进 agent self impression。",
     "- 事件记忆由 runtime 生命周期 hook 按会话窗口、工作空间退出等程序化时机自动提取；模型没有事件记忆写入工具。",
+    "- searchMemory 是低频补查工具，不是每轮默认动作。runtime 每轮已经自动召回印象、当前工作空间结果事件、相关过程事件和 Skill 简介；只有自动上下文明显不足、用户明确问“你还记得/之前说过/以前做过什么”、需要核对不在当前上下文里的旧事件/偏好/经验，或当前任务明确依赖旧记忆证据时，才调用 searchMemory。",
+    "- 不要为了确认当前上下文里已经出现的信息而调用 searchMemory；不要把 searchMemory 当作普通搜索、workspace 发现、工具发现或每轮安全检查；不要连续用多个泛泛 query 试探记忆库。调用时必须使用具体 query，并优先用 memoryType 限定 impression/event/skill。",
     "- Skill 采用渐进式披露：上下文里只会看到当前工作空间最近的 skill 名称和简介。如果某条 skill 简介与当前任务高度相关、能减少失败或能指导工具使用，先调用 readSkill 读取完整 procedure/appliesWhen/avoidWhen/detail，再应用该经验。",
     "- 当用户或 agent 明确要求沉淀可复用经验，或你发现了已经脱敏、可复用且能减少未来失败的方法时，可以调用 writeSkillMemory；skill 必须属于当前工作空间，并包含 procedure、appliesWhen、avoidWhen、desensitized=true 和 confidence。",
     "- Skill 不是普通总结。只有可迁移的方法、失败后找到的稳定规避方式、经过验证的工具流程、或能降低同类任务失败率的经验才值得写入。不要写“认真检查”“合理使用工具”“保持上下文”这类空泛内容。",

@@ -132,6 +132,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "runtime、workspace、context、tool call、memory injection 等信息只用于内部决策，不要在面向用户的回答里展示或解释。",
   "需要使用工具时，直接通过 function call 调用，不要告诉用户你正在调用工具、切换内部模块或读取内部上下文。",
   "回复语言必须跟随用户当前消息的主要语言：用户用中文就用中文，用户用英文就用英文；除非用户明确要求翻译或指定另一种语言，不要中英混杂或随意切换语言。",
+  "searchMemory 是低频补查工具；每轮上下文已经自动召回主要记忆，只有自动上下文不足、用户明确追问旧记忆，或任务依赖旧事件/偏好/经验证据时才调用。",
   "Skill 记忆采用渐进式披露：上下文只给名称和简介；当某条 Skill 明显相关并能减少失败时，先调用 readSkill 读取完整步骤再应用。",
   "当用户表达长期偏好、长期背景、自我认知更新或已脱敏的可复用经验时，可以通过对应记忆写入工具请求 runtime 写入；事件记忆由 runtime 生命周期 hook 自动提取。",
   "除非用户明确要求查看系统内部状态，否则像真人助手一样直接回答用户。"
@@ -251,7 +252,7 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-finish-task", "finishTask", "Mark the main workspace task as ready for final user-facing response.", JSON.stringify(toolSchemas.finishTask), "low", now, now);
   insertTool.run("tool-search-files", "searchFiles", "搜索项目文件名和文本内容。", JSON.stringify(toolSchemas.searchFiles), "medium", now, now);
   insertTool.run("tool-run-command", "runCommand", "运行经过允许的命令行命令。", JSON.stringify(toolSchemas.runCommand), "high", now, now);
-  insertTool.run("tool-search-memory", "searchMemory", "使用 SQLite FTS 和作用域过滤搜索记忆。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
+  insertTool.run("tool-search-memory", "searchMemory", "低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
   insertTool.run("tool-read-skill", "readSkill", "读取当前 active workspace 中一条已召回 skill 的完整经验详情。", JSON.stringify(toolSchemas.readSkill), "low", now, now);
   insertTool.run("tool-write-user-impression", "writeUserImpression", "只为当前用户写入长期偏好、背景、身份、称呼或约束；不要记录 agent 自己。", JSON.stringify(toolSchemas.writeUserImpression), "medium", now, now);
   insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
@@ -264,7 +265,7 @@ export function seedDefaults(db: Database.Database): void {
   updateTool.run("Mark the main workspace task as ready for final user-facing response.", now, "tool-finish-task");
   updateTool.run("搜索项目文件名和文本内容。", now, "tool-search-files");
   updateTool.run("运行经过允许的命令行命令。", now, "tool-run-command");
-  updateTool.run("使用 SQLite FTS 和作用域过滤搜索记忆。", now, "tool-search-memory");
+  updateTool.run("低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", now, "tool-search-memory");
   updateTool.run("读取当前 active workspace 中一条已召回 skill 的完整经验详情。", now, "tool-read-skill");
   updateTool.run("只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", now, "tool-write-agent-self-impression");
   updateTool.run("只为当前用户写入长期偏好、背景、身份、称呼或约束；不要记录 agent 自己。", now, "tool-write-user-impression");

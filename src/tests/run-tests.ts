@@ -1565,6 +1565,10 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("不要把 agent 自己的名字、身份、职责、人格、能力边界写进 user impression"), true);
   assert.equal(systemMessage.includes("writeSkillMemory"), true);
   assert.equal(systemMessage.includes("readSkill"), true);
+  assert.equal(systemMessage.includes("searchMemory 是低频补查工具"), true);
+  assert.equal(systemMessage.includes("自动上下文明显不足"), true);
+  assert.equal(systemMessage.includes("不要把 searchMemory 当作普通搜索"), true);
+  assert.equal(systemMessage.includes("优先用 memoryType 限定"), true);
   assert.equal(systemMessage.includes("渐进式披露"), true);
   assert.equal(systemMessage.includes("生命周期 hook"), true);
   assert.equal(systemMessage.includes("writeEventMemory"), false);
@@ -3928,6 +3932,8 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(writeUserImpression?.bindingType, "runtime");
   assert.equal(writeSkillMemory?.bindingType, "runtime");
   assert.equal(searchMemory?.bindingType, "runtime");
+  assert.equal(searchMemory?.description.includes("低频补查记忆"), true);
+  assert.equal(searchMemory?.description.includes("自动召回不足"), true);
   assert.equal(readSkill?.bindingType, "runtime");
   assert.equal(repos.listTools().some((tool) => tool.name === "writeEventMemory"), false);
   assert.equal(repos.listTools().some((tool) => tool.name === "updateMemory"), false);

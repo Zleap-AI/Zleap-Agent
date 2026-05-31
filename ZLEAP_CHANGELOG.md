@@ -688,6 +688,28 @@ Verification:
 Git:
 - Pending in this work session.
 
+## 2026-05-31 19:17 +08:00
+
+Purpose:
+- Stop the agent from overusing `searchMemory` by teaching it that automatic recall is the normal memory path and manual memory search is low-frequency fallback behavior.
+
+Changed:
+- Added explicit system-prompt rules for when `searchMemory` is appropriate: automatic context is insufficient, the user asks about previous memory/history, or the task depends on old memory evidence.
+- Added explicit system-prompt prohibitions against using `searchMemory` as ordinary search, workspace/tool discovery, generic safety checking, or repeated vague probing.
+- Updated the seeded `searchMemory` tool description to present it as low-frequency scoped memory fallback search.
+- Updated `ZLEAP_MASTER_PLAN.md` with the `searchMemory` usage boundary.
+- Added tests for the prompt contract and tool description.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
+- Verified the local SQLite seed refreshed the `searchMemory` tool description and default agent system prompt.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 19:13 +08:00
 
 Purpose:
