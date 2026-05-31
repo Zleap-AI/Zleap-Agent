@@ -6,6 +6,7 @@
 - If a future change materially affects architecture, data model, UI, runtime, LLM protocol, or memory strategy, update this file before or alongside the code.
 - When user decisions clarify or override earlier assumptions, treat the newest decision as authoritative, then update this master plan and the affected docs before or alongside code. Older docs are not allowed to remain as conflicting guidance.
 - The root README is not a source of truth. Core design docs and this master plan guide development.
+- `docs/` files are design documents, not dated patch logs. When updating them, merge new ideas into the relevant conceptual sections, remove date-based update headings, and write narrative prose in Chinese except for code identifiers, API names, type names, and protocol fields.
 - The architecture is a headless TypeScript agent core, Node API server, React/Vite Web UI, and SQLite with Raw SQL.
 - Every meaningful code or documentation change must be recorded in Git. The change should also be appended to `ZLEAP_CHANGELOG.md` with the local timestamp, purpose, touched areas, verification status, and Git commit reference when available. If a Git remote is configured, changes should be pushed after commit unless the user explicitly says not to push.
 

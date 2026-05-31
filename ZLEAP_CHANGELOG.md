@@ -2,6 +2,24 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 20:25 +08:00
+
+Purpose:
+- Normalize the `docs/` design documents so future documentation updates are integrated into the concept body instead of appended as dated update notes.
+
+Changed:
+- Added the documentation-maintenance rule to `ZLEAP_MASTER_PLAN.md` and `docs/README.md`.
+- Removed date-based update sections from the affected design docs and merged their ideas into conceptual sections.
+- Chinese-localized the main docs narrative and headings while preserving code identifiers, API names, type names, and protocol fields.
+- Updated the lifecycle example to use the unified `dev` workspace instead of the old separate File/CLI flow.
+
+Verification:
+- `rg -n "(^#{1,4} .*202[0-9]|2026-05|update:|Update:|更新：|clarification:)" docs` returned no matches.
+- `git diff --check` passed.
+
+Git:
+- Recorded by this commit.
+
 ## 2026-05-31 20:17 +08:00
 
 Purpose:

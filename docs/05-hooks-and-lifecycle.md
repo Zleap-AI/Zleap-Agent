@@ -1,4 +1,4 @@
-# Hooks and Lifecycle
+# 生命周期钩子
 
 ## 总览
 
@@ -9,19 +9,19 @@ hook 的目标不是让模型自己负责所有生命周期，而是由程序在
 核心生命周期：
 
 ```text
-User Message
-  -> Load Global Context
-  -> Main Workspace Planning
-  -> Enter Workspace
-  -> Execute Workspace Task
-  -> Exit Workspace
-  -> Generate Event Memory
-  -> Maybe Generate Skill
-  -> Return to Main Workspace
-  -> Final Response
+用户消息
+  -> 加载全局上下文
+  -> 主工作空间规划
+  -> 进入工作空间
+  -> 执行工作空间任务
+  -> 退出工作空间
+  -> 生成事件记忆
+  -> 视情况生成经验记忆
+  -> 返回主工作空间
+  -> 最终回复
 ```
 
-## Hook 类型
+## 钩子类型
 
 推荐的 hook：
 
@@ -114,9 +114,9 @@ load:
   skill memory scoped by workspaceId
 ```
 
-The memory partitions recalled here become the authoritative `WorkspaceSession.localContext` for the next LLM call in that workspace. Later prompt assembly must reuse this persisted local context rather than recalling memory again with a different query, so trace/debug UI and final LLM messages stay consistent.
+这里召回的记忆分区会成为该工作空间下一次 LLM 调用的权威 `WorkspaceSession.localContext`。后续 prompt assembly 必须复用这份已持久化的 local context，而不是用另一个 query 再做一次独立召回；这样 trace/debug UI 和 final LLM messages 才能保持一致。
 
-Recall uses the long-conversation projection strategy: latest 20 impression projections are loaded without query filtering; result events provide an older outcome timeline; process events are searched by current task relevance; skill memory remains workspace-scoped and is injected only as recent title/summary/index projections. Full skill detail/procedure is loaded later through `readSkill` when the agent judges a skill highly relevant. `final_messages` is only a raw provider-payload log for inspection and must not become an input to hooks or later prompt assembly.
+召回使用长对话投影策略：最新 20 条 impression projection 不做 query 筛选直接载入；result events 提供更早的结果时间线；process events 按当前任务相关性搜索；skill memory 保持 workspace-scoped，并且只注入最近的标题/简介/索引投影。完整 skill detail/procedure 只有在 agent 判断某条 skill 高度相关时，才通过 `readSkill` 读取。`final_messages` 只是用于检查的原始 provider-payload log，不能成为 hook 或后续 prompt assembly 的输入。
 
 ## afterWorkspaceEnter
 
@@ -177,15 +177,15 @@ tool 调用后运行。
 - 触发 skill candidate extraction。
 - 将结果返回 main workspace。
 
-### 2026-05-31 update: single exit hook execution
+### 单次退出 hook 执行
 
-`afterWorkspaceExit` is tied to one successful `exitWorkspace` function call. If a model emits `exitWorkspace` together with additional tool calls in the same assistant message, runtime must not run exit lifecycle work more than once for the committed workspace session. This prevents duplicated `skill_usage_recorded` counters, duplicated `hook.afterWorkspaceExit` audit logs, and repeated exit-hook memory extraction for the same handoff.
+`afterWorkspaceExit` 绑定一次成功的 `exitWorkspace` function call。如果模型在同一条 assistant message 里同时发出 `exitWorkspace` 和其他 tool calls，runtime 不能对已经提交的 workspace session 重复运行退出生命周期工作。这样可以避免同一个 handoff 出现重复的 `skill_usage_recorded` counters、重复的 `hook.afterWorkspaceExit` audit logs 和重复的退出 hook memory extraction。
 
-If `exitWorkspace` succeeds and later tool calls appear in the same assistant tool-call batch, those later child workspace calls are post-exit calls. Runtime should log them as failed trace records, but it must not execute them or mutate the already committed `WorkspaceResult` / local tool evidence.
+如果 `exitWorkspace` 成功后，同一个 assistant tool-call batch 里还出现后续 tool calls，这些后续子工作空间调用都属于 post-exit calls。Runtime 应把它们记录为 failed trace records，但不能执行它们，也不能修改已经提交的 `WorkspaceResult` 或 local tool evidence。
 
-### 2026-05-31 update: session-scoped exit evidence
+### session-scoped 退出证据
 
-Workspace-exit event extraction must keep evidence tied to the committed child `WorkspaceSession`. It may include the user message that created the task, messages created during the session interval, exact `workspaceSessionId`/`taskId` tool calls, and legacy unbound tool calls from the same interval. It must not attach older same-workspace messages or tool calls from another session.
+Workspace-exit event extraction 必须把 evidence 绑定到已提交的 child `WorkspaceSession`。它可以包含创建任务的用户消息、session interval 内创建的消息、精确匹配 `workspaceSessionId`/`taskId` 的 tool calls，以及同一 interval 内的 legacy unbound tool calls。它不能附加同 workspace 的更早消息，也不能附加另一个 session 的 tool calls。
 
 ## afterConversationWindow
 
@@ -207,23 +207,23 @@ Workspace-exit event extraction must keep evidence tied to the committed child `
 - 维护 relationId。
 - 判断是否需要提炼 skill。
 
-### 2026-05-31 update: absolute conversation windows
+### 绝对对话窗口
 
-Conversation-window event extraction must use the full stored message count and absolute message-window indexes. It must not derive window numbers from a bounded recent-history slice. If a conversation has 520 stored messages and the window size is 20, runtime must be able to generate `window:26` process/result events with exactly messages 501-520 as evidence.
+Conversation-window event extraction 必须使用完整已存消息数量和绝对 message-window indexes，不能从受限 recent-history slice 推导 window number。如果一个 conversation 有 520 条已存消息，窗口大小为 20，runtime 必须能够生成 `window:26` 的 process/result events，并且 evidence 精确对应消息 501-520。
 
-### 2026-05-31 update: trusted memory trace links
+### 可信 memory trace 链接
 
-`metadataJson.conversationId` is a trace-linking field. Non-creator memory writes may only use a conversation id that already exists and belongs to the writing actor. If a memory write is rejected because the metadata points at another user's conversation, the rejection audit must not include that forged conversation id, otherwise the Web UI trace for the other user would be polluted by the failed attempt.
+`metadataJson.conversationId` 是 trace-linking 字段。Non-creator memory writes 只能使用已经存在并属于写入 actor 的 conversation id。如果某次 memory write 因 metadata 指向另一个用户的 conversation 而被拒绝，rejection audit 不能包含这个伪造 conversation id，否则另一个用户的 Web UI trace 会被这次失败尝试污染。
 
-Direct Memory Web UI/API create/update/delete requests may also carry an operation-level `conversationId` for trace linking. That request field is not trusted input for ordinary users: it must resolve to one of the actor's existing conversations before any memory mutation or operation audit is written. Runtime tool calls do not use this external request field; they use the current run's code-bound `conversationId`.
+直接 Memory Web UI/API create/update/delete 请求也可以携带 operation-level `conversationId` 做 trace linking。这个请求字段对普通用户不是可信输入：在任何 memory mutation 或 operation audit 写入前，它必须解析到 actor 自己的某个已有 conversation。Runtime tool calls 不使用这个外部请求字段，而是使用当前 run 的 code-bound `conversationId`。
 
-### 2026-05-30 更新：自动 memory 写入审计身份
+### 自动 memory 写入审计身份
 
 conversation-window event extraction 写入的是当前用户在当前 workspace 里的 event memory，因此落库时必须沿用当前 run 的 userId 和 userRole 做 policy 检查，不能伪装成 creator 手动写入。hook 本身的生命周期记录仍然以 system action 写入 audit log。
 
 memory `create` audit 必须尽量携带 `conversationId`、`workspaceId`、`relationId`、`source`、`userId`、`agentId` 和版本信息。这样 Web UI trace 才能把一条 memory row 精确连回产生它的对话窗口、workspace session 或 memory tool call。
 
-## Event Extraction
+## 事件提取
 
 event 提取主要由程序 hook 自动触发。
 
@@ -256,7 +256,7 @@ event 提取主要由程序 hook 自动触发。
 8. 触发 skill 判断。
 ```
 
-## Skill Extraction
+## 经验提取
 
 skill 提取有三种触发来源：
 
@@ -360,31 +360,26 @@ searchMemory
 - 不允许根据自然语言关键词猜测另一个 workspace。
 - 应保存 evidence event。
 
-Runtime-requested `writeSkillMemory` must also preserve trace evidence from code-bound runtime state. When available, metadata includes `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`, so the Web UI can connect the shared skill to the exact workspace execution that requested it. The model cannot supply or override these ids.
+Runtime 请求的 `writeSkillMemory` 也必须保留来自 code-bound runtime state 的 trace evidence。可用时，metadata 包含 `activeWorkspaceId`、`workspaceSessionId`、`taskId`、`workspaceSessionIds` 和 `taskIds`，让 Web UI 可以把共享 skill 连接到请求它的具体 workspace execution。模型不能提供或覆盖这些 id。
 
-## Workspace Lifecycle 示例
+## 工作空间生命周期示例
 
 以“修改项目代码并验证”为例：
 
 ```text
 1. 用户请求：帮我修复测试失败。
-2. Main workspace 判断需要 CLI workspace。
-3. 进入 CLI workspace。
-4. CLI workspace 运行测试，发现失败。
-5. 退出 CLI workspace，返回失败摘要。
-6. Main workspace 判断需要 File workspace。
-7. 进入 File workspace。
-8. File workspace 搜索相关文件并修改。
-9. 退出 File workspace，返回修改摘要。
-10. Main workspace 再进入 CLI workspace。
-11. CLI workspace 运行测试通过。
-12. 退出 CLI workspace。
-13. hook 提取 event：
-    - 过程：先测试失败，再定位文件，再修改，再验证。
-    - 结果：测试通过。
-14. hook 判断是否生成 skill：
-    - 如果发现项目测试命令规律，生成 CLI skill。
-15. Main workspace 给用户最终结果。
+2. 主工作空间判断需要 `dev` 工作空间。
+3. 进入 `dev` 工作空间。
+4. `dev` 工作空间运行测试，发现失败。
+5. `dev` 工作空间搜索相关文件并修改。
+6. `dev` 工作空间再次运行测试并验证通过。
+7. 退出 `dev` 工作空间，返回结构化结果。
+8. hook 提取 event：
+   - 过程：先测试失败，再定位文件，再修改，再验证。
+   - 结果：测试通过。
+9. hook 判断是否生成 skill：
+   - 如果发现项目测试命令规律或稳定失败恢复路径，生成 `dev` skill。
+10. 主工作空间给用户最终结果。
 ```
 
 ## 生命周期设计原则

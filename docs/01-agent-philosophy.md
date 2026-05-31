@@ -54,11 +54,11 @@ Zleap 的核心假设是：
 
 ```text
 Agent = LLM
-      + System Prompt
-      + Personality Prompt
-      + Tools
-      + Memory
-      + Conversation Context
+      + 系统提示词
+      + 人格提示词
+      + 工具
+      + 记忆
+      + 对话上下文
 ```
 
 这个定义保留了传统 agent 的组成部分，但关键区别是：这些组成部分并不处在同一个平面。
@@ -66,17 +66,17 @@ Agent = LLM
 其中，稳定部分是：
 
 ```text
-Stable Agent Identity = LLM
-                      + System Prompt
-                      + Personality Prompt
+稳定 Agent 身份 = LLM
+                  + 系统提示词
+                  + 人格提示词
 ```
 
 动态部分是：
 
 ```text
-Dynamic Workspace State = Tools
-                        + Workspace Memory
-                        + Workspace Context
+动态工作空间状态 = 工具
+                    + 工作空间记忆
+                    + 工作空间上下文
 ```
 
 因此，agent 不是一个固定装满所有能力的对象，而是一个稳定身份在不同 workspace 中运行的过程。
@@ -133,16 +133,16 @@ Agent
 而是把能力拆成 workspace：
 
 ```text
-Main Workspace
+主工作空间
   - 只负责理解任务、选择 workspace、编排流程
 
-Dev Workspace
+开发工作空间
   - 统一负责项目文件搜索、代码检查、命令执行和相关经验
 
-Browser Workspace
+浏览器工作空间
   - 只负责浏览器操作、页面检查、截图、交互相关工具和经验
 
-Memory Tools
+记忆工具
   - 记忆不是独立 workspace；记忆检索、写入、整理、归档工具挂在每个 workspace 内
   - 每个 workspace 只能通过自己的记忆工具操作当前 workspace 的 event/skill 记忆
   - 跨 workspace 的记忆调试和维护属于 Web UI/API 的策略层能力，不属于模型普通 tool use
@@ -152,7 +152,7 @@ Memory Tools
 
 每次只让模型进入它当前真正需要的能力空间。
 
-## 主 workspace 的定位
+## 主工作空间的定位
 
 主 workspace 类似系统桌面。
 
@@ -177,7 +177,7 @@ Memory Tools
 - 结果整合。
 - 判断是否继续、停止或询问用户。
 
-## 子 workspace 的定位
+## 子工作空间的定位
 
 子 workspace 类似一个具体软件或专业工作台。
 

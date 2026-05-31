@@ -1,4 +1,4 @@
-# TypeScript Implementation Roadmap
+# TypeScript 实现路线图
 
 ## 最终目标
 
@@ -29,7 +29,7 @@ packages/
     SQL store
     SQLite FTS recall
     memory extraction
-    prompt projection for impression/result-event/process-event/skill
+    impression/result-event/process-event/skill 的 prompt projection
 
   tools/
     tool interface
@@ -39,14 +39,14 @@ packages/
   workspaces/
     main workspace
     dev workspace
-    memory tools mounted in every workspace
+    挂载到每个 workspace 的 memory tools
 
   web/
     Web UI
     chat interface
     workspace view
     memory inspector
-    context overview and raw final_messages log toggle
+    context overview 和 raw final_messages log toggle
 ```
 
 也可以先用单仓单包实现 MVP，等概念稳定后再拆包。
@@ -274,7 +274,7 @@ MVP 可以暂时简化：
 
 ## 后续阶段
 
-### Stage 1: 文档确认
+### 阶段一：文档确认
 
 目标：
 
@@ -286,7 +286,7 @@ MVP 可以暂时简化：
 
 - 当前 docs。
 
-### Stage 2: Core Runtime Skeleton
+### 阶段二：核心 runtime 骨架
 
 目标：
 
@@ -296,16 +296,16 @@ MVP 可以暂时简化：
 - 实现 WorkspaceRuntime 的最小循环。
 - 实现 main workspace 到 child workspace 的切换。
 
-### Stage 3: Tool System
+### 阶段三：工具系统
 
 目标：
 
 - 定义 ToolDefinition。
 - 实现 tool registry。
-- 实现 CLI 和 File 基础工具。
+- 实现 `dev` 工作空间里的文件搜索和命令执行基础工具。
 - 为 tool call 加入 policy hook。
 
-### Stage 4: Memory MVP
+### 阶段四：记忆 MVP
 
 目标：
 
@@ -317,7 +317,7 @@ MVP 可以暂时简化：
 - 实现 SQLite FTS + relation/version 召回，并保证按 memoryType、userId、agentId、workspaceId 分区去重。
 - 实现 prompt projection：impression 固定最新 20 条，result event 约 50 条，process event 少量相关召回，skill 按 workspace 策略召回；原始 `final_messages` 只作为日志查看。
 
-### Stage 5: Hook System
+### 阶段五：Hook 系统
 
 目标：
 
@@ -326,7 +326,7 @@ MVP 可以暂时简化：
 - 实现 event 后 skill candidate 判断。
 - 实现 conversation window 压缩。
 
-### Stage 6: Web UI
+### 阶段六：Web UI
 
 目标：
 
@@ -337,7 +337,7 @@ MVP 可以暂时简化：
 - memory inspector。
 - skill inspector。
 
-### Stage 7: Production Hardening
+### 阶段七：生产化加固
 
 目标：
 
@@ -364,29 +364,29 @@ Web UI 不应该只是普通聊天框。
 当前 Web UI 结构以三栏 + 三 tab 为准：
 
 ```text
-Top Tabs:
+顶部标签：
   - 对话
   - 工作空间
   - 记忆
 
-Chat:
-  Left Panel:
-    - agent/LLM/prompt settings
-  Center Panel:
+对话：
+  左侧面板：
+    - agent/LLM/prompt 设置
+  中间面板：
     - streaming Markdown chat
     - retry / clear current conversation
-  Right Panel:
+  右侧面板：
     - active workspace
     - context stack
     - LLM logs
     - tool/memory/audit trace
 
-Workspace:
+工作空间：
   - workspace manifests
   - registered tools
   - MCP/runtime/placeholder binding status
 
-Memory:
+记忆：
   - database-like memory table
   - filter/add/edit/delete
   - policy and trace diagnostics

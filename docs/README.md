@@ -4,6 +4,8 @@
 
 当前项目已经进入实现阶段。`ZLEAP_MASTER_PLAN.md` 是长期主计划；本目录文档用于解释核心理念和约束。每次重大实现调整都必须同步更新主计划和相关 docs，旧文档如果与最新决策冲突，以主计划和最新用户确认的规则为准。
 
+`docs/` 目录不是变更日志。更新这些文档时，不要新增“某年某月某日 update”之类的按日期补丁小节；应把新的设计判断融合到对应主题正文中。除代码标识符、API 名称、类型名和协议字段外，叙述内容默认使用中文。
+
 ## 核心判断
 
 现在很多 agent 框架把 tools、memory、skills、context、planning、execution 全部塞进同一个 agent，让模型在一个巨大的上下文里自己决定一切。这种方式实现简单，但对模型能力和注意力要求极高。
@@ -18,29 +20,29 @@ Zleap 的核心思想是：
 
 ```text
 Agent = LLM
-      + System Prompt
-      + Personality Prompt
-      + Tools
-      + Memory
-      + Conversation Context
+      + 系统提示词
+      + 人格提示词
+      + 工具
+      + 记忆
+      + 对话上下文
 ```
 
 但在 Zleap 中，tools、部分 memory 和 conversation context 不应该全部挂在同一个全局 agent 上，而应该被 workspace 管理。
 
 ```text
-Workspace = Tools
-          + Event Memory
-          + Skill Memory
-          + Workspace-local Context
+工作空间 = 工具
+          + 事件记忆
+          + 经验记忆
+          + 工作空间局部上下文
 ```
 
 跨 workspace 保持稳定的是：
 
 ```text
-Stable Agent Identity = LLM
-                      + System Prompt
-                      + Personality Prompt
-                      + Cross-workspace Impression Memory
+稳定 Agent 身份 = LLM
+                  + 系统提示词
+                  + 人格提示词
+                  + 跨工作空间印象记忆
 ```
 
 ## 文档结构
