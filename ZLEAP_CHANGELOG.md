@@ -707,7 +707,7 @@ Verification:
 - Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
 
 Git:
-- Pending in this work session.
+- Recorded in commit `b01d3e2 fix: compact process event memory`.
 
 ## 2026-05-31 19:05 +08:00
 
