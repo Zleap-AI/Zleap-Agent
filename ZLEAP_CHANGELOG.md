@@ -20,7 +20,7 @@
 - 浏览器验证通过：刷新 `http://localhost:4173/` 并打开 `概念介绍`，页面只保留 7 个真实上下文层卡片，`Provider request`、`Function calling`、`UI trace only` 和 `.prompt-assembly-lane` 均不存在，memory 子分区仍在第 4 层内部。
 
 Git：
-- 待提交。
+- `d53d0c3` 移除概念页非堆栈说明。
 
 ## 2026-06-01 06:38 +08:00
 
