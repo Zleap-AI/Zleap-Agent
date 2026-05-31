@@ -51,6 +51,7 @@ type CachedState = {
   baseUrl?: string;
   model?: string;
   apiKey?: string;
+  contextPanelWidth?: number;
   messages?: ChatMessage[];
   output?: AgentRunOutput | null;
   retryMessage?: string;
@@ -574,6 +575,10 @@ function saveCache(patch: CachedState): void {
   localStorage.setItem(CACHE_KEY, JSON.stringify(next));
 }
 
+function clampContextPanelWidth(value: number): number {
+  return Math.min(720, Math.max(320, Math.round(value)));
+}
+
 function normalizeCachedMessages(messages: ChatMessage[] | undefined): ChatMessage[] {
   return (messages ?? []).map((item) => ({
     ...item,
@@ -1041,6 +1046,7 @@ function ChatTab() {
   const [selectedTurnId, setSelectedTurnId] = useState(cached.selectedTurnId ?? "");
   const [selectedLlmCallId, setSelectedLlmCallId] = useState(cached.selectedLlmCallId ?? "");
   const [showRawContextLogs, setShowRawContextLogs] = useState(false);
+  const [contextPanelWidth, setContextPanelWidth] = useState(clampContextPanelWidth(cached.contextPanelWidth ?? 420));
   const [loading, setLoading] = useState(false);
   const currentRunControllerRef = useRef<AbortController | null>(null);
   const selectedUserMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId && item.role === "用户") : undefined;
@@ -1095,8 +1101,8 @@ function ChatTab() {
   }, [conversationId, userId, userRole]);
 
   useEffect(() => {
-    saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined });
-  }, [userId, userRole, conversationId, baseUrl, model, apiKey, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agent]);
+    saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined });
+  }, [userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agent]);
 
   async function saveAgent() {
     if (!agent) return;
@@ -1326,6 +1332,27 @@ function ChatTab() {
     void sendMessage();
   }
 
+  function handleContextResizePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = contextPanelWidth;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setContextPanelWidth(clampContextPanelWidth(startWidth + startX - moveEvent.clientX));
+    };
+    const handlePointerUp = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }
+
   function clearLocalCache() {
     localStorage.removeItem(CACHE_KEY);
     setMessages([]);
@@ -1356,7 +1383,7 @@ function ChatTab() {
   }
 
   return (
-    <section className="chat-grid">
+    <section className="chat-grid" style={{ "--context-panel-width": `${contextPanelWidth}px` } as React.CSSProperties}>
       <aside className="panel config-panel">
         <h2>智能体配置</h2>
         <label>智能体 ID<input value={agent?.id ?? ""} disabled /></label>
@@ -1465,6 +1492,13 @@ function ChatTab() {
       </section>
 
       <aside className="panel context-panel">
+        <button
+          className="context-resizer"
+          type="button"
+          aria-label="调整右侧栏宽度"
+          title="拖拽调整右侧栏宽度"
+          onPointerDown={handleContextResizePointerDown}
+        />
         <h2>当前工作空间</h2>
         <div className="workspace-badge">
           <strong>{workspaceView.primary}</strong>
@@ -2111,7 +2145,7 @@ function JsonValueView({ value, depth = 0 }: { value: unknown; depth?: number })
                     <td>{index + 1}</td>
                     {columns.map((column) => (
                       <td key={column}>
-                        <JsonCell value={row[column]} depth={depth + 1} />
+                        <JsonTableCell value={row[column]} depth={depth + 1} />
                       </td>
                     ))}
                   </tr>
@@ -2157,6 +2191,39 @@ function JsonCell({ value, depth }: { value: unknown; depth: number }) {
   if (isJsonScalar(value)) return <span className={`json-scalar ${jsonScalarClass(value)}`}>{formatJsonScalar(value)}</span>;
   if (depth > 3) return <code className="json-compact">{compactJson(value)}</code>;
   return <JsonValueView value={value} depth={depth} />;
+}
+
+function JsonTableCell({ value, depth }: { value: unknown; depth: number }) {
+  if (value === undefined) return <span className="json-muted">-</span>;
+  const preview = tableCellPreview(value);
+  if (!isJsonScalar(value) || preview.length > 80) {
+    return (
+      <span className="json-table-cell-preview" title={preview}>
+        {preview}
+      </span>
+    );
+  }
+  return <JsonCell value={value} depth={depth} />;
+}
+
+function tableCellPreview(value: unknown): string {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "空数组";
+    if (value.every(isJsonScalar)) return value.map((item) => formatJsonScalar(item)).join("，");
+    return `${value.length} 条：${value.slice(0, 3).map((item) => tableCellPreview(item)).join("；")}`;
+  }
+  if (isJsonRecord(value)) {
+    const preferredKeys = ["name", "id", "title", "summary", "description", "status", "type", "workspaceId"];
+    const parts: string[] = [];
+    for (const key of preferredKeys) {
+      const item = value[key];
+      if (item !== undefined) parts.push(`${jsonFieldLabel(key)}=${tableCellPreview(item)}`);
+      if (parts.length >= 3) break;
+    }
+    if (parts.length > 0) return parts.join("，");
+    return compactJson(value);
+  }
+  return formatJsonScalar(value);
 }
 
 function isJsonRecord(value: unknown): value is Record<string, unknown> {

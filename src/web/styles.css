@@ -110,7 +110,7 @@ button:disabled {
 .chat-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(360px, 1fr) minmax(300px, 420px);
+  grid-template-columns: minmax(260px, 320px) minmax(360px, 1fr) minmax(320px, var(--context-panel-width, 420px));
   gap: 12px;
   padding: 12px;
   min-height: 0;
@@ -126,6 +126,40 @@ button:disabled {
   overflow: auto;
   min-height: 0;
   max-height: 100%;
+}
+
+.context-panel {
+  position: relative;
+}
+
+.context-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  width: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.context-resizer::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.context-resizer:hover::after,
+.context-resizer:focus-visible::after {
+  background: #9bb4d3;
 }
 
 .editor-panel {
@@ -888,16 +922,19 @@ textarea {
 }
 
 .json-table-wrap {
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 8px;
   background: #fff;
 }
 
 .json-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .json-table th,
@@ -906,7 +943,8 @@ textarea {
   padding: 7px 8px;
   text-align: left;
   vertical-align: top;
-  min-width: 54px;
+  min-width: 92px;
+  max-width: 220px;
 }
 
 .json-table th {
@@ -919,8 +957,27 @@ textarea {
 .json-table td:first-child,
 .json-table th:first-child {
   width: 34px;
+  min-width: 34px;
+  max-width: 34px;
   color: #7a8794;
   text-align: right;
+}
+
+.json-table-cell-preview,
+.json-table td .json-scalar,
+.json-table td .json-compact,
+.json-table td .json-muted {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.json-table-cell-preview {
+  color: #17202a;
+  line-height: 1.45;
 }
 
 .json-list {
