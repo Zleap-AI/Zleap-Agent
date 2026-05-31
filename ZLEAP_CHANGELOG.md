@@ -1,982 +1,999 @@
-# Zleap Change Log
+# Zleap 变更日志
 
-This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
+本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
+
+## 2026-05-31 20:32 +08:00
+
+目的：
+- 将变更日志整体中文化，并把“日志、更新、文档和后续 Git 提交信息默认使用中文”的规则写入主计划。
+
+变更：
+- 将 `ZLEAP_CHANGELOG.md` 的标题、栏目和历史条目改为中文叙述。
+- 保留代码标识符、接口名、命令、路径、类型名和历史 commit title 的原文。
+- 更新 `ZLEAP_MASTER_PLAN.md`，说明之后的日志、更新说明、文档叙述和 Git 提交信息都默认使用中文。
+
+验证：
+- 已扫描旧英文栏目名和常见英文状态描述，变更日志正文没有残留旧栏目格式。
+- `git diff --check` 通过。
+
+Git：
+- 将由本次 Git 提交记录。
 
 ## 2026-05-31 20:25 +08:00
 
-Purpose:
-- Normalize the `docs/` design documents so future documentation updates are integrated into the concept body instead of appended as dated update notes.
+目的：
+- 规范化 `docs/` 设计文档，让后续文档更新融入概念正文，而不是按日期追加 update 小节。
 
-Changed:
-- Added the documentation-maintenance rule to `ZLEAP_MASTER_PLAN.md` and `docs/README.md`.
-- Removed date-based update sections from the affected design docs and merged their ideas into conceptual sections.
-- Chinese-localized the main docs narrative and headings while preserving code identifiers, API names, type names, and protocol fields.
-- Updated the lifecycle example to use the unified `dev` workspace instead of the old separate File/CLI flow.
+变更：
+- 在 `ZLEAP_MASTER_PLAN.md` 和 `docs/README.md` 中加入文档维护规则。
+- 移除受影响设计文档里的日期式 update 小节，并把内容合并进对应概念章节。
+- 将主要文档叙述和标题中文化，同时保留代码标识符、API 名、类型名和协议字段。
+- 将生命周期示例改为统一的 `dev` 工作空间，不再沿用旧的 File/CLI 分离流程。
 
-Verification:
-- `rg -n "(^#{1,4} .*202[0-9]|2026-05|update:|Update:|更新：|clarification:)" docs` returned no matches.
-- `git diff --check` passed.
+验证：
+- `rg -n "(^#{1,4} .*202[0-9]|2026-05|update:|Update:|更新：|clarification:)" docs` 没有命中。
+- `git diff --check` 通过。
 
-Git:
-- Recorded by this commit.
+Git：
+- 已由对应提交记录。
 
 ## 2026-05-31 20:17 +08:00
 
-Purpose:
-- Remove the obsolete implementation acceptance summary because it was a one-time验收 document and is not part of the current source-of-truth documentation set.
+目的：
+- 删除过时的实现验收总结，因为它是一次性验收材料，不属于当前事实来源文档。
 
-Changed:
-- Deleted `ZLEAP_IMPLEMENTATION_ACCEPTANCE_SUMMARY.md`.
-- Kept `ZLEAP_MASTER_PLAN.md` unchanged because this cleanup does not change architecture, runtime, UI, memory, LLM protocol, or data model.
+变更：
+- 删除 `ZLEAP_IMPLEMENTATION_ACCEPTANCE_SUMMARY.md`。
+- `ZLEAP_MASTER_PLAN.md` 保持不变，因为这次清理不改变架构、runtime、UI、memory、LLM 协议或数据模型。
 
-Verification:
-- Pending in this work session.
+验证：
+- 本工作会话中待验证。
 
-Git:
-- Pending.
+Git：
+- 待记录。
 
 ## 2026-05-31 20:13 +08:00
 
-Purpose:
-- Merge the default File and CLI workspaces into one unified development workspace.
+目的：
+- 将默认 File 和 CLI 工作空间合并为一个统一的开发工作空间。
 
-Changed:
-- Replaced the default `file` and `cli` built-in workspaces with `dev` / 开发工作空间.
-- Mounted both built-in runtime tools, `searchFiles` and `runCommand`, into `dev`.
-- Updated runtime tool guards so both tools execute only inside `dev`.
-- Updated workspace selection hints, UI built-in workspace protection, and concept guide workspace map.
-- Seed now migrates legacy `file`/`cli` memory, approval, MCP server, workspace-tool, and workspace records toward `dev` so existing local databases stop showing separate default File/CLI workspaces.
-- Updated master plan and docs so prompts/concepts describe `main + dev + MCP extensions`, not `main/file/cli`.
-- Updated tests for the new default workspace boundary: main cannot call dev tools directly, while dev can use both file search and command execution.
+变更：
+- 用 `dev` / 开发工作空间替换默认内置 `file` 和 `cli` 工作空间。
+- 将内置 runtime 工具 `searchFiles` 和 `runCommand` 都挂载到 `dev`。
+- 更新 runtime 工具保护逻辑，让两个工具只在 `dev` 中执行。
+- 更新工作空间选择提示、UI 内置工作空间保护和概念指南里的工作空间地图。
+- Seed 会把旧数据库中的 `file`/`cli` memory、approval、MCP server、workspace-tool 和 workspace 记录迁移到 `dev`，避免本地数据库继续显示分离的默认 File/CLI 工作空间。
+- 更新主计划和 docs，让 prompt/concept 描述 `main + dev + MCP extensions`，而不是 `main/file/cli`。
+- 更新测试，覆盖新的默认工作空间边界：main 不能直接调用 dev 工具，dev 可以同时使用文件搜索和命令执行。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
-- Verified `/api/workspaces` now shows built-in `dev` and `main`, with `dev` exposing both `searchFiles` and `runCommand`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok":true}`。
+- 已验证 `/api/workspaces` 显示内置 `dev` 和 `main`，且 `dev` 暴露 `searchFiles` 和 `runCommand`。
 
-Git:
-- Pending.
+Git：
+- 待记录。
 
 ## 2026-05-31 19:56 +08:00
 
-Purpose:
-- Add a Stop control to the chat composer so users can interrupt a running streamed agent turn.
+目的：
+- 在聊天输入区加入停止按钮，让用户可以中断正在流式运行的 agent 回合。
 
-Changed:
-- Added a visible `停止` button while the Chat turn is generating.
-- The Web UI now aborts the active stream fetch and marks streaming messages as stopped rather than failed/retryable.
-- The streaming API now propagates client disconnect cancellation into `AgentRuntime` and provider fetch/stream reads through `AbortSignal`.
-- Updated the master plan with the stop-running behavior.
+变更：
+- 在 Chat 回合生成中显示 `停止` 按钮。
+- Web UI 现在会 abort 当前 stream fetch，并把流式消息标记为已停止，而不是失败/可重试。
+- Streaming API 现在通过 `AbortSignal` 把客户端断开传递给 `AgentRuntime` 和 provider fetch/stream reads。
+- 在主计划中记录停止运行行为。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
-- Browser verification passed: during a running streamed request the `停止` button appears, clicking it stops the visible stream and shows `已停止运行。`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok":true}`。
+- 浏览器验证通过：流式请求运行中会出现 `停止` 按钮，点击后停止可见流并显示 `已停止运行。`。
 
-Git:
-- Pending.
+Git：
+- 待记录。
 
 ## 2026-05-31 19:48 +08:00
 
-Purpose:
-- Fix follow-up LLM context snapshots after tool execution so the model and UI keep the full active context instead of collapsing to only callable tools and tool results.
+目的：
+- 修复工具执行后的 follow-up LLM 上下文快照，避免模型和 UI 只剩可调用工具与工具结果，而丢失完整 active context。
 
-Changed:
-- Tool-loop follow-up LLM calls now clone the active base context stack (`system`, `workspace`, `tools`, `memory`, `history`, and clean `user`) before appending function-call/tool-result evidence.
-- The follow-up `tool_result` segment now records accumulated assistant function calls and actual tool result messages, excluding synthetic runtime context tool messages.
-- Added regression coverage for non-streaming and streaming multi-step tool loops to ensure follow-up context stacks remain complete.
-- Updated the master plan and context contract doc with the full follow-up context snapshot requirement.
+变更：
+- 工具循环中的 follow-up LLM 调用现在会先复制 active base context stack（`system`、`workspace`、`tools`、`memory`、`history` 和干净 `user`），再追加 function-call/tool-result evidence。
+- follow-up `tool_result` segment 现在记录累积的 assistant function calls 和真实 tool result messages，并排除 synthetic runtime context tool messages。
+- 增加非流式和流式多步工具循环回归测试，确保 follow-up context stack 保持完整。
+- 更新主计划和上下文契约文档，记录完整 follow-up context snapshot 要求。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok":true}`。
 
-Git:
-- Recorded by the Git commit titled `fix: preserve follow-up context stack`.
+Git：
+- 已由 Git 提交 `fix: preserve follow-up context stack` 记录。
 
 ## 2026-05-31 19:41 +08:00
 
-Purpose:
-- Fix Skill memory extraction so it stores reusable, desensitized experience instead of task results or private task details.
+目的：
+- 修复 Skill memory 提取，让它保存可复用、脱敏的经验，而不是任务结果或私有任务细节。
 
-Changed:
-- Tightened hook-based Skill candidate extraction: ordinary workspace completion no longer creates Skill memory by itself.
-- Hook-generated Skills now require concrete reusable evidence such as capability-tool workflows or failure-recovery paths.
-- Hook-generated Skill detail no longer copies process/result event text, raw function-call arguments, raw tool outputs, user identity, task originals, paths, accounts, or source logs.
-- Added stable `skillFingerprint` duplicate suppression so similar Skills in the same workspace reuse an existing record instead of creating near-duplicates.
-- Extended Skill quality checks to reject task-specific identity/raw-conversation leakage and event-hook raw evidence copying.
-- Updated the master plan, framework concept doc, memory model doc, and lifecycle hook doc with the stricter Skill extraction contract.
+变更：
+- 收紧 hook-based Skill candidate extraction：普通工作空间完成本身不再创建 Skill memory。
+- Hook 生成的 Skill 现在必须有明确可复用证据，比如能力工具流程或失败恢复路径。
+- Hook 生成的 Skill detail 不再复制 process/result event 文本、原始 function-call 参数、原始工具输出、用户身份、任务原文、路径、账号或源日志。
+- 添加稳定 `skillFingerprint` 去重，让同一工作空间中的相似 Skill 复用已有记录，而不是创建近重复项。
+- 扩展 Skill 质量检查，拒绝任务特定身份/原始对话泄漏和 event-hook 原始证据复制。
+- 更新主计划、框架概念文档、memory model 文档和 lifecycle hook 文档，记录更严格的 Skill 提取契约。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok":true}`。
 
-Git:
-- Pending.
+Git：
+- 待记录。
 
 ## 2026-05-31 19:25 +08:00
 
-Purpose:
-- Prevent streamed LLM follow-up calls from staying in `pending` forever after CLI/tool results return.
-
-Changed:
-- Added a configurable provider fetch timeout and stream idle timeout to the OpenAI-compatible client.
-- Streamed response reads now fail with a clear timeout diagnostic when no new provider data arrives for the idle window.
-- Added regression coverage proving that a streamed tool-call follow-up failure is marked `failed` in `llm_calls` instead of waiting until server restart.
-- Updated the master plan with the bounded streaming/failure-finalization requirement.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
-
-Git:
-- Recorded by the Git commit titled `fix: timeout stalled llm streams`.
-
-## 2026-05-31 08:52 +08:00
-
-Purpose:
-- Reduce information loss during workspace switching by adding runtime-controlled result handoff context, and stabilize user-facing reply language.
-
-Changed:
-- Added `WorkspaceHandoffContext` to workspace local context.
-- When entering a child workspace, runtime now carries only the current user request, workspace-entry result, and bounded parent result evidence instead of unrelated global history.
-- When returning to main, runtime now carries the full child `WorkspaceResult`, the child workspace's final assistant context, and key tool results; tool-call parameters and long intermediate process logs stay in trace/debug storage.
-- Updated the hidden runtime prompt so main must treat child handoff results as authoritative and must not casually re-summarize away or omit key facts.
-- Added a system-level language rule: user-facing replies follow the user's current message language unless the user asks for translation or another language.
-- Updated the master plan and context/workspace docs with the software handoff model: transfer the finished result, not the full editing history.
-- Added tests proving handoff context exists in child/main transitions while excluding `tool_call` process items, and tests for the language rule in the system prompt.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
-
-Git:
-- Recorded by the Git commit titled `feat: add workspace handoff context`.
-
-## 2026-05-31 08:27 +08:00
-
-Purpose:
-- Make existing and cached function-call/tool-result process messages show concrete parameters and result summaries instead of tool names only.
-
-Changed:
-- Updated `src/web/main.tsx` to reconstruct process preview items from the associated LLM response and `tool_calls` trace logs when cached messages do not already include structured process items.
-- Added argument/result summarizers for common tool payloads such as search queries, shell commands, stdout, summaries, snippets, and errors.
-- Updated process previews/details to use reconstructed items so collapsed rows can show what `metasoSearch` searched for and what each tool roughly returned.
-- Updated `ZLEAP_MASTER_PLAN.md` with the fallback trace reconstruction requirement for older cached process messages.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
-
-Git:
-- Recorded in the Git commit titled `fix: recover process event details`.
-
-## 2026-05-31 08:23 +08:00
-
-Purpose:
-- Remove horizontal scrolling from the Chat context inspector raw LLM log view.
-
-Changed:
-- Updated `src/web/styles.css` so raw `final_messages` logs use automatic wrapping, break long tokens, and hide horizontal overflow.
-- Updated `ZLEAP_MASTER_PLAN.md`, `docs/07-context-and-prompt-contracts.md`, `docs/README.md`, and `zleap-agent-framework.md` to record that raw provider logs must wrap within the panel instead of using X-axis scrolling.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
-
-Git:
-- Recorded in the Git commit titled `fix: wrap raw llm logs`.
-
-## 2026-05-31 08:19 +08:00
-
-Purpose:
-- Make function-call and tool-result process messages readable at a glance and keep call parameters separate from returned results.
-
-Changed:
-- Added structured process items to streamed workspace/tool events so tool calls carry `argumentsJson` and tool results carry `resultJson`.
-- Updated Chat process blocks to show one-line tool call/result summaries even while collapsed.
-- Updated expanded process details so function-call blocks show actual parameters and tool-result blocks show actual returned results.
-- Updated `ZLEAP_MASTER_PLAN.md` with the expected process-message display contract.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
-
-Git:
-- Recorded in the Git commit titled `fix: summarize process tool events`.
-
-## 2026-05-31 08:14 +08:00
-
-Purpose:
-- Fix the Chat context inspector raw-log UI so raw mode shows only the original LLM messages log directly, instead of showing the numbered context stack or requiring another expand click.
-
-Changed:
-- Updated `src/web/main.tsx` so structured mode shows the numbered context stack without `final_messages`, while raw-log mode hides that stack and renders only the saved `final_messages` content in a direct raw text view.
-- Updated `src/web/styles.css` for the direct raw log panel.
-- Updated `ZLEAP_MASTER_PLAN.md`, `docs/07-context-and-prompt-contracts.md`, `docs/README.md`, and `zleap-agent-framework.md` to clarify that raw provider-log mode hides the structured stack and directly displays `final_messages`.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
-
-Git:
-- Recorded in the Git commit titled `fix: show raw llm log directly`.
-
-## 2026-05-31 08:06 +08:00
-
-Purpose:
-- Fix Chat context inspection so clicking a user message shows that message's own clean user input instead of a stale/earlier turn such as `我是谁`.
-
-Changed:
-- Updated `src/web/main.tsx` so user messages prefer their own saved `turnOutput.contextSegments[0].llmCallId` over cached `inspectLlmCallId`.
-- Cleared stale selected LLM call state when sending a new message.
-- Changed stream completion binding to derive the current turn's first call from `payload.output.contextSegments`, then select only LLM calls from that point forward for the assistant's final-call binding.
-- Added `llmCallId` to streamed workspace/process events and persisted it onto visible workspace/process chat messages, so model-initiated intermediate replies can inspect the exact LLM call that produced them.
-- Updated assistant-message fallback binding so a final assistant reply resolves to the final LLM call of its own current turn, while intermediate model-generated workspace messages use their streamed `llmCallId`.
-- Updated `ZLEAP_MASTER_PLAN.md` to record that user messages bind to their own sent-turn context and AI replies bind to the concrete model call that produced that visible response, including model-initiated multi-round calls.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
-
-Git:
-- Recorded in the Git commit titled `fix: bind chat context to current turn`.
-
-## 2026-05-31 07:56 +08:00
-
-Purpose:
-- Change the Chat context inspector raw-log behavior so `显示原始日志` switches the whole context stack into raw text mode instead of appending a separate raw-log block.
-
-Changed:
-- Updated `src/web/main.tsx` so the context stack uses one displayed segment list: structured mode hides `final_messages`, while raw mode shows the full inspected stack and renders each segment as raw text.
-- Added a raw stack renderer and `raw-json` styling so raw mode displays direct JSON/text rather than structured JSON tables.
-- Updated `ZLEAP_MASTER_PLAN.md`, `docs/07-context-and-prompt-contracts.md`, `docs/README.md`, and `zleap-agent-framework.md` to make the raw-log toggle behavior part of the design contract.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
-
-Git:
-- Recorded in the Git commit titled `fix: toggle raw context stack`.
-
-## 2026-05-31 07:50 +08:00
-
-Purpose:
-- Fix prompt assembly boundaries and guard current-user impression recall.
-
-Changed:
-- Changed prompt assembly so the system message contains only system/personality/runtime policy text.
-- Moved workspace manifest/context injection from the system message into a synthetic `runtime_context.workspace` tool result.
-- Kept memory and local conversation as synthetic tool results, and kept callable schemas only in the OpenAI-compatible top-level `tools` request array.
-- Added tests proving the system message no longer includes `## Callable Tools`, `toolCount`, or workspace JSON, while the workspace manifest is still visible through `runtime_context.workspace`.
-- Added recall coverage proving current-user impressions and current-agent self impressions are both injected, while other users' impressions are excluded.
-- Updated master/context/concept docs with the corrected prompt assembly boundary.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit titled `feat: add progressive skill disclosure`.
-
-## 2026-05-31 07:43 +08:00
-
-Purpose:
-- Make memory scopes inspectable and prevent user-impression versus agent-self-impression confusion.
-
-Changed:
-- Strengthened the runtime system memory-write protocol so `writeUserImpression` is only for current-user long-term facts and `writeAgentSelfImpression` is only for creator-authorized agent identity/self-knowledge.
-- Added conversation trace memory-write recovery so the Chat right panel can show memory rows associated with the selected run even when the run output cache missed them.
-- Updated the Memory tab table and editor to show `agentId` and `relationId`, plus a readable scope label.
-- Updated the right-panel memory write display to show scope, userId, agentId, workspaceId, relationId, summary, and a structured full-record view.
-- Updated master/concept/memory/lifecycle docs with explicit impression scope rules and removed stale model-callable event/update memory guidance.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that introduced this changelog entry.
-
-## 2026-05-31 07:38 +08:00
-
-Purpose:
-- Make context stack and JSON-heavy debug views readable enough to verify callable tools and runtime partitions without scanning raw JSON blobs.
-
-Changed:
-- Added a reusable structured JSON viewer for the Web UI.
-- Changed context stack sections to render parsed JSON as field groups, nested lists, and table-like arrays instead of raw `<pre>` dumps.
-- Changed LLM log message/tool/response payload details to use the same structured JSON view, while keeping raw provider logs separated from the normal context stack.
-- Updated the concept guide, master plan, and context contract docs to require readable structured JSON views, especially for the OpenAI-compatible callable `tools` array.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that introduced this changelog entry.
-
-## 2026-05-31 07:33 +08:00
-
-Purpose:
-- Clarify memory handling in the concept guide and keep raw provider payload logs out of the normal context stack.
-
-Changed:
-- Added a dedicated memory-recall explanation to the `概念介绍` tab: recent raw context, result/process event projections, fixed impression recall, and why long conversations do not re-inject raw source data.
-- Renamed the concept guide's context section to `上下文概览` and removed `final_messages` from the normal context stack illustration.
-- Updated the Chat right context panel so `final_messages` is hidden from the stack and appears only behind a subtle `显示原始日志` toggle beside the stack title.
-- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, and all files under `docs/` to state that `final_messages` is a raw provider-payload log, not a context layer, and to restate the current memory recall/injection strategy.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded in commit `2153447 fix: show skill disclosure in context`.
-
-## 2026-05-31 07:25 +08:00
-
-Purpose:
-- Implement the clarified long-conversation memory recall strategy and make impression recall fixed rather than query-selective.
-
-Changed:
-- Changed automatic runtime recall so impression memory always loads up to 20 latest effective user/agent impressions for the current scope without SQLite FTS filtering.
-- Split event recall into up to 50 latest result events plus up to 8 SQLite FTS-matched process events for the active `userId + workspaceId`.
-- Increased raw local conversation context to 20 messages/records and kept older long-conversation continuity in projected event memory instead of raw transcript injection.
-- Changed `runtime_context.memory` and the `memory` context segment to inject compact projected memory views rather than raw `MemoryRow` records, full `detail`, full `metadataJson`, or evidence arrays.
-- Updated the Chat context labels and concept intro UI to show result-event/process-event memory sections.
-- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, `docs/03-memory-model.md`, and `docs/07-context-and-prompt-contracts.md` with the fixed-impression and long-conversation recall rules.
-- Added/updated tests for fixed impression recall, result/process event recall, projection shape, audit partition counts, and 50-result-event behavior.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that introduced this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 07:13 +08:00
-
-Purpose:
-- Simplify the Chat right sidebar so it does not duplicate the central timeline and only shows the inspection essentials.
-
-Changed:
-- Removed the right-sidebar `正在查看` block because the selected message/turn is already clear in the middle conversation timeline.
-- Removed raw `工作空间轨迹` and `LLM 调用检查点` blocks from the Chat sidebar.
-- Kept the sidebar focused on `当前工作空间`, `上下文窗口堆栈`, and `本轮记忆写入`.
-- Updated `ZLEAP_MASTER_PLAN.md` to make this simplified right-panel structure the UI contract.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 07:10 +08:00
-
-Purpose:
-- Clarify why child workspaces should know sibling workspace existence: the manifest list is shared environment memory / a capability map, not shared execution authority.
-
-Changed:
-- Updated the runtime prompt contract so child workspace awareness is described as a cross-workspace shared capability map similar to knowing other software exists while using one application.
-- Updated `ZLEAP_MASTER_PLAN.md` and `zleap-agent-framework.md` to distinguish workspace awareness from tool access and direct switching authority.
-- Updated the concept introduction UI labels/copy so the workspace manifest is presented as a shared capability map rather than a main-only list.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 07:04 +08:00
-
-Purpose:
-- Align memory writing with the clarified strategy: impression is agentic, event is hook/programmatic, skill is both agentic and conservative hook/manual, and runtime memory does not expose model-callable update/delete tools.
-
-Changed:
-- Removed `writeEventMemory`, `updateMemory`, and `deleteMemory` from the model-callable runtime memory tool surface and seed cleanup now removes legacy tool definitions/links from existing SQLite databases.
-- Kept `searchMemory`, `writeUserImpression`, `writeAgentSelfImpression`, and `writeSkillMemory` as the only universal memory tools visible inside workspaces.
-- Updated the hidden runtime prompt contract so event memory is described as lifecycle-hook owned, skill hook extraction is conservative and desensitized, and memory evolution is append/latest rather than in-place model mutation.
-- Updated `ZLEAP_MASTER_PLAN.md` and `zleap-agent-framework.md` to clarify the three memory write sources and the boundary between agent freedom and code authority.
-- Updated tests to assert legacy memory mutation tools are absent from callable tools while hook-generated event memory remains auditable.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that introduced this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 06:57 +08:00
-
-Purpose:
-- Make child workspaces aware of sibling workspace capabilities without allowing them to switch workspaces directly, and preserve workspace-local continuity across switches.
-
-Changed:
-- Runtime now includes the workspace manifest list in child workspace context so a child can recommend a sibling handoff through `exitWorkspace.suggestedNextSteps`.
-- Child workspaces still do not receive `enterWorkspace`; only `main` can schedule the next workspace.
-- Child workspace local conversation context now restores bounded prior records from the same workspace within the conversation, so returning to a workspace behaves like switching back to the same software rather than starting a memoryless sub-agent.
-- LLM call completion snapshots now persist the assistant message alongside raw provider metadata, which lets workspace-local history recover previous tool-call decisions.
-- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, and the concept intro copy to reflect this software-switching model.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:53 +08:00
-
-Purpose:
-- Keep callable tool schemas in the OpenAI-compatible `tools` request array instead of duplicating them into the system prompt.
-
-Changed:
-- Updated `PromptAssembler` so the system message only includes `system` and `workspace` context segments.
-- Kept the `tools` context segment as an inspectable snapshot for the Web UI and trace logs.
-- Added regression coverage that child workspace tool schemas appear in the request `tools` array but not inside the system message.
-- Updated `ZLEAP_MASTER_PLAN.md`, `zleap-agent-framework.md`, and the concept intro copy to clarify this boundary.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:51 +08:00
-
-Purpose:
-- Turn the external Framework markdown into a product-facing concept introduction while keeping it aligned with the latest Zleap runtime decisions.
-
-Changed:
-- Rewrote `zleap-agent-framework.md` to remove outdated/conflicting guidance: `listWorkspaces` is not a tool, `exitWorkspace` is child-only, Browser workspace is future scope, vector recall is not enabled in the first version, and tools/context categories follow the latest master plan.
-- Added a top-level `概念介绍` Web UI tab.
-- Built a visual concept guide covering the traditional-agent problem, Zleap's stable identity + dynamic workspace state model, workspace routing, memory layers, context stack, lifecycle hooks, design principles, and implementation modules.
-- Updated `ZLEAP_MASTER_PLAN.md` so the new tab and Framework markdown alignment rules remain part of the project direction.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:46 +08:00
-
-Purpose:
-- Make the Chat context stack numbering read like normal UI order instead of exposing internal sort weights.
-
-Changed:
-- Updated the context stack summary labels to display sequential numbers (`1`, `2`, `3`, ...) while continuing to use `sortOrder` only for internal ordering.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:40 +08:00
-
-Purpose:
-- Make callable tools visible inside every inspected LLM context stack, so each request shows exactly which function calls were exposed.
-
-Changed:
-- Added a first-level `tools` context segment during runtime prompt assembly with active workspace id, tool count, tool schemas, risk levels, and runtime/MCP binding metadata.
-- Removed callable tool definitions from the `workspace` segment so workspace information and tool exposure are no longer conflated.
-- Included the `tools` segment in the system message assembly, keeping the prompt and stored context stack aligned.
-- Updated the Chat context inspector to label/render `tools` as its own expandable category and synthesize the same view from saved `toolsJson` for older LLM call records.
-- Updated `ZLEAP_MASTER_PLAN.md` so future context-stack work treats tools as a first-level category.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:35 +08:00
-
-Purpose:
-- Make every saved LLM call inspectable from the Chat UI, not only the initial user-message turn.
-
-Changed:
-- Added current-conversation trace loading to the Chat page so it can group `context_segments` by `llmCallId`.
-- Added an `LLM 调用检查点` list in the right panel; each checkpoint opens the exact context stack for that saved LLM request.
-- Made user, assistant, workspace, and function-call/process messages clickable when they can be associated with an LLM call.
-- Cached the selected LLM call id in browser state.
-- Updated `ZLEAP_MASTER_PLAN.md` so future UI work preserves per-LLM-call context inspection.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:25 +08:00
-
-Purpose:
-- Teach the agent the internal workspace concept clearly enough to decide when to enter or exit workspaces.
-
-Changed:
-- Added an explicit workspace decision contract to the runtime system prompt: workspace is an internal capability boundary, `main` plans/integrates, and child workspaces specialize with limited tools.
-- Clarified in the prompt that child workspaces should call `exitWorkspace` when work is complete, failed, blocked, missing tools, requires user input/approval, or needs another workspace.
-- Added regression coverage that the assembled system message includes the workspace contract and `enterWorkspace`/`exitWorkspace` handoff language.
-- Updated `ZLEAP_MASTER_PLAN.md` with the rule that the system prompt should teach the internal workspace model while final user-facing answers still hide it.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:18 +08:00
-
-Purpose:
-- Stop exposing internal tool-loop limits as a per-workspace operation limit in user-facing chat.
-
-Changed:
-- Raised the default runtime tool-loop circuit breaker to 100 rounds and made it configurable with `ZLEAP_MAX_TOOL_ROUNDS`.
-- Replaced the user-facing "连续操作轮次" fallback with natural wording that asks whether to continue or clarify the goal.
-- Updated tests so loop-limit coverage verifies the audit/circuit-breaker behavior without requiring the old internal wording, and workspace-tool fake LLMs exit child workspaces through the normal `exitWorkspace` protocol.
-- Updated `ZLEAP_MASTER_PLAN.md` to clarify that the loop guard is a high global safety circuit breaker, not a per-workspace product limit.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Pending in this work session.
-
-## 2026-05-31 06:14 +08:00
-
-Purpose:
-- Remove redundant Workspace editor settings and make the workspace input/output protocol code-owned.
-
-Changed:
-- Replaced the duplicate Workspace `描述`/`工作空间说明` fields with one visible `工作空间说明` field.
-- Removed user-facing Workspace `输入类型`, `输出类型`, and `工具使用说明` fields from the Web UI.
-- Normalized workspace saves so code always supplies the fixed input protocol (`user_request`, `workspace_task`), fixed output protocol (`workspace_result`), mirrors the single workspace explanation into runtime instructions, and clears workspace-level tool instructions.
-- Updated `ZLEAP_MASTER_PLAN.md` to record that workspace input/output contracts are uniform and that tool usage guidance belongs to tool definitions.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-
-## 2026-05-31 06:10 +08:00
-
-Purpose:
-- Keep the Workspace editor compact when a workspace has no MCP Server.
-- Keep workspace save/delete actions reachable during vertical scrolling.
-
-Changed:
-- Stopped auto-creating an MCP Server draft when the selected workspace has no MCP Servers; the registration form now opens only after clicking `新增 Server`.
-- Made the Workspace editor action bar sticky at the bottom of the scrollable editor panel.
-- Updated `ZLEAP_MASTER_PLAN.md` with the compact MCP empty-state and persistent workspace actions rules.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 06:08 +08:00
-
-Purpose:
-- Prevent editing an existing workspace ID from accidentally creating a new workspace.
-- Add a Workspace UI path for deleting non-built-in workspaces.
-
-Changed:
-- Made saved workspace IDs read-only in the Workspace editor while keeping new unsaved workspace IDs editable.
-- Added a Workspace editor delete/cancel action: unsaved workspaces can be abandoned, custom saved workspaces can be deleted, and built-in `main/file/cli` workspaces cannot be deleted.
-- Routed Workspace UI deletion through the existing creator-gated `DELETE /api/workspaces/:id` API.
-- Updated `ZLEAP_MASTER_PLAN.md` with the immutable workspace ID and non-built-in deletion UI rules.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 06:02 +08:00
-
-Purpose:
-- Treat `file` and `cli` as built-in foundational workspaces instead of requiring MCP Server setup for their default tools.
-- Keep MCP as the expansion path for external/user-provided tools while making first-run file search and CLI execution actually runnable.
-
-Changed:
-- Added internal runtime executors for `searchFiles` and `runCommand`.
-- Changed seed bindings for `tool-search-files` and `tool-run-command` from placeholder to runtime executors.
-- Protected built-in file/CLI runtime tools from ordinary workspace tool editing/deletion.
-- Updated tests to prove `searchFiles` and `runCommand` complete through runtime execution, while MCP import/execution remains covered by the echo server fixture.
-- Updated `ZLEAP_MASTER_PLAN.md` with the rule that core local capabilities do not need MCP indirection.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 05:42 +08:00
-
-Purpose:
-- Make the Chat timeline feel like one continuous agent task stream for ordinary users, while still exposing workspace switches and function calls for users who inspect details.
-- Replace visible workspace/debug-looking process messages with compact collapsible run-process blocks.
-
-Changed:
-- Added `运行过程` chat messages for workspace entry/exit, function-call batches, and tool results.
-- Rendered non-final runtime events as collapsible details with simple summaries and expanded workspace/tool metadata.
-- Kept child workspace assistant text visible separately from the final assistant answer.
-- Updated `ZLEAP_MASTER_PLAN.md` with the user-task-first timeline rule.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 05:36 +08:00
-
-Purpose:
-- Correct the MCP product/runtime model from tool-first binding to workspace-scoped MCP Server binding.
-- Make MCP setup usable for both local stdio servers and remote Streamable HTTP servers: save server, detect tools, choose mounted tools, then execute through the generated binding.
-
-Changed:
-- Added the `mcp_servers` SQLite table, `McpServerDefinition` type, repository CRUD, server-to-binding generation, and workspace-scoped MCP tool import.
-- Added HTTP APIs under `/api/workspaces/:workspaceId/mcp-servers` for list/create/update/delete/discover/import.
-- Updated MCP execution parsing to accept `streamable-http` transport names and kept execution on the official TypeScript SDK client.
-- Reworked the Workspace UI so MCP Server management is the primary workflow, with discovery and selected-tool mounting inside the current workspace.
-- Changed seeded file/CLI capability tools back to placeholders until a real MCP Server is bound, so fake local MCP IDs are not presented as working tools.
-- Updated tests and docs to reflect server-first MCP setup and creator-gated MCP installation.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 05:27 +08:00
-
-Purpose:
-- Show child workspace LLM interactions in the central Chat conversation, instead of hiding them only in trace/log views.
-- Keep final assistant replies separate from workspace process messages, so user-facing answers stay clean while workspace execution remains visible.
-
-Changed:
-- Extended streaming runtime events with a `workspace` event type for workspace entry, child workspace assistant text, child tool calls/results, and workspace exit summaries.
-- Updated Chat UI message rendering to insert workspace process messages before the final assistant placeholder and style them separately from user/assistant messages.
-- Added a streaming child-workspace visibility test that proves file workspace LLM text and tool/exit events are emitted while the final answer remains separate.
-- Updated `ZLEAP_MASTER_PLAN.md` to make child workspace process visibility part of the runtime/UI contract and clarify that this replaces the older hidden-only streaming policy for child workspace interactions.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- In-app browser reload at `http://localhost:4173/` confirmed the refreshed Chat UI includes the workspace-aware conversation surface.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 05:22 +08:00
-
-Purpose:
-- Fix the Chat right panel's workspace display so a turn that entered `file` or another child workspace is not shown as only `main` after the child returns its result to main.
-- Make the UI reflect the runtime contract: child workspaces execute capability work, then normally exit back to main for final integration.
-
-Changed:
-- Added Web UI logic that derives the currently inspected workspace from the selected/latest turn's workspace trace, preferring the latest non-main workspace when one was involved.
-- Changed the Chat right panel label from current workspace to current inspected workspace, with status text and a "returned to main" note when applicable.
-- Updated workspace badge styling for primary workspace, status, and involved route.
-- Updated `ZLEAP_MASTER_PLAN.md` with the display rule.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- In-app browser reload at `http://localhost:4173/` confirmed the selected `查找js文件` turn now displays `file`, `状态：失败；运行结束后回到 main`, and `本轮涉及：main → file`.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 04:52 +08:00
-
-Purpose:
-- Make runtime memory recall inspectable in the Logs tab, including turns where the current SQLite FTS recall algorithm returns zero hits.
-- Clarify that missing recall results can be an FTS query/token limitation, not necessarily a missing memory or permission failure.
-
-Changed:
-- Added `memory_recall_requested` audit logs during workspace local-context construction, with conversation/workspace/task ids, query text, algorithm name, `vectorEnabled`, recall limits, raw partition counts, injected partition counts, and injected memory ids.
-- Added impression counts to `hook.afterWorkspaceEnter` metadata.
-- Added tests for successful child-workspace recall logging and zero-hit main-workspace recall logging.
-- Updated `ZLEAP_MASTER_PLAN.md` and `docs/03-memory-model.md` with the recall observability contract.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-
-Git:
-- Recorded by the Git commit that includes this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 04:10 +08:00
-
-Purpose:
-- Add a standing project process rule: every meaningful code or documentation change should be recorded in Git and logged here with timestamp, purpose, touched areas, verification status, and commit reference when available.
-- Preserve an acceptance summary for the prior multi-hour Agent framework implementation work, so the work can be reviewed against the original docs and design principles.
-
-Changed:
-- Added `ZLEAP_IMPLEMENTATION_ACCEPTANCE_SUMMARY.md`.
-- Added this `ZLEAP_CHANGELOG.md`.
-- Updated `ZLEAP_MASTER_PLAN.md` to make Git versioning plus timestamped change logging a mandatory project practice.
-
-Verification:
-- Documentation/process-only change. No runtime verification required.
-
-Git:
-- Recorded by the Git commit that introduced this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
-
-## 2026-05-31 04:48 +08:00
-
-Purpose:
-- Change workspace/tool management from a global shared tool-pool UI to workspace-first tool registration, and connect MCP-bound tools to a real MCP client executor instead of leaving them as placeholders.
-
-Changed:
-- Added `@modelcontextprotocol/sdk` as the official MCP TypeScript SDK dependency.
-- Added `src/core/mcp-executor.ts` to support MCP stdio and Streamable HTTP bindings, `listTools()` discovery, and `callTool()` execution with structured failed results on connection/configuration/tool errors.
-- Updated `ToolRegistry` and `AgentRuntime` so MCP tool execution can run asynchronously during normal and streaming tool loops.
-- Added `tool_definitions.workspaceId` and repository APIs for workspace-scoped tool create/update/delete.
-- Added HTTP APIs for workspace tool registration and MCP tool discovery.
-- Reworked the Workspace UI so tools are added, edited, discovered, and deleted inside the selected workspace rather than selected from a global pool.
-- Visually separated system/runtime tools from workspace-registered tools.
-- Added an MCP echo server fixture and an end-to-end runtime test proving a workspace MCP tool can execute through stdio.
-- Updated `ZLEAP_MASTER_PLAN.md` and `docs/02-workspace-runtime.md` with the workspace-first tool model and real MCP execution contract.
-
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- In-app browser verification could not complete because Browser Use rejected the localhost action under its URL policy.
-
-Git:
-- Pending in this work session.
+目的：
+- 防止 CLI/tool results 返回后，流式 LLM follow-up 调用永久停留在 `pending`。
+
+变更：
+- 给 OpenAI-compatible client 加入可配置 provider fetch timeout 和 stream idle timeout。
+- 流式响应读取在 idle 窗口内没有新 provider 数据时，会用清晰 timeout diagnostic 失败。
+- 添加回归测试，证明流式 tool-call follow-up 失败会在 `llm_calls` 中标记为 `failed`，而不是等到服务重启。
+- 更新主计划，记录有界流式请求与失败终结要求。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok":true}`。
+
+Git：
+- 已由 Git 提交 `fix: timeout stalled llm streams` 记录。
 
 ## 2026-05-31 19:17 +08:00
 
-Purpose:
-- Stop the agent from overusing `searchMemory` by teaching it that automatic recall is the normal memory path and manual memory search is low-frequency fallback behavior.
+目的：
+- 通过 prompt 约束让 agent 不再过度调用 `searchMemory`，明确自动召回才是常规记忆路径，手动记忆搜索只是低频 fallback。
 
-Changed:
-- Added explicit system-prompt rules for when `searchMemory` is appropriate: automatic context is insufficient, the user asks about previous memory/history, or the task depends on old memory evidence.
-- Added explicit system-prompt prohibitions against using `searchMemory` as ordinary search, workspace/tool discovery, generic safety checking, or repeated vague probing.
-- Updated the seeded `searchMemory` tool description to present it as low-frequency scoped memory fallback search.
-- Updated `ZLEAP_MASTER_PLAN.md` with the `searchMemory` usage boundary.
-- Added tests for the prompt contract and tool description.
+变更：
+- 在系统 prompt 中增加 `searchMemory` 适用场景：自动上下文不足、用户询问过去记忆/历史、任务依赖旧记忆证据。
+- 明确禁止把 `searchMemory` 当成普通搜索、工作空间/工具发现、泛化安全检查或反复模糊探测。
+- 更新 seed 中 `searchMemory` 工具描述，把它定位为低频 scoped memory fallback search。
+- 更新 `ZLEAP_MASTER_PLAN.md` 中的 `searchMemory` 使用边界。
+- 添加 prompt contract 和工具描述测试。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
-- Verified the local SQLite seed refreshed the `searchMemory` tool description and default agent system prompt.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web UI 服务 `http://localhost:4173/`；`/api/health` 返回 `{ "ok": true }`。
+- 已验证本地 SQLite seed 刷新了 `searchMemory` 工具描述和默认 agent system prompt。
 
-Git:
-- Recorded in commit `099c37e fix: constrain search memory prompting`.
+Git：
+- 已由提交 `099c37e fix: constrain search memory prompting` 记录。
 
 ## 2026-05-31 19:13 +08:00
 
-Purpose:
-- Tighten event process memory so it behaves like compact memory instead of storing noisy runtime trace payloads.
+目的：
+- 收紧事件过程记忆，让它像紧凑记忆，而不是保存嘈杂 runtime trace payload。
 
-Changed:
-- Replaced process-event detail generation for workspace-exit hooks with a compact task/status/observation/tool-overview summary.
-- Replaced conversation-window process-event detail generation with a compact window/user-intent/session/tool overview.
-- Stopped writing recalled memory dumps, raw message windows, `argumentsJson`, `resultJson`, and full tool/session JSON into process memory detail.
-- Added tests that process event detail stays under the compact limit and does not include raw trace fields.
-- Updated `ZLEAP_MASTER_PLAN.md` to document the process event memory boundary.
+变更：
+- 将 workspace-exit hook 的 process-event detail 改为紧凑 task/status/observation/tool-overview 摘要。
+- 将 conversation-window process-event detail 改为紧凑 window/user-intent/session/tool overview。
+- 停止把 recalled memory dumps、raw message windows、`argumentsJson`、`resultJson` 和完整 tool/session JSON 写入 process memory detail。
+- 添加测试，确保 process event detail 保持在紧凑限制内，且不包含原始 trace 字段。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录 process event memory 边界。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web UI 服务 `http://localhost:4173/`；`/api/health` 返回 `{ "ok": true }`。
 
-Git:
-- Recorded in commit `b01d3e2 fix: compact process event memory`.
+Git：
+- 已由提交 `b01d3e2 fix: compact process event memory` 记录。
 
 ## 2026-05-31 19:05 +08:00
 
-Purpose:
-- Make LLM provider failures diagnosable and resilient after a streamed 400 response was displayed as compressed binary-looking text.
+目的：
+- 在流式 400 响应被显示成压缩二进制乱码后，让 LLM provider 失败更可诊断、更具韧性。
 
-Changed:
-- Added server-side provider retry with up to 5 attempts for transient LLM failures: network errors, 408/409/425, 429, and 5xx.
-- Kept non-retryable 4xx request errors immediate so invalid request payloads are not blindly repeated.
-- Added gzip, brotli, and deflate decoding for provider error responses before saving/displaying the error message.
-- Added tests proving 5-attempt retry, streamed 429 retry, and compressed 400 error decoding.
-- Updated `ZLEAP_MASTER_PLAN.md` with the retry and error-decoding LLM contract.
+变更：
+- 对临时性 LLM 失败加入服务端 provider retry，最多 5 次：网络错误、408/409/425、429 和 5xx。
+- 保持不可重试的 4xx 请求错误立即失败，避免盲目重复无效 payload。
+- 保存/显示 provider error response 前，加入 gzip、brotli 和 deflate 解码。
+- 添加测试，覆盖 5 次重试、流式 429 重试和压缩 400 error 解码。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录 retry 和 error-decoding LLM contract。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web UI 服务 `http://localhost:4173/`；`/api/health` 返回 `{ "ok": true }`。
 
-Git:
-- Recorded in commit `27da167 fix: retry and decode llm provider errors`.
+Git：
+- 已由提交 `27da167 fix: retry and decode llm provider errors` 记录。
 
 ## 2026-05-31 09:02 +08:00
 
-Purpose:
-- Clarify whether Skill progressive disclosure is actually injected into the context stack and make the UI show that state directly.
+目的：
+- 澄清 Skill progressive disclosure 是否真的注入上下文堆栈，并让 UI 直接显示该状态。
 
-Changed:
-- Verified against the local SQLite trace that child workspace LLM calls can contain `currentWorkspaceSkillMemory` with `summary_only` and `readSkill`, while `main` calls may correctly show zero workspace-scoped Skill records.
-- Added a structured memory-context renderer in the Chat right panel.
-- Made the Skill memory section show the injected Skill title/summary, disclosure mode, `readSkill` tool hint, relation id, confidence, and id without requiring raw JSON reading.
-- Added an empty-state explanation for Skill memory when the selected LLM call has no active-workspace Skill recall.
-- Updated `ZLEAP_MASTER_PLAN.md` so context-stack Skill disclosure visibility is part of the UI contract.
+变更：
+- 通过本地 SQLite trace 验证 child workspace LLM calls 可以包含带 `summary_only` 和 `readSkill` 的 `currentWorkspaceSkillMemory`，而 `main` 调用可以正确显示 0 条 workspace-scoped Skill 记录。
+- 在 Chat 右侧面板添加结构化 memory-context renderer。
+- Skill memory 区域现在显示注入的 Skill title/summary、disclosure mode、`readSkill` tool hint、relation id、confidence 和 id，不需要阅读原始 JSON。
+- 当选中 LLM call 没有 active-workspace Skill recall 时，增加空状态解释。
+- 更新 `ZLEAP_MASTER_PLAN.md`，把 context-stack Skill disclosure 可见性纳入 UI contract。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- `/api/health` returned `{ "ok": true }` on `http://localhost:4173/`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `http://localhost:4173/` 的 `/api/health` 返回 `{ "ok": true }`。
 
-Git:
-- Pending in this work session.
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 08:52 +08:00
+
+目的：
+- 通过 runtime 控制的 result handoff context 减少工作空间切换时的信息损失，并稳定面向用户的回复语言。
+
+变更：
+- 向 workspace local context 添加 `WorkspaceHandoffContext`。
+- 进入子工作空间时，runtime 现在只携带当前用户请求、workspace-entry result 和有上限的 parent result evidence，而不是无关全局历史。
+- 返回 main 时，runtime 现在携带完整 child `WorkspaceResult`、child workspace 的 final assistant context 和关键 tool results；tool-call 参数和冗长中间过程日志保留在 trace/debug storage。
+- 更新 hidden runtime prompt，要求 main 把 child handoff results 当成权威证据，不得随意二次概括掉或遗漏关键事实。
+- 增加系统级语言规则：面向用户的回复遵循用户当前消息语言，除非用户要求翻译或指定其他语言。
+- 更新主计划和 context/workspace docs，记录软件 handoff 模型：传递完成结果，而不是完整编辑历史。
+- 添加测试，证明 handoff context 存在于 child/main transitions 中，同时排除 `tool_call` process items；并测试 system prompt 中的语言规则。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web UI 服务 `http://localhost:4173/`；`/api/health` 返回 `{ "ok": true }`。
+
+Git：
+- 已由 Git 提交 `feat: add workspace handoff context` 记录。
 
 ## 2026-05-31 08:39 +08:00
 
-Purpose:
-- Implement progressive Skill memory disclosure so the prompt sees recent Skill names/summaries first, and the agent reads full Skill details only when a Skill is clearly relevant to the current task.
+目的：
+- 实现 Skill memory 渐进式披露，让 prompt 先看到最近 Skill 名称/简介，只有当某条 Skill 与当前任务明确相关时，agent 才读取完整 Skill 详情。
 
-Changed:
-- Added the runtime memory tool `readSkill`, registered into every workspace beside `searchMemory`, impression writes, and `writeSkillMemory`.
-- Changed Skill recall to load recent active-workspace Skill summaries without FTS filtering, and changed prompt projection so Skill detail/procedure are not automatically injected.
-- Updated the hidden runtime prompt to teach the agent when to call `readSkill`, and tightened `writeSkillMemory` guidance around concrete reusable procedures, failure recovery, verified tool flows, and non-vague lessons.
-- Strengthened Skill quality gates and hook extraction so low-confidence or vague Skill records are rejected, while concrete search/inspect/edit/tool workflows remain valid.
-- Updated the concept tab and concept/master docs to explain progressive Skill disclosure and the stricter Skill generation standard.
-- Added tests for `readSkill` schema/binding/scope isolation and for summary-only Skill prompt injection.
+变更：
+- 添加 runtime memory tool `readSkill`，并和 `searchMemory`、impression writes、`writeSkillMemory` 一起注册到每个 workspace。
+- Skill recall 改为加载最近 active-workspace Skill summaries，不再使用 FTS 过滤；prompt projection 不再自动注入 Skill detail/procedure。
+- 更新 hidden runtime prompt，教 agent 何时调用 `readSkill`，并收紧 `writeSkillMemory` 对具体可复用流程、失败恢复、已验证工具流程和非空泛经验的要求。
+- 强化 Skill quality gates 和 hook extraction，让低置信度或空泛 Skill 记录被拒绝，同时保留具体 search/inspect/edit/tool workflows。
+- 更新概念 tab 和 concept/master docs，解释 progressive Skill disclosure 与更严格的 Skill 生成标准。
+- 添加 `readSkill` schema/binding/scope 隔离测试，以及 summary-only Skill prompt injection 测试。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web UI 服务 `http://localhost:4173/`；`/api/health` 返回 `{ "ok": true }`。
 
-Git:
-- Pending in this work session.
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 08:27 +08:00
+
+目的：
+- 让已有和缓存的 function-call/tool-result 过程消息显示具体参数和结果摘要，而不是只显示工具名。
+
+变更：
+- 更新 `src/web/main.tsx`，当缓存消息没有结构化 process items 时，从关联 LLM response 和 `tool_calls` trace logs 重建 process preview items。
+- 为常见 tool payload 增加参数/结果摘要器，例如搜索 query、shell command、stdout、summary、snippet 和 error。
+- 更新 process previews/details 使用重建条目，让折叠行能显示 `metasoSearch` 搜了什么、每个工具大致返回了什么。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录旧缓存 process messages 的 fallback trace reconstruction 要求。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok": true}`。
+
+Git：
+- 已由 Git 提交 `fix: recover process event details` 记录。
+
+## 2026-05-31 08:23 +08:00
+
+目的：
+- 移除 Chat context inspector 原始 LLM 日志视图中的横向滚动。
+
+变更：
+- 更新 `src/web/styles.css`，让 raw `final_messages` logs 自动换行、打断长 token，并隐藏横向 overflow。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/07-context-and-prompt-contracts.md`、`docs/README.md` 和 `zleap-agent-framework.md`，记录 raw provider logs 必须在面板内换行，而不是使用 X 轴滚动。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok": true}`。
+
+Git：
+- 已由 Git 提交 `fix: wrap raw llm logs` 记录。
+
+## 2026-05-31 08:19 +08:00
+
+目的：
+- 让 function-call 和 tool-result 过程消息一眼可读，并把调用参数与返回结果分开。
+
+变更：
+- 给流式 workspace/tool events 添加 structured process items，让 tool calls 携带 `argumentsJson`，tool results 携带 `resultJson`。
+- Chat process blocks 折叠时也显示一行工具调用/结果摘要。
+- 展开的 process details 中，function-call blocks 显示真实参数，tool-result blocks 显示真实返回结果。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录预期 process-message display contract。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok": true}`。
+
+Git：
+- 已由 Git 提交 `fix: summarize process tool events` 记录。
+
+## 2026-05-31 08:14 +08:00
+
+目的：
+- 修复 Chat context inspector 的 raw-log UI，让 raw mode 只直接显示原始 LLM messages log，而不是显示编号 context stack 或要求再展开一次。
+
+变更：
+- 更新 `src/web/main.tsx`，structured mode 显示不含 `final_messages` 的编号 context stack；raw-log mode 隐藏该堆栈，并直接用 raw text view 渲染保存的 `final_messages` 内容。
+- 更新 `src/web/styles.css`，支持直接 raw log panel。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/07-context-and-prompt-contracts.md`、`docs/README.md` 和 `zleap-agent-framework.md`，明确 raw provider-log mode 会隐藏 structured stack 并直接显示 `final_messages`。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok": true}`。
+
+Git：
+- 已由 Git 提交 `fix: show raw llm log directly` 记录。
+
+## 2026-05-31 08:06 +08:00
+
+目的：
+- 修复 Chat context inspection，点击某条用户消息时显示该消息自己的干净用户输入，而不是过期/更早回合，例如 `我是谁`。
+
+变更：
+- 更新 `src/web/main.tsx`，用户消息优先使用自己的 `turnOutput.contextSegments[0].llmCallId`，而不是缓存的 `inspectLlmCallId`。
+- 发送新消息时清理 stale selected LLM call state。
+- stream completion binding 改为从 `payload.output.contextSegments` 推导当前回合 first call，再只选择此后 LLM calls 作为 assistant final-call binding。
+- 在流式 workspace/process events 中添加 `llmCallId`，并保存到可见 workspace/process chat messages，让模型主动产生的中间回复能检查生成它们的确切 LLM call。
+- 更新 assistant-message fallback binding，让最终 assistant reply 解析到自己当前回合的 final LLM call，中间模型生成的 workspace messages 使用其 streamed `llmCallId`。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录用户消息绑定自己的发送回合上下文，AI 回复绑定产生该可见响应的具体模型调用，包括模型主动多轮调用。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok": true}`。
+
+Git：
+- 已由 Git 提交 `fix: bind chat context to current turn` 记录。
+
+## 2026-05-31 07:56 +08:00
+
+目的：
+- 修改 Chat context inspector 的 raw-log 行为，让 `显示原始日志` 将整个 context stack 切换为 raw text mode，而不是追加单独 raw-log block。
+
+变更：
+- 更新 `src/web/main.tsx`，context stack 使用一个 displayed segment list：structured mode 隐藏 `final_messages`，raw mode 显示完整 inspected stack，并把每个 segment 渲染为 raw text。
+- 增加 raw stack renderer 和 `raw-json` 样式，让 raw mode 显示直接 JSON/text，而不是结构化 JSON 表格。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/07-context-and-prompt-contracts.md`、`docs/README.md` 和 `zleap-agent-framework.md`，把 raw-log toggle 行为纳入设计契约。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已重启本地 Web 服务 `http://localhost:4173/`；`/api/health` 返回 `{"ok": true}`。
+
+Git：
+- 已由 Git 提交 `fix: toggle raw context stack` 记录。
+
+## 2026-05-31 07:50 +08:00
+
+目的：
+- 修复 prompt assembly 边界，并保护当前用户 impression recall。
+
+变更：
+- Prompt assembly 改为 system message 只包含 system/personality/runtime policy 文本。
+- Workspace manifest/context injection 从 system message 移到 synthetic `runtime_context.workspace` tool result。
+- Memory 和 local conversation 保持为 synthetic tool results，callable schemas 只保留在 OpenAI-compatible 顶层 `tools` request array。
+- 添加测试，证明 system message 不再包含 `## Callable Tools`、`toolCount` 或 workspace JSON，同时 workspace manifest 仍通过 `runtime_context.workspace` 可见。
+- 添加 recall 覆盖，证明当前用户 impressions 和当前 agent self impressions 都会注入，其他用户 impressions 被排除。
+- 更新 master/context/concept docs，记录修正后的 prompt assembly boundary。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由 Git 提交 `feat: add progressive skill disclosure` 记录。
+
+## 2026-05-31 07:43 +08:00
+
+目的：
+- 让 memory scope 可检查，并防止 user-impression 与 agent-self-impression 混淆。
+
+变更：
+- 强化 runtime system memory-write protocol：`writeUserImpression` 只用于当前用户长期事实，`writeAgentSelfImpression` 只用于 creator 授权的 agent identity/self-knowledge。
+- 增加 conversation trace memory-write recovery，让 Chat 右侧面板即使 run output cache 漏掉记录，也能显示与 selected run 关联的 memory rows。
+- 更新 Memory tab 表格和编辑器，显示 `agentId`、`relationId` 和可读 scope label。
+- 更新右侧面板 memory write display，显示 scope、userId、agentId、workspaceId、relationId、summary 和结构化完整记录视图。
+- 更新 master/concept/memory/lifecycle docs，明确 impression scope 规则，并移除过时的模型可调用 event/update memory 指引。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由引入本日志条目的 Git 提交记录。
+
+## 2026-05-31 07:38 +08:00
+
+目的：
+- 让 context stack 和 JSON-heavy debug views 足够可读，能验证 callable tools 和 runtime partitions，而不用扫原始 JSON blobs。
+
+变更：
+- 给 Web UI 增加可复用 structured JSON viewer。
+- Context stack sections 改为把 parsed JSON 渲染成 field groups、nested lists 和 table-like arrays，而不是 raw `<pre>` dumps。
+- LLM log message/tool/response payload details 使用同一 structured JSON view，同时保持 raw provider logs 与 normal context stack 分离。
+- 更新 concept guide、master plan 和 context contract docs，要求 readable structured JSON views，尤其是 OpenAI-compatible callable `tools` array。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由引入本日志条目的 Git 提交记录。
+
+## 2026-05-31 07:33 +08:00
+
+目的：
+- 在概念指南中澄清 memory handling，并让 raw provider payload logs 不进入 normal context stack。
+
+变更：
+- 在 `概念介绍` tab 中加入专门的 memory-recall 说明：recent raw context、result/process event projections、fixed impression recall，以及长对话为什么不重新注入原始 source data。
+- 将概念指南的 context section 改名为 `上下文概览`，并从 normal context stack illustration 中移除 `final_messages`。
+- 更新 Chat 右侧 context panel，让 `final_messages` 从 stack 中隐藏，只通过 stack 标题旁边低调的 `显示原始日志` toggle 出现。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`zleap-agent-framework.md` 和 `docs/` 下所有文件，说明 `final_messages` 是 raw provider-payload log，不是 context layer，并重申当前 memory recall/injection strategy。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已记录在提交 `2153447 fix: show skill disclosure in context`。
+
+## 2026-05-31 07:25 +08:00
+
+目的：
+- 实现已明确的长对话 memory recall 策略，并让 impression recall 固定加载而不是 query-selective。
+
+变更：
+- 自动 runtime recall 改为总是为当前 scope 加载最多 20 条最新有效 user/agent impressions，不做 SQLite FTS filtering。
+- Event recall 拆成 active `userId + workspaceId` 下最多 50 条最新 result events，加最多 8 条 SQLite FTS-matched process events。
+- 将 raw local conversation context 增加到 20 条 messages/records，并用 projected event memory 承接更早长对话连续性，而不是注入原始 transcript。
+- `runtime_context.memory` 和 `memory` context segment 改为注入 compact projected memory views，而不是原始 `MemoryRow` records、完整 `detail`、完整 `metadataJson` 或 evidence arrays。
+- 更新 Chat context labels 和概念介绍 UI，显示 result-event/process-event memory sections。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`zleap-agent-framework.md`、`docs/03-memory-model.md` 和 `docs/07-context-and-prompt-contracts.md`，记录 fixed-impression 和 long-conversation recall rules。
+- 添加/更新测试，覆盖 fixed impression recall、result/process event recall、projection shape、audit partition counts 和 50-result-event behavior。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由引入本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 07:13 +08:00
+
+目的：
+- 简化 Chat 右侧栏，避免重复中央 timeline 中已有信息，只展示检查所需的核心内容。
+
+变更：
+- 移除右侧栏 `正在查看` block，因为 selected message/turn 已经在中间 conversation timeline 中清楚显示。
+- 从 Chat sidebar 移除 raw `工作空间轨迹` 和 `LLM 调用检查点` blocks。
+- 让 sidebar 聚焦于 `当前工作空间`、`上下文窗口堆栈` 和 `本轮记忆写入`。
+- 更新 `ZLEAP_MASTER_PLAN.md`，将这个简化右侧面板结构作为 UI contract。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 07:10 +08:00
+
+目的：
+- 澄清为什么 child workspaces 应该知道 sibling workspace 的存在：manifest list 是 shared environment memory / capability map，不是共享执行权限。
+
+变更：
+- 更新 runtime prompt contract，把 child workspace awareness 描述为跨工作空间共享能力地图，类似使用一个应用时仍知道其他软件存在。
+- 更新 `ZLEAP_MASTER_PLAN.md` 和 `zleap-agent-framework.md`，区分 workspace awareness、tool access 和 direct switching authority。
+- 更新 concept introduction UI labels/copy，让 workspace manifest 呈现为 shared capability map，而不是 main-only list。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 07:04 +08:00
+
+目的：
+- 对齐已明确的 memory 写入策略：impression 是 agentic，event 是 hook/programmatic，skill 兼具 agentic 与保守 hook/manual，runtime memory 不暴露模型可调用 update/delete tools。
+
+变更：
+- 从模型可调用 runtime memory tool surface 移除 `writeEventMemory`、`updateMemory` 和 `deleteMemory`；seed cleanup 现在会从已有 SQLite 数据库中删除 legacy tool definitions/links。
+- 保留 `searchMemory`、`writeUserImpression`、`writeAgentSelfImpression` 和 `writeSkillMemory` 作为工作空间内唯一可见的通用 memory tools。
+- 更新 hidden runtime prompt contract，说明 event memory 由 lifecycle-hook 拥有，skill hook extraction 保守且脱敏，memory evolution 是 append/latest 而不是模型原地 mutation。
+- 更新 `ZLEAP_MASTER_PLAN.md` 和 `zleap-agent-framework.md`，澄清三类 memory write sources，以及 agent freedom 与 code authority 的边界。
+- 更新测试，断言 legacy memory mutation tools 不在 callable tools 中，同时 hook-generated event memory 仍可审计。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由引入本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 06:57 +08:00
+
+目的：
+- 让 child workspaces 知道 sibling workspace capabilities，但不允许它们直接切换工作空间，并在切换间保留 workspace-local continuity。
+
+变更：
+- Runtime 现在把 workspace manifest list 放入 child workspace context，让 child 可以通过 `exitWorkspace.suggestedNextSteps` 建议 sibling handoff。
+- Child workspaces 仍不接收 `enterWorkspace`；只有 `main` 可以调度下一个 workspace。
+- Child workspace local conversation context 现在会恢复同一 conversation 内相同 workspace 的有界 prior records，让返回某个 workspace 像切回同一个软件，而不是启动无记忆 sub-agent。
+- LLM call completion snapshots 现在会把 assistant message 和 raw provider metadata 一起持久化，让 workspace-local history 能恢复之前的 tool-call decisions。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`zleap-agent-framework.md` 和 concept intro copy，反映这个 software-switching model。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:53 +08:00
+
+目的：
+- 将 callable tool schemas 保持在 OpenAI-compatible `tools` request array 中，而不是复制进 system prompt。
+
+变更：
+- 更新 `PromptAssembler`，让 system message 只包含 `system` 和 `workspace` context segments。
+- 保留 `tools` context segment 作为 Web UI 和 trace logs 的可检查快照。
+- 增加回归覆盖，证明 child workspace tool schemas 出现在 request `tools` array 中，但不在 system message 内。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`zleap-agent-framework.md` 和 concept intro copy，澄清这个边界。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:51 +08:00
+
+目的：
+- 将外部 Framework markdown 转成面向产品的概念介绍，并保持它与最新 Zleap runtime 决策一致。
+
+变更：
+- 重写 `zleap-agent-framework.md`，移除过时/冲突指引：`listWorkspaces` 不是工具，`exitWorkspace` 只属于 child，Browser workspace 是未来范围，vector recall 首版未启用，tools/context categories 遵循最新主计划。
+- 添加顶层 `概念介绍` Web UI tab。
+- 构建视觉概念指南，覆盖传统 agent 问题、Zleap stable identity + dynamic workspace state 模型、workspace routing、memory layers、context stack、lifecycle hooks、design principles 和 implementation modules。
+- 更新 `ZLEAP_MASTER_PLAN.md`，让新 tab 和 Framework markdown 对齐规则继续作为项目方向的一部分。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:46 +08:00
+
+目的：
+- 让 Chat context stack 编号像正常 UI 顺序，而不是暴露内部 sort weights。
+
+变更：
+- 更新 context stack summary labels，显示连续编号（`1`、`2`、`3` ...），同时继续只在内部使用 `sortOrder` 排序。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:40 +08:00
+
+目的：
+- 让每个可检查的 LLM context stack 都显示 callable tools，使每次请求都能看到实际暴露了哪些 function calls。
+
+变更：
+- 在 runtime prompt assembly 中增加第一层 `tools` context segment，包含 active workspace id、tool count、tool schemas、risk levels 和 runtime/MCP binding metadata。
+- 从 `workspace` segment 移除 callable tool definitions，让 workspace information 和 tool exposure 不再混在一起。
+- 将 `tools` segment 包含进 system message assembly，使 prompt 和存储的 context stack 保持一致。
+- 更新 Chat context inspector，把 `tools` 标记/渲染为独立可展开类别，并为旧 LLM call records 从保存的 `toolsJson` 合成同样视图。
+- 更新 `ZLEAP_MASTER_PLAN.md`，让未来 context-stack 工作把 tools 作为第一层类别。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:35 +08:00
+
+目的：
+- 让 Chat UI 可以检查每个已保存 LLM call，而不只是初始用户消息回合。
+
+变更：
+- 在 Chat 页面添加 current-conversation trace loading，让它可以按 `llmCallId` 分组 `context_segments`。
+- 在右侧面板添加 `LLM 调用检查点` 列表；每个 checkpoint 打开对应已保存 LLM 请求的精确 context stack。
+- 当 user、assistant、workspace 和 function-call/process messages 能关联到 LLM call 时，允许点击检查。
+- 在浏览器状态中缓存 selected LLM call id。
+- 更新 `ZLEAP_MASTER_PLAN.md`，要求未来 UI 工作保留 per-LLM-call context inspection。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:25 +08:00
+
+目的：
+- 让 agent 足够清楚地理解内部 workspace 概念，从而决定何时进入或退出工作空间。
+
+变更：
+- 在 runtime system prompt 中加入明确 workspace decision contract：workspace 是内部能力边界，`main` 负责 planning/integration，child workspaces 使用有限工具专精执行。
+- 在 prompt 中说明 child workspaces 应在工作完成、失败、阻塞、缺工具、需要用户输入/审批或需要另一个工作空间时调用 `exitWorkspace`。
+- 增加回归覆盖，证明 assembled system message 包含 workspace contract 和 `enterWorkspace`/`exitWorkspace` handoff language。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录 system prompt 应教会内部 workspace model，同时最终面向用户回答仍隐藏这些机制。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:18 +08:00
+
+目的：
+- 停止把内部 tool-loop limit 暴露成面向用户的 per-workspace operation limit。
+
+变更：
+- 将默认 runtime tool-loop circuit breaker 提高到 100 轮，并通过 `ZLEAP_MAX_TOOL_ROUNDS` 可配置。
+- 用自然措辞替换面向用户的“连续操作轮次” fallback，询问是否继续或澄清目标。
+- 更新测试，让 loop-limit coverage 验证 audit/circuit-breaker 行为，而不依赖旧内部措辞；workspace-tool fake LLMs 通过正常 `exitWorkspace` 协议退出 child workspaces。
+- 更新 `ZLEAP_MASTER_PLAN.md`，澄清 loop guard 是高全局安全 circuit breaker，不是 per-workspace product limit。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本工作会话中待记录。
+
+## 2026-05-31 06:14 +08:00
+
+目的：
+- 移除冗余 Workspace editor 设置，让 workspace input/output protocol 由代码拥有。
+
+变更：
+- 用一个可见 `工作空间说明` 字段替换重复的 Workspace `描述`/`工作空间说明` 字段。
+- 从 Web UI 移除面向用户的 Workspace `输入类型`、`输出类型` 和 `工具使用说明` 字段。
+- 规范化 workspace saves：代码总是提供固定 input protocol（`user_request`、`workspace_task`）、固定 output protocol（`workspace_result`），把单一 workspace explanation 镜像到 runtime instructions，并清空 workspace-level tool instructions。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录 workspace input/output contracts 统一，tool usage guidance 属于 tool definitions。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+
+## 2026-05-31 06:10 +08:00
+
+目的：
+- 当 workspace 没有 MCP Server 时，让 Workspace editor 保持紧凑。
+- 让 workspace 保存/删除操作在垂直滚动时始终可触达。
+
+变更：
+- 当选中的 workspace 没有 MCP Servers 时，不再自动创建 MCP Server draft；注册表单只在点击 `新增 Server` 后打开。
+- 将 Workspace editor action bar 固定在可滚动编辑面板底部。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录紧凑 MCP empty-state 和持久 workspace actions 规则。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 06:08 +08:00
+
+目的：
+- 防止编辑已有 workspace ID 时意外创建新 workspace。
+- 为非内置 workspace 增加 UI 删除路径。
+
+变更：
+- 已保存 workspace ID 在 Workspace editor 中只读，新建未保存 workspace ID 仍可编辑。
+- 增加 Workspace editor delete/cancel action：未保存 workspace 可放弃，自定义已保存 workspace 可删除，内置 `main/file/cli` 不可删除。
+- Workspace UI 删除通过已有 creator-gated `DELETE /api/workspaces/:id` API。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录 immutable workspace ID 和 non-built-in deletion UI 规则。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 06:02 +08:00
+
+目的：
+- 将 `file` 和 `cli` 作为内置基础工作空间处理，而不是要求默认工具必须先配置 MCP Server。
+- 保持 MCP 作为外部/用户提供工具的扩展路径，同时让首次运行的文件搜索和 CLI 执行真实可用。
+
+变更：
+- 为 `searchFiles` 和 `runCommand` 添加 internal runtime executors。
+- 将 `tool-search-files` 和 `tool-run-command` 的 seed bindings 从 placeholder 改成 runtime executors。
+- 保护内置 file/CLI runtime tools，防止普通 workspace tool editing/deletion。
+- 更新测试，证明 `searchFiles` 和 `runCommand` 可通过 runtime execution 完成，同时 MCP import/execution 仍由 echo server fixture 覆盖。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录核心本地能力不需要 MCP indirection。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 05:42 +08:00
+
+目的：
+- 让普通用户看到的 Chat timeline 像一个连续 agent task stream，同时为检查详情的用户暴露 workspace switches 和 function calls。
+- 用紧凑可折叠运行过程块替代显眼的 workspace/debug 风格过程消息。
+
+变更：
+- 为 workspace entry/exit、function-call batches 和 tool results 添加 `运行过程` chat messages。
+- 将非最终 runtime events 渲染为带简单摘要和扩展 workspace/tool metadata 的 collapsible details。
+- 保留 child workspace assistant text，并与 final assistant answer 分开显示。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录 user-task-first timeline 规则。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 05:36 +08:00
+
+目的：
+- 将 MCP 产品/runtime 模型从 tool-first binding 修正为 workspace-scoped MCP Server binding。
+- 让 MCP setup 同时支持本地 stdio server 和远程 Streamable HTTP server：保存 server、检测工具、选择挂载工具，再通过生成的 binding 执行。
+
+变更：
+- 添加 `mcp_servers` SQLite 表、`McpServerDefinition` 类型、repository CRUD、server-to-binding generation 和 workspace-scoped MCP tool import。
+- 添加 `/api/workspaces/:workspaceId/mcp-servers` 下的 list/create/update/delete/discover/import HTTP APIs。
+- 更新 MCP execution parsing，接受 `streamable-http` transport names，并继续使用官方 TypeScript SDK client 执行。
+- 重做 Workspace UI，让 MCP Server management 成为主流程，在当前 workspace 中发现并挂载选中工具。
+- 将 seeded file/CLI capability tools 改回 placeholders，直到绑定真实 MCP Server，避免把假的本地 MCP IDs 显示为可用工具。
+- 更新测试和 docs，反映 server-first MCP setup 与 creator-gated MCP installation。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 05:27 +08:00
+
+目的：
+- 在中央 Chat 对话中显示 child workspace LLM interactions，而不是只藏在 trace/log views。
+- 保持 final assistant replies 与 workspace process messages 分离，让用户可见答案保持干净，同时工作空间执行过程可见。
+
+变更：
+- 扩展 streaming runtime events，加入 `workspace` event type，用于 workspace entry、child workspace assistant text、child tool calls/results 和 workspace exit summaries。
+- 更新 Chat UI message rendering，在 final assistant placeholder 前插入 workspace process messages，并让它们与 user/assistant messages 使用不同样式。
+- 添加 streaming child-workspace visibility test，证明 file workspace LLM text 和 tool/exit events 会发出，同时 final answer 仍然分离。
+- 更新 `ZLEAP_MASTER_PLAN.md`，让 child workspace process visibility 成为 runtime/UI contract，并澄清它取代了旧的 child workspace interactions hidden-only streaming policy。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- In-app browser reload `http://localhost:4173/` 已确认刷新后的 Chat UI 包含 workspace-aware conversation surface。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 05:22 +08:00
+
+目的：
+- 修复 Chat 右侧面板的 workspace display，避免进入 `file` 或其他 child workspace 的回合，在 child 返回结果给 main 后仍只显示 `main`。
+- 让 UI 反映 runtime contract：child workspaces 执行能力工作，然后通常退出回 main 做最终整合。
+
+变更：
+- 添加 Web UI 逻辑，从 selected/latest turn 的 workspace trace 推导当前 inspected workspace；当涉及非 main workspace 时，优先显示最近的非 main workspace。
+- 将 Chat 右侧面板标签从当前工作空间改为当前 inspected workspace，并在适用时显示 status text 和“returned to main” note。
+- 更新 workspace badge styling，支持 primary workspace、status 和 involved route。
+- 更新 `ZLEAP_MASTER_PLAN.md`，记录显示规则。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- In-app browser reload `http://localhost:4173/` 已确认选中的 `查找js文件` 回合显示 `file`、`状态：失败；运行结束后回到 main` 和 `本轮涉及：main → file`。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 04:52 +08:00
+
+目的：
+- 在 Logs tab 中让 runtime memory recall 可检查，包括当前 SQLite FTS recall algorithm 返回 0 命中的回合。
+- 澄清召回缺失可能是 FTS query/token 限制，不一定是没有 memory 或权限失败。
+
+变更：
+- 在 workspace local-context construction 期间添加 `memory_recall_requested` audit logs，包含 conversation/workspace/task ids、query text、algorithm name、`vectorEnabled`、recall limits、raw partition counts、injected partition counts 和 injected memory ids。
+- 在 `hook.afterWorkspaceEnter` metadata 中添加 impression counts。
+- 添加成功 child-workspace recall logging 和 zero-hit main-workspace recall logging 测试。
+- 更新 `ZLEAP_MASTER_PLAN.md` 和 `docs/03-memory-model.md`，记录 recall observability contract。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 已由包含本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 04:48 +08:00
+
+目的：
+- 将 workspace/tool management 从全局共享 tool-pool UI 改为 workspace-first tool registration，并把 MCP-bound tools 接到真实 MCP client executor，而不是保留为 placeholders。
+
+变更：
+- 添加 `@modelcontextprotocol/sdk` 作为官方 MCP TypeScript SDK 依赖。
+- 添加 `src/core/mcp-executor.ts`，支持 MCP stdio 和 Streamable HTTP bindings、`listTools()` discovery，以及 `callTool()` execution；连接、配置或工具错误会返回结构化失败结果。
+- 更新 `ToolRegistry` 和 `AgentRuntime`，让 MCP tool execution 可在普通和流式 tool loops 中异步运行。
+- 添加 `tool_definitions.workspaceId` 和 workspace-scoped tool create/update/delete repository APIs。
+- 添加 workspace tool registration 和 MCP tool discovery HTTP APIs。
+- 重做 Workspace UI，让工具在选中 workspace 内新增、编辑、发现和删除，而不是从全局池选择。
+- 视觉上分离 system/runtime tools 和 workspace-registered tools。
+- 添加 MCP echo server fixture 和端到端 runtime 测试，证明 workspace MCP tool 可通过 stdio 执行。
+- 更新 `ZLEAP_MASTER_PLAN.md` 和 `docs/02-workspace-runtime.md`，记录 workspace-first tool model 和真实 MCP execution contract。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- In-app browser verification 未完成，因为 Browser Use 在该环境下拒绝 localhost action。
+
+Git：
+- 本工作会话中待记录。
 
 ## 2026-05-31 04:31 +08:00
 
-Purpose:
-- Move lifecycle hook logs, tool call logs, approval requests, and LLM request logs out of the Chat context inspector into a dedicated top-level log area, so the Chat right panel stays focused on workspace state and context stack inspection.
+目的：
+- 将 lifecycle hook logs、tool call logs、approval requests 和 LLM request logs 从 Chat context inspector 移到专门的顶层日志区域，让 Chat 右侧面板专注 workspace state 和 context stack inspection。
 
-Changed:
-- Added a fourth top-level Web UI tab: `日志`.
-- Added `LogsTab` in `src/web/main.tsx` with current conversation trace loading, global recent LLM request loading, compact LLM debug summary, lifecycle log panel, tool call log panel, approval request panel, and LLM request log panels.
-- Added clear actions for the whole visible log view and for each log section. These clear the current UI view rather than deleting persisted audit/debug records.
-- Removed lifecycle, tool call, approval, and LLM log sections from the Chat right panel.
-- Updated `src/web/styles.css` for the new log page layout.
-- Updated `ZLEAP_MASTER_PLAN.md` so the dedicated `日志` tab is part of the project UI contract.
+变更：
+- 添加第四个顶层 Web UI tab：`日志`。
+- 在 `src/web/main.tsx` 中添加 `LogsTab`，支持 current conversation trace loading、global recent LLM request loading、compact LLM debug summary、lifecycle log panel、tool call log panel、approval request panel 和 LLM request log panels。
+- 为整个可见 log view 和各 log section 添加清空动作；这些动作只清空当前 UI view，不删除持久化 audit/debug records。
+- 从 Chat 右侧面板移除 lifecycle、tool call、approval 和 LLM log sections。
+- 更新 `src/web/styles.css`，支持新的 log page layout。
+- 更新 `ZLEAP_MASTER_PLAN.md`，把专门的 `日志` tab 纳入项目 UI contract。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Browser verification could not complete because the local server process did not remain reachable at `http://localhost:4173/` after background startup attempts in this environment.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- Browser verification 未完成，因为该环境下 background startup attempts 后，本地 server process 没有保持在 `http://localhost:4173/` 可访问。
 
-Git:
-- Pending in this work session.
+Git：
+- 本工作会话中待记录。
 
 ## 2026-05-31 04:25 +08:00
 
-Purpose:
-- Align the prompt/context contract with the clarified workspace model: runtime strategy belongs in the system prompt, workspace routing information belongs in the main workspace contract, memory is shown as a first-level stack with clear second-level sections, and redundant local workspace/task categories are merged.
+目的：
+- 按已澄清的 workspace model 对齐 prompt/context contract：runtime strategy 属于 system prompt；workspace routing information 属于 main workspace contract；memory 作为第一层堆栈显示并有清晰二级分区；冗余 local workspace/task categories 合并。
 
-Changed:
-- Updated `src/core/context-builder.ts` so the primary context stack now uses stable first-level categories: `system`, `workspace`, `memory`, `history`, and `user`, with debug follow-ups for `tool_result` and `final_messages`.
-- Merged base system prompt, personality prompt, hidden runtime strategy, and proactive impression-memory write protocol into the single `system` context segment and final OpenAI-compatible system message.
-- Moved active workspace description, instructions, manifest, memory policy, and tool definitions into the `workspace` segment; only the main workspace receives the full available-workspace manifest list.
-- Replaced separate runtime synthetic tool results for task/history/load with `runtime_context.memory` and `runtime_context.local_conversation`.
-- Updated `src/core/attention-budget.ts`, `src/tests/run-tests.ts`, `src/web/main.tsx`, and `src/web/styles.css` for the simplified context stack and second-level UI expansion.
-- Updated `ZLEAP_MASTER_PLAN.md`, `docs/02-workspace-runtime.md`, `docs/03-memory-model.md`, and `docs/07-context-and-prompt-contracts.md` so the documentation matches the new contract.
+变更：
+- 更新 `src/core/context-builder.ts`，primary context stack 使用稳定第一层类别：`system`、`workspace`、`memory`、`history` 和 `user`，并保留 `tool_result` 和 `final_messages` 调试 follow-ups。
+- 将 base system prompt、personality prompt、hidden runtime strategy 和 proactive impression-memory write protocol 合并进单一 `system` context segment 和最终 OpenAI-compatible system message。
+- 将 active workspace description、instructions、manifest、memory policy 和 tool definitions 放入 `workspace` segment；只有 main workspace 收到完整 available-workspace manifest list。
+- 用 `runtime_context.memory` 和 `runtime_context.local_conversation` 替换独立 runtime synthetic tool results for task/history/load。
+- 更新 `src/core/attention-budget.ts`、`src/tests/run-tests.ts`、`src/web/main.tsx` 和 `src/web/styles.css`，支持简化 context stack 和二级 UI 展开。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/02-workspace-runtime.md`、`docs/03-memory-model.md` 和 `docs/07-context-and-prompt-contracts.md`，使文档匹配新契约。
 
-Verification:
-- `npm run typecheck` passed.
-- `npm test` passed.
-- `npm run build` passed.
-- Restarted the local server on `http://localhost:4173/` with process id `7456`.
-- In-app browser automation could not complete because the Browser tool rejected the localhost navigation/reload request under its URL policy.
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- 已在 `http://localhost:4173/` 重启本地 server，进程 id 为 `7456`。
+- In-app browser automation 未完成，因为 Browser tool 在其 URL policy 下拒绝 localhost navigation/reload request。
 
-Git:
-- Recorded by the Git commit that introduced this changelog entry.
-- No remote repository is currently configured, so push cannot be performed yet.
+Git：
+- 已由引入本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
+
+## 2026-05-31 04:10 +08:00
+
+目的：
+- 增加长期项目流程规则：每次有意义的代码或文档改动都应该进入 Git，并在本文件中记录时间、目的、涉及区域、验证状态和可用的 commit reference。
+- 保留此前多小时 Agent framework 实现工作的验收总结，方便按原始 docs 和设计原则复盘。
+
+变更：
+- 添加 `ZLEAP_IMPLEMENTATION_ACCEPTANCE_SUMMARY.md`。
+- 添加本文件 `ZLEAP_CHANGELOG.md`。
+- 更新 `ZLEAP_MASTER_PLAN.md`，把 Git 版本记录和带时间戳变更日志作为强制项目实践。
+
+验证：
+- 仅文档/流程改动，不需要 runtime 验证。
+
+Git：
+- 已由引入本日志条目的 Git 提交记录。
+- 当时尚未配置 remote repository，因此无法 push。
