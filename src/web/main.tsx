@@ -676,6 +676,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 function App() {
   const [tab, setTab] = useState<Tab>("chat");
+  const renderTabPanel = (item: Tab, node: React.ReactNode) => (
+    <div className={`tab-panel ${tab === item ? "active" : ""}`} aria-hidden={tab !== item}>
+      {node}
+    </div>
+  );
 
   return (
     <main className="app-shell">
@@ -692,11 +697,11 @@ function App() {
           ))}
         </nav>
       </header>
-      {tab === "chat" && <ChatTab />}
-      {tab === "workspace" && <WorkspaceTab />}
-      {tab === "memory" && <MemoryTab />}
-      {tab === "logs" && <LogsTab />}
-      {tab === "concept" && <ConceptIntroTab />}
+      {renderTabPanel("chat", <ChatTab />)}
+      {renderTabPanel("workspace", <WorkspaceTab />)}
+      {renderTabPanel("memory", <MemoryTab />)}
+      {renderTabPanel("logs", <LogsTab />)}
+      {renderTabPanel("concept", <ConceptIntroTab />)}
     </main>
   );
 }

@@ -89,6 +89,17 @@ button:disabled {
   color: #ffffff;
 }
 
+.tab-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
 .panel {
   background: #ffffff;
   border: 1px solid #dce2e8;
