@@ -21,7 +21,7 @@
 - 浏览器验证通过：刷新 `http://localhost:4173/` 并打开 `概念介绍`，可见“上下文窗口堆栈”、`memory` 分区展开、`runtime_context.local_conversation`、`readMemory(memoryId)` 和 `readSkill(skillId)`，页面不再出现“上下文概览”。
 
 Git：
-- 待提交。
+- `3f8dce2` 重做概念介绍上下文堆栈。
 
 ## 2026-06-01 06:17 +08:00
 
