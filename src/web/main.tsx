@@ -4,11 +4,6 @@ import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSeg
 import "./styles.css";
 
 type Tab = "chat" | "workspace" | "memory" | "logs" | "tables" | "concept";
-type GlobalRunState = {
-  running: boolean;
-  label: string;
-  stop?: () => void;
-};
 type ChatMessage = {
   id: string;
   role: string;
@@ -697,7 +692,6 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 function App() {
   const [tab, setTab] = useState<Tab>("chat");
-  const [globalRun, setGlobalRun] = useState<GlobalRunState>({ running: false, label: "" });
   const renderTabPanel = (item: Tab, node: React.ReactNode) => (
     <div className={`tab-panel ${tab === item ? "active" : ""}`} aria-hidden={tab !== item}>
       {node}
@@ -718,14 +712,8 @@ function App() {
             </button>
           ))}
         </nav>
-        {globalRun.running && (
-          <div className="global-run-banner">
-            <span>{globalRun.label || "对话正在生成"}</span>
-            <button className="danger" onClick={() => globalRun.stop?.()}>停止</button>
-          </div>
-        )}
       </header>
-      {renderTabPanel("chat", <ChatTab onRunStateChange={setGlobalRun} />)}
+      {renderTabPanel("chat", <ChatTab />)}
       {renderTabPanel("workspace", <WorkspaceTab />)}
       {renderTabPanel("memory", <MemoryTab />)}
       {renderTabPanel("logs", <LogsTab />)}
@@ -990,7 +978,7 @@ function ConceptIntroTab() {
   );
 }
 
-function ChatTab({ onRunStateChange }: { onRunStateChange?: (state: GlobalRunState) => void }) {
+function ChatTab() {
   const cached = loadCache();
   const [agent, setAgent] = useState<AgentConfig | null>(null);
   const [userId, setUserId] = useState(cached.userId ?? "user");
@@ -1090,11 +1078,6 @@ function ChatTab({ onRunStateChange }: { onRunStateChange?: (state: GlobalRunSta
     const assistantMessageId = createLocalId("assistant-msg");
     const controller = new AbortController();
     currentRunControllerRef.current = controller;
-    onRunStateChange?.({
-      running: true,
-      label: "对话正在生成，切换页面不会中断运行",
-      stop: () => controller.abort()
-    });
     setLoading(true);
     setError("");
     setRetryMessage("");
@@ -1267,7 +1250,6 @@ function ChatTab({ onRunStateChange }: { onRunStateChange?: (state: GlobalRunSta
       });
     } finally {
       if (currentRunControllerRef.current === controller) currentRunControllerRef.current = null;
-      onRunStateChange?.({ running: false, label: "" });
       setLoading(false);
     }
   }

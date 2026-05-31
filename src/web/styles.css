@@ -83,24 +83,6 @@ button:disabled {
   gap: 8px;
 }
 
-.global-run-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid #f2c94c;
-  border-radius: 6px;
-  background: #fff8dc;
-  color: #5f4700;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.global-run-banner button {
-  padding: 5px 8px;
-  font-size: 12px;
-}
-
 .tabs button.active {
   background: #172026;
   border-color: #172026;
