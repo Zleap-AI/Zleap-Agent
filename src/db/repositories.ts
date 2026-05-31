@@ -717,7 +717,7 @@ export class Repositories {
     const resultEvents = recallPartition(
       "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'result'",
       [input.userId, input.workspaceId],
-      input.resultEventLimit ?? input.eventLimit ?? 50
+      input.resultEventLimit ?? input.eventLimit ?? 10
     );
     const processEvents = recallPartition(
       "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'process'",

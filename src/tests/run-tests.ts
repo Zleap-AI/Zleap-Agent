@@ -2645,7 +2645,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     }
   });
   const raisedLimitFileSession = raisedLimitOutput.workspaceTrace.find((session) => session.workspaceId === "dev");
-  assert.equal(raisedLimitFileSession?.localContext.recalledEventMemories.filter((memory) => metadataOf(memory).eventKind === "result").length, 50);
+  assert.equal(raisedLimitFileSession?.localContext.recalledEventMemories.filter((memory) => metadataOf(memory).eventKind === "result").length, 10);
   const raisedProcessEvents = raisedLimitFileSession?.localContext.recalledEventMemories.filter((memory) => metadataOf(memory).eventKind === "process") ?? [];
   assert.equal(raisedProcessEvents.length >= 1, true);
   assert.equal(raisedProcessEvents.length <= 8, true);

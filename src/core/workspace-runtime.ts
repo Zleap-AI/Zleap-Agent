@@ -3,7 +3,7 @@ import { createId, nowIso } from "./id";
 import { Repositories } from "../db/repositories";
 
 const IMPRESSION_RECALL_LIMIT = 20;
-const RESULT_EVENT_RECALL_LIMIT = 50;
+const RESULT_EVENT_RECALL_LIMIT = 10;
 const PROCESS_EVENT_RECALL_LIMIT = 8;
 
 export class WorkspaceRuntime {

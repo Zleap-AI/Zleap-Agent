@@ -245,7 +245,7 @@ workspace memory 包含三类：
 ```text
 结果事件记忆：
   按 userId + workspaceId 隔离
-  最新有效结果，约 50 条
+  最新有效结果，约 10 条
 
 相关过程事件记忆：
   按 userId + workspaceId 隔离
@@ -369,7 +369,7 @@ type AttentionBudget = {
 1. system 和 personality 稳定但尽量短。
 2. workspace instructions 必须准确，不能过长。
 3. impression memory 固定注入最新有效 20 条投影，不做 query 选择性召回。
-4. event memory 分层注入：约 50 条 result event 保留旧结果时间线，少量 process event 按当前任务相关性召回。
+4. event memory 分层注入：约 10 条 result event 保留旧结果时间线，少量 process event 按当前任务相关性召回。
 5. skill memory 数量要少，默认只注入最近 N 条名称和简介；高度相关时用 `readSkill` 渐进读取完整步骤。
 6. tool result 长输出必须摘要。
 7. local history 只保留当前 workspace 的必要片段。

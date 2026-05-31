@@ -915,7 +915,7 @@ function ConceptIntroTab() {
           </article>
           <article>
             <strong>事件投影</strong>
-            <span>50 条结果 + 相关过程索引</span>
+            <span>10 条结果 + 相关过程索引</span>
             <p>结果事件提供旧任务时间线；过程事件只按当前任务相关性召回少量索引和摘要投影，完整细节按 id 用 readMemory 读取。</p>
           </article>
           <article>
@@ -963,7 +963,7 @@ function ConceptIntroTab() {
               items: ["跨工作空间印象记忆", "当前工作空间结果事件", "当前工作空间相关过程事件", "当前工作空间经验记忆"],
               memoryDetails: [
                 ["crossWorkspaceImpressionMemory", "跨工作空间印象记忆", "最新有效 20 条投影", "用户印象与 Agent 自我印象；默认不做 query 筛选，详情未注入，必要时用 readMemory。"],
-                ["currentWorkspaceResultEvents", "当前工作空间结果事件", "约 50 条旧结果时间线", "记录过去完成了什么、失败了什么、产出在哪里；不复制原始对话。"],
+                ["currentWorkspaceResultEvents", "当前工作空间结果事件", "约 10 条旧结果时间线", "记录过去完成了什么、失败了什么、产出在哪里；不复制原始对话。"],
                 ["currentWorkspaceRelevantProcessEvents", "当前工作空间相关过程事件", "少量 FTS 相关过程索引", "只给 id/title/summary/readMemory 提示；过程 detail 不直接进入上下文。"],
                 ["currentWorkspaceSkillMemory", "当前工作空间经验记忆", "近 N 条名称和简介", "先看简介判断相关性；高度相关时调用 readSkill 读取 procedure/appliesWhen/avoidWhen。"]
               ]
