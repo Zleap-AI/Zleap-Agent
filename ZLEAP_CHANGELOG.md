@@ -2,6 +2,21 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 20:17 +08:00
+
+Purpose:
+- Remove the obsolete implementation acceptance summary because it was a one-time验收 document and is not part of the current source-of-truth documentation set.
+
+Changed:
+- Deleted `ZLEAP_IMPLEMENTATION_ACCEPTANCE_SUMMARY.md`.
+- Kept `ZLEAP_MASTER_PLAN.md` unchanged because this cleanup does not change architecture, runtime, UI, memory, LLM protocol, or data model.
+
+Verification:
+- Pending in this work session.
+
+Git:
+- Pending.
+
 ## 2026-05-31 20:13 +08:00
 
 Purpose:
