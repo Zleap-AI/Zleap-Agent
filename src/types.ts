@@ -38,6 +38,22 @@ export type AgentConfig = {
   updatedAt: string;
 };
 
+export type RuntimeConfigValueType = "number" | "boolean" | "string";
+
+export type RuntimeConfigItem = {
+  key: string;
+  category: string;
+  label: string;
+  description: string;
+  valueType: RuntimeConfigValueType;
+  value: number | boolean | string;
+  defaultValue: number | boolean | string;
+  minValue?: number;
+  maxValue?: number;
+  step?: number;
+  updatedAt: string;
+};
+
 export type AgentRunInput = {
   agentId: string;
   userId: string;

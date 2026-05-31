@@ -62,6 +62,25 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/config") {
+      const actor = parseActorFromSearchParams(url.searchParams, "Runtime config list API");
+      sendJson(response, 200, { configs: repos.listRuntimeConfigs(actor.actorRole) });
+      return;
+    }
+
+    const configMatch = url.pathname.match(/^\/api\/config\/([^/]+)$/);
+    if (configMatch && request.method === "PUT") {
+      const body = await readJson<{ value: unknown; actorId?: string; actorRole?: "user" | "creator" }>(request);
+      const actor = parseActor(body, "Runtime config update API");
+      sendJson(response, 200, repos.updateRuntimeConfig({
+        key: decodeURIComponent(configMatch[1]),
+        value: body.value,
+        actorId: actor.actorId,
+        actorRole: actor.actorRole
+      }));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/approvals") {
       const limit = Number(url.searchParams.get("limit") ?? 100);
       const actor = parseActorFromSearchParams(url.searchParams, "Approval list API");

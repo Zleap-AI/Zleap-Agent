@@ -9,6 +9,9 @@ export type ChatCompletionInput = {
   tools: ToolDefinition[];
   temperature?: number;
   signal?: AbortSignal;
+  maxProviderAttempts?: number;
+  providerFetchTimeoutMs?: number;
+  streamIdleTimeoutMs?: number;
 };
 
 export type ChatCompletionOutput = {
@@ -197,15 +200,19 @@ async function fetchWithProviderRetry(input: {
   apiKey: string;
   body: unknown;
   signal?: AbortSignal;
+  maxProviderAttempts?: number;
+  providerFetchTimeoutMs?: number;
 }): Promise<Response> {
   let lastNetworkError: unknown;
-  for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt += 1) {
+  const maxAttempts = Math.max(1, Math.floor(input.maxProviderAttempts ?? MAX_PROVIDER_ATTEMPTS));
+  const fetchTimeoutMs = Math.max(1, Math.floor(input.providerFetchTimeoutMs ?? providerFetchTimeoutMs()));
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     throwIfAborted(input.signal);
     let response: Response;
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     input.signal?.addEventListener("abort", onAbort, { once: true });
-    const timeout = setTimeout(() => controller.abort(), providerFetchTimeoutMs());
+    const timeout = setTimeout(() => controller.abort(), fetchTimeoutMs);
     try {
       response = await fetch(input.endpoint, {
         method: "POST",
@@ -219,7 +226,7 @@ async function fetchWithProviderRetry(input: {
     } catch (error) {
       if (input.signal?.aborted) throw runStoppedError();
       lastNetworkError = error;
-      if (attempt < MAX_PROVIDER_ATTEMPTS) {
+      if (attempt < maxAttempts) {
         await delay(retryDelayMs(attempt), input.signal);
         continue;
       }
@@ -229,7 +236,7 @@ async function fetchWithProviderRetry(input: {
       input.signal?.removeEventListener("abort", onAbort);
     }
 
-    if (response.ok || !isRetryableStatus(response.status) || attempt === MAX_PROVIDER_ATTEMPTS) {
+    if (response.ok || !isRetryableStatus(response.status) || attempt === maxAttempts) {
       return response;
     }
 
@@ -265,7 +272,9 @@ export class OpenAICompatibleClient implements LLMClient {
           }
         }))
       },
-      signal: input.signal
+      signal: input.signal,
+      maxProviderAttempts: input.maxProviderAttempts,
+      providerFetchTimeoutMs: input.providerFetchTimeoutMs
     });
 
     if (!response.ok) {
@@ -304,7 +313,9 @@ export class OpenAICompatibleClient implements LLMClient {
           }
         }))
       },
-      signal: input.signal
+      signal: input.signal,
+      maxProviderAttempts: input.maxProviderAttempts,
+      providerFetchTimeoutMs: input.providerFetchTimeoutMs
     });
 
     if (!response.ok) {
@@ -316,7 +327,7 @@ export class OpenAICompatibleClient implements LLMClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    const idleTimeoutMs = streamIdleTimeoutMs();
+    const idleTimeoutMs = Math.max(1, Math.floor(input.streamIdleTimeoutMs ?? streamIdleTimeoutMs()));
 
     try {
       while (true) {

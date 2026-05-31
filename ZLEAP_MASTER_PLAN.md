@@ -15,7 +15,7 @@
 
 - Web UI:
   - The visible interface must use Chinese by default.
-  - Top-level tabs: `对话`, `工作空间`, `记忆`, `日志`, `数据表`, and `概念介绍`.
+  - Top-level tabs: `对话`, `工作空间`, `记忆`, `日志`, `数据表`, `配置`, and `概念介绍`.
   - `对话` uses three columns: agent/LLM/prompt configuration, chatbot conversation, and workspace/context stack inspection.
   - Assistant responses must support streaming output with a character-by-character typing feel.
   - Chat messages render Markdown for common assistant output such as headings, lists, quotes, links, inline code, and fenced code blocks.
@@ -36,6 +36,7 @@
   - `记忆` is a database-like table with filtering, create, edit, and delete.
   - `日志` is the dedicated trace inspection area for lifecycle hook logs, tool call logs, approval requests, current-conversation LLM request logs, and global recent LLM request logs.
   - `数据表` 是 creator-only 的只读 SQLite 表查看器。它用于切换查看 `messages`、`llm_calls`、`context_segments`、`tool_calls`、`workspace_sessions`、`memories`、`audit_logs` 等真实落库记录，帮助从 memory evidence id 追溯到原始数据基础，但它不是普通用户流程，也不提供任意 SQL 或写入能力。
+  - `配置` 是 creator-only 的运行参数管理页。类似 `RESULT_EVENT_RECALL_LIMIT`、工具循环轮次、事件窗口大小、过程事件详情长度、LLM 重试/超时和关键上下文预算这类策略参数必须集中保存在 SQLite `runtime_config` 表里，UI 可以随时调节；runtime 每次运行读取最新配置，不应长期依赖代码里的不可调常量。
   - `概念介绍` presents the corrected `zleap-agent-framework.md` concepts as a polished Chinese visual guide with diagrams for workspace routing, memory layers, long-conversation memory recall/context injection, the detailed context-window stack, lifecycle hooks, principles, and implementation modules. The context-window section must show first-level partitions and second-level contents only. The memory sublayers must be expanded directly inside the `memory` layer of the stack, not as a separate detached panel: cross-workspace impressions, current-workspace result events, relevant process events, skill summaries, and the `readMemory` / `readSkill` progressive disclosure path. Provider request, function-calling protocol, raw logs, and UI trace metadata are useful debug concepts but are not context-window layers, so they must not appear as extra cards inside this stack section.
   - Log panels must support clearing the current visible log view without treating audit data deletion as an ordinary UI action.
   - The Memory editor must not present `metadataJson` as a normal raw JSON editing surface. It should show semantic fields and a structured evidence-reference view. Raw message/tool/LLM payloads belong in `messages`, `tool_calls`, `llm_calls`, `context_segments`, `workspace_sessions`, and `audit_logs`, not in memory rows.
@@ -54,6 +55,7 @@
   - The active `WorkspaceSession.localContext` is the authoritative source for memory injected into that workspace's LLM call. Prompt assembly must not run a second independent memory recall that can diverge from the persisted session trace.
   - `ContextBuilder` stores clear first-level context segment snapshots with second-level sections inside each segment.
   - Context assembly uses an explicit `AttentionBudgetManager` before prompt assembly. Budgeting must preserve valid JSON for structured runtime partitions such as memory, task, history, workspace results, and tool results, so context trimming does not silently erase parsed payloads.
+  - 运行策略参数由数据库 `runtime_config` 管理，并由 seed 写入默认定义。核心可调项包括 `agent.maxToolRounds`、`memory.impressionRecallLimit`、`memory.resultEventRecallLimit`、`memory.processEventRecallLimit`、`memory.eventWindowSize`、`memory.processEventDetailLimit`、`llm.maxProviderAttempts`、`llm.providerFetchTimeoutMs`、`llm.streamIdleTimeoutMs`、`context.historyTokenBudget`、`context.memoryTokenBudget` 和 `context.toolResultTokenBudget`。
   - `PromptAssembler` produces OpenAI-compatible chat messages.
   - User messages stay clean. System prompt, personality prompt, and internal runtime strategy are merged into the single `system` context segment and the single OpenAI-compatible system message.
   - Callable tools must be sent to the LLM through the OpenAI-compatible request `tools` array. The `tools` context segment is an inspectable runtime/UI snapshot of that array, not content to be duplicated inside the system prompt.
@@ -373,7 +375,7 @@
   - Lifecycle hooks are logged in `audit_logs` and visible through conversation trace.
   - Memory recall attempts are logged in `audit_logs` as `memory_recall_requested`, including zero-hit attempts, so the UI can distinguish "no recall was attempted" from "SQLite FTS recall ran but found no matching memory."
 - UI:
-  - Chinese `对话/工作空间/记忆/日志/数据表/概念介绍` tabs render.
+  - Chinese `对话/工作空间/记忆/日志/数据表/配置/概念介绍` tabs render.
   - Chat right panel expands the real context stack, callable tool snapshots, and memory writes while keeping the visible sections limited to current workspace, context stack, and memory writes. The subtle `显示原始日志` control beside the context-stack title switches between structured inspection mode and raw provider-log mode. Structured mode shows the numbered context stack and hides `final_messages`; raw provider-log mode hides the numbered stack entirely and directly displays the selected `llm_calls` raw request/response snapshot, including `messagesJson`, `toolsJson`, response/status metadata, and the matching `llmCallId`. It must not use a stale or different LLM call from the structured stack, must not require a second click-to-expand wrapper, must not render JSON as tables, and long JSON/text lines must wrap within the panel without horizontal scrolling.
   - Chat right panel renders JSON context payloads as structured tables/field groups. This is especially important for the callable tools snapshot, because users need to verify the actual OpenAI-compatible `tools` array without reading a raw JSON blob.
   - Chat right panel must make Skill progressive disclosure visible in the memory context segment: `currentWorkspaceSkillMemory` shows the injected Skill title/summary plus `summary_only` and `readSkill`, while empty states explain that Skill recall is active-workspace scoped and may be absent on `main` calls.
@@ -401,6 +403,7 @@
   - Memory table shows userId, agentId, workspaceId, relationId, and a readable scope label so user impressions, agent self impressions, event memories, and workspace skills are visually distinguishable.
   - Memory editor supports semantic editing, structured evidence-reference inspection, policy-aware add buttons for event/impression/skill, and visible strategy-layer error feedback. It should avoid encouraging users to paste or preserve raw JSON payloads inside memory.
   - Database table viewer lists application SQLite tables, switches between them, paginates rows, and shows a selected-row structured field view. It is read-only and creator-only, so raw trace inspection does not become an accidental ordinary user feature.
+  - Runtime config viewer lists `runtime_config` entries by category, shows label/key/description/default/range/current value, and lets creator users save or restore each value. Saving a config writes an audit log and takes effect for subsequent runtime calls without code changes.
   - The dedicated `日志` tab shows lifecycle hook/audit logs, tool call logs, tool approval requests, current-conversation LLM request logs, and global recent LLM request logs.
   - The dedicated `日志` tab shows a compact LLM debug summary so endpoint/status/result/timestamp are visible without scrolling through raw request payloads.
   - The dedicated `日志` tab lets only a creator approve or reject pending requests for debugging the approval lifecycle.

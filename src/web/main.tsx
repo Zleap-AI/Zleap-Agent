@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, DatabaseTableRows, DatabaseTableSummary, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, DatabaseTableRows, DatabaseTableSummary, LLMCallSnapshot, McpServerDefinition, MemoryRow, RuntimeConfigItem, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
 import "./styles.css";
 
-type Tab = "chat" | "workspace" | "memory" | "logs" | "tables" | "concept";
+type Tab = "chat" | "workspace" | "memory" | "logs" | "tables" | "config" | "concept";
 type ChatMessage = {
   id: string;
   role: string;
@@ -42,6 +42,7 @@ const TAB_LABELS: Record<Tab, string> = {
   memory: "记忆",
   logs: "日志",
   tables: "数据表",
+  config: "配置",
   concept: "概念介绍"
 };
 
@@ -767,7 +768,7 @@ function App() {
           <p>工作空间优先的智能体调试控制台</p>
         </div>
         <nav className="tabs" aria-label="主导航">
-          {(["chat", "workspace", "memory", "logs", "tables", "concept"] as Tab[]).map((item) => (
+          {(["chat", "workspace", "memory", "logs", "tables", "config", "concept"] as Tab[]).map((item) => (
             <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
               {TAB_LABELS[item]}
             </button>
@@ -779,8 +780,131 @@ function App() {
       {renderTabPanel("memory", <MemoryTab />)}
       {renderTabPanel("logs", <LogsTab />)}
       {renderTabPanel("tables", <DatabaseTablesTab />)}
+      {renderTabPanel("config", <ConfigTab />)}
       {renderTabPanel("concept", <ConceptIntroTab />)}
     </main>
+  );
+}
+
+function configCategoryLabel(category: string): string {
+  if (category === "agent") return "Agent 调度";
+  if (category === "memory") return "记忆策略";
+  if (category === "llm") return "LLM 请求";
+  if (category === "context") return "上下文预算";
+  return category;
+}
+
+function configDraftValue(item: RuntimeConfigItem): string {
+  return item.valueType === "boolean" ? String(Boolean(item.value)) : String(item.value);
+}
+
+function parseConfigDraft(item: RuntimeConfigItem, value: string): unknown {
+  if (item.valueType === "boolean") return value === "true";
+  if (item.valueType === "number") return Number(value);
+  return value;
+}
+
+function ConfigTab() {
+  const [configs, setConfigs] = useState<RuntimeConfigItem[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const [savingKey, setSavingKey] = useState("");
+
+  async function load() {
+    setError("");
+    try {
+      const params = new URLSearchParams({ actorId: "creator", actorRole: "creator" });
+      const data = await api<{ configs: RuntimeConfigItem[] }>(`/api/config?${params.toString()}`);
+      setConfigs(data.configs);
+      setDrafts(Object.fromEntries(data.configs.map((item) => [item.key, configDraftValue(item)])));
+    } catch (err) {
+      setError(`加载配置失败：${memoryErrorText(err)}`);
+    }
+  }
+
+  async function saveConfig(item: RuntimeConfigItem, nextValue = drafts[item.key] ?? configDraftValue(item)) {
+    setSavingKey(item.key);
+    setError("");
+    try {
+      const saved = await api<RuntimeConfigItem>(`/api/config/${encodeURIComponent(item.key)}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          actorId: "creator",
+          actorRole: "creator",
+          value: parseConfigDraft(item, nextValue)
+        })
+      });
+      setConfigs((current) => current.map((candidate) => candidate.key === saved.key ? saved : candidate));
+      setDrafts((current) => ({ ...current, [saved.key]: configDraftValue(saved) }));
+    } catch (err) {
+      setError(`保存配置失败：${memoryErrorText(err)}`);
+    } finally {
+      setSavingKey("");
+    }
+  }
+
+  useEffect(() => {
+    load().catch(console.error);
+  }, []);
+
+  const grouped = configs.reduce<Record<string, RuntimeConfigItem[]>>((acc, item) => {
+    acc[item.category] = [...(acc[item.category] ?? []), item];
+    return acc;
+  }, {});
+
+  return (
+    <section className="config-page">
+      <div className="config-header">
+        <div>
+          <h2>运行配置</h2>
+          <p>这些参数保存在 SQLite 的 `runtime_config` 表里，保存后下一次 runtime/LLM 调用会读取最新值。</p>
+        </div>
+        <button onClick={() => void load()}>刷新</button>
+      </div>
+      {error && <div className="error memory-error"><span>{error}</span></div>}
+      {Object.entries(grouped).map(([category, items]) => (
+        <section className="config-section panel" key={category}>
+          <h3>{configCategoryLabel(category)}</h3>
+          <div className="config-list">
+            {items.map((item) => {
+              const draft = drafts[item.key] ?? configDraftValue(item);
+              const changed = draft !== configDraftValue(item);
+              return (
+                <article className="config-row" key={item.key}>
+                  <div className="config-copy">
+                    <strong>{item.label}</strong>
+                    <code>{item.key}</code>
+                    <p>{item.description}</p>
+                    <small>默认值：{String(item.defaultValue)}{item.minValue !== undefined || item.maxValue !== undefined ? ` · 范围：${item.minValue ?? "-"} - ${item.maxValue ?? "-"}` : ""}</small>
+                  </div>
+                  <div className="config-control">
+                    {item.valueType === "boolean" ? (
+                      <select value={draft} onChange={(event) => setDrafts((current) => ({ ...current, [item.key]: event.target.value }))}>
+                        <option value="true">开启</option>
+                        <option value="false">关闭</option>
+                      </select>
+                    ) : (
+                      <input
+                        type={item.valueType === "number" ? "number" : "text"}
+                        min={item.minValue}
+                        max={item.maxValue}
+                        step={item.step}
+                        value={draft}
+                        onChange={(event) => setDrafts((current) => ({ ...current, [item.key]: event.target.value }))}
+                      />
+                    )}
+                    <div className="config-actions">
+                      <button className="primary" disabled={!changed || savingKey === item.key} onClick={() => void saveConfig(item)}>保存</button>
+                      <button disabled={savingKey === item.key} onClick={() => void saveConfig(item, String(item.defaultValue))}>恢复默认</button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </section>
   );
 }
 

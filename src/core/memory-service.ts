@@ -3,9 +3,7 @@ import type { AgentRunInput, MemoryRow, PolicyDecision, StoredMessage, ToolCallL
 import { Repositories } from "../db/repositories";
 import { PolicyEngine } from "./policy-engine";
 import { nowIso } from "./id";
-
-const DEFAULT_EVENT_WINDOW_SIZE = 20;
-const PROCESS_EVENT_DETAIL_LIMIT = 900;
+import { runtimeConfigNumber } from "./runtime-config";
 
 type MemoryWriteInput = Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail">;
 type UserImpressionCandidate = {
@@ -144,7 +142,7 @@ function sessionResultSignals(session: WorkspaceSession): string[] {
   ];
 }
 
-function compactWorkspaceProcessDetail(session: WorkspaceSession): string {
+function compactWorkspaceProcessDetail(session: WorkspaceSession, maxLength: number): string {
   return truncate([
     `任务目标：${compactText(session.task.objective || session.objective, 260)}`,
     `完成状态：${session.result.status}`,
@@ -156,7 +154,7 @@ function compactWorkspaceProcessDetail(session: WorkspaceSession): string {
     session.result.suggestedNextSteps.length
       ? compactLines("建议下一步", session.result.suggestedNextSteps, 3, 160)
       : ""
-  ].filter(Boolean).join("\n"), PROCESS_EVENT_DETAIL_LIMIT);
+  ].filter(Boolean).join("\n"), maxLength);
 }
 
 function compactConversationProcessDetail(input: {
@@ -166,7 +164,7 @@ function compactConversationProcessDetail(input: {
   messages: StoredMessage[];
   relatedSessions: WorkspaceSession[];
   toolCalls: ToolCallLog[];
-}): string {
+}, maxLength: number): string {
   const userMessages = input.messages
     .filter((message) => message.role === "user")
     .map((message) => message.content);
@@ -180,7 +178,7 @@ function compactConversationProcessDetail(input: {
     compactLines("本窗口用户意图", userMessages, 4, 140),
     compactLines("相关工作空间结果", sessionSignals, 4, 160),
     compactToolCallOverview(input.toolCalls)
-  ].filter(Boolean).join("\n"), PROCESS_EVENT_DETAIL_LIMIT);
+  ].filter(Boolean).join("\n"), maxLength);
 }
 
 function summarizeJson(value: unknown, maxLength = 900): string {
@@ -466,11 +464,7 @@ function skillSeedFromEventBatch(workspaceId: string, input: {
 
 export class MemoryService {
   private readonly policy = new PolicyEngine();
-  private readonly eventWindowSize: number;
-
-  constructor(private readonly repos: Repositories, eventWindowSize = Number(process.env.ZLEAP_EVENT_MEMORY_WINDOW ?? DEFAULT_EVENT_WINDOW_SIZE)) {
-    this.eventWindowSize = Math.max(2, eventWindowSize || DEFAULT_EVENT_WINDOW_SIZE);
-  }
+  constructor(private readonly repos: Repositories) {}
 
   afterAgentTurn(input: {
     run: AgentRunInput;
@@ -518,7 +512,7 @@ export class MemoryService {
         version: 1,
         title: `${input.session.workspaceId} 工作空间过程`,
         summary: truncate(input.session.objective, 220),
-        detail: compactWorkspaceProcessDetail(input.session),
+        detail: compactWorkspaceProcessDetail(input.session, this.processEventDetailLimit()),
         metadataJson: JSON.stringify({
           ...metadataBase,
           eventKind: "process",
@@ -966,17 +960,27 @@ export class MemoryService {
     return memory.workspaceId === activeWorkspaceId;
   }
 
+  private eventWindowSize(): number {
+    return runtimeConfigNumber(this.repos.getRuntimeConfigValues(), "memory.eventWindowSize");
+  }
+
+  private processEventDetailLimit(): number {
+    return runtimeConfigNumber(this.repos.getRuntimeConfigValues(), "memory.processEventDetailLimit");
+  }
+
   private maybeWriteConversationWindowEvent(run: AgentRunInput, workspaceId: string): MemoryRow[] {
+    const eventWindowSize = this.eventWindowSize();
+    const processEventDetailLimit = this.processEventDetailLimit();
     const messageCount = this.repos.countMessages(run.conversationId);
     const sessions = this.repos.listWorkspaceSessions(run.conversationId);
     const toolCalls = this.repos.listToolCalls(run.conversationId);
-    const completedWindows = Math.floor(messageCount / this.eventWindowSize);
+    const completedWindows = Math.floor(messageCount / eventWindowSize);
     if (completedWindows < 1) return [];
 
     const writes: MemoryRow[] = [];
     for (let windowIndex = 1; windowIndex <= completedWindows; windowIndex += 1) {
-      const start = (windowIndex - 1) * this.eventWindowSize;
-      const end = windowIndex * this.eventWindowSize;
+      const start = (windowIndex - 1) * eventWindowSize;
+      const end = windowIndex * eventWindowSize;
       const windowRelationScope = `event:${run.userId}:${workspaceId}:${run.conversationId}:window:${windowIndex}`;
       const processRelationId = `${windowRelationScope}:process`;
       const resultRelationId = `${windowRelationScope}:result`;
@@ -990,8 +994,8 @@ export class MemoryService {
       });
       if (this.repos.getMemoryByRelation("event", processRelationId, eventRelationScope) && this.repos.getMemoryByRelation("event", resultRelationId, eventRelationScope)) continue;
 
-      const windowMessages = this.repos.listMessagesWindow(run.conversationId, start, this.eventWindowSize);
-      if (windowMessages.length < this.eventWindowSize) continue;
+      const windowMessages = this.repos.listMessagesWindow(run.conversationId, start, eventWindowSize);
+      if (windowMessages.length < eventWindowSize) continue;
 
       const firstUser = windowMessages.find((message) => message.role === "user")?.content ?? run.message;
       const lastAssistant = [...windowMessages].reverse().find((message) => message.role === "assistant")?.content ?? "";
@@ -1036,7 +1040,7 @@ export class MemoryService {
             messages: windowMessages,
             relatedSessions,
             toolCalls: windowToolCalls
-          }),
+          }, processEventDetailLimit),
           metadataJson: JSON.stringify({
             ...evidenceBase,
             eventKind: "process",
@@ -1075,11 +1079,12 @@ export class MemoryService {
   }
 
   private workspaceExitEvidence(run: AgentRunInput, session: WorkspaceSession): Record<string, unknown> {
+    const eventWindowSize = this.eventWindowSize();
     const sessionEndAt = session.completedAt ?? session.startedAt;
     const messages = dedupeById([
       ...this.repos.listMessagesBefore(run.conversationId, session.startedAt, 1),
-      ...this.repos.listMessagesInRange(run.conversationId, session.startedAt, sessionEndAt, this.eventWindowSize)
-    ]).slice(-this.eventWindowSize);
+      ...this.repos.listMessagesInRange(run.conversationId, session.startedAt, sessionEndAt, eventWindowSize)
+    ]).slice(-eventWindowSize);
     const toolCalls = this.repos
       .listToolCalls(run.conversationId)
       .filter((toolCall) =>

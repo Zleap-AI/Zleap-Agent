@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { nowIso } from "../core/id";
+import { RUNTIME_CONFIG_DEFINITIONS } from "../core/runtime-config";
 
 const toolSchemas = {
   enterWorkspace: {
@@ -221,6 +222,50 @@ export function seedDefaults(db: Database.Database): void {
     VALUES ('default-302ai', 'default-agent', '302AI', 'https://api.302ai.com', 'gpt-5-mini', 0.2, ?, ?)
   `).run(now, now);
   db.prepare("UPDATE llm_profiles SET baseUrl = 'https://api.302ai.com', updatedAt = ? WHERE id = 'default-302ai'").run(now);
+
+  const insertRuntimeConfig = db.prepare(`
+    INSERT OR IGNORE INTO runtime_config
+      (key, category, label, description, valueType, valueJson, defaultValueJson, minValue, maxValue, step, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateRuntimeConfigDefinition = db.prepare(`
+    UPDATE runtime_config SET
+      category = ?,
+      label = ?,
+      description = ?,
+      valueType = ?,
+      defaultValueJson = ?,
+      minValue = ?,
+      maxValue = ?,
+      step = ?
+    WHERE key = ?
+  `);
+  for (const definition of RUNTIME_CONFIG_DEFINITIONS) {
+    insertRuntimeConfig.run(
+      definition.key,
+      definition.category,
+      definition.label,
+      definition.description,
+      definition.valueType,
+      JSON.stringify(definition.defaultValue),
+      JSON.stringify(definition.defaultValue),
+      definition.minValue ?? null,
+      definition.maxValue ?? null,
+      definition.step ?? null,
+      now
+    );
+    updateRuntimeConfigDefinition.run(
+      definition.category,
+      definition.label,
+      definition.description,
+      definition.valueType,
+      JSON.stringify(definition.defaultValue),
+      definition.minValue ?? null,
+      definition.maxValue ?? null,
+      definition.step ?? null,
+      definition.key
+    );
+  }
 
   const insertWorkspace = db.prepare(`
     INSERT OR IGNORE INTO workspaces

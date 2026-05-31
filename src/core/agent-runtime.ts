@@ -1,7 +1,7 @@
 import type { AgentConfig, AgentRunInput, AgentRunOutput, AgentRunPrepared, AgentStreamEvent, ContextSegment, LLMCallSnapshot, LLMMessage, MemoryRow, WorkspaceHandoffContext, WorkspaceResult, WorkspaceSession } from "../types";
 import { Repositories } from "../db/repositories";
 import { ContextBuilder, PromptAssembler } from "./context-builder";
-import { AttentionBudgetManager, estimateTokens } from "./attention-budget";
+import { AttentionBudgetManager, DEFAULT_ATTENTION_BUDGET, estimateTokens } from "./attention-budget";
 import { createId, nowIso } from "./id";
 import { ChatCompletionOutput, LLMClient, LLMStreamEvent, normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "./llm-client";
 import { WorkspaceRuntime } from "./workspace-runtime";
@@ -10,14 +10,10 @@ import { PolicyEngine } from "./policy-engine";
 import { HookManager } from "./hook-manager";
 import type { ToolExecutionResult } from "./tool-registry";
 import { ToolRegistry } from "./tool-registry";
+import { runtimeConfigNumber } from "./runtime-config";
 
 type LLMToolCall = NonNullable<LLMMessage["tool_calls"]>[number];
 type ToolCallAccumulator = Partial<LLMToolCall> & { function: { name: string; arguments: string } };
-const DEFAULT_MAX_TOOL_ROUNDS = 100;
-const configuredMaxToolRounds = Number.parseInt(process.env.ZLEAP_MAX_TOOL_ROUNDS ?? "", 10);
-const MAX_TOOL_ROUNDS = Number.isFinite(configuredMaxToolRounds) && configuredMaxToolRounds > 0
-  ? configuredMaxToolRounds
-  : DEFAULT_MAX_TOOL_ROUNDS;
 const TOOL_LOOP_LIMIT_USER_MESSAGE = "这一步还没有形成稳定的可交付结果。我先暂停在这里；你可以让我继续推进，或者补充更具体的目标。";
 
 function summarizeAssistantMessage(value: string, maxLength = 500): string {
@@ -124,9 +120,7 @@ function llmResponseSnapshot(completion: ChatCompletionOutput, extra: Record<str
 }
 
 export class AgentRuntime {
-  private readonly contextBuilder = new ContextBuilder();
   private readonly promptAssembler = new PromptAssembler();
-  private readonly attentionBudget = new AttentionBudgetManager();
   private readonly workspaceRuntime: WorkspaceRuntime;
   private readonly memoryService: MemoryService;
   private readonly policy = new PolicyEngine();
@@ -143,6 +137,33 @@ export class AgentRuntime {
     this.toolRegistry = new ToolRegistry(repos, this.memoryService, this.workspaceRuntime, this.policy);
   }
 
+  private maxToolRounds(): number {
+    return runtimeConfigNumber(this.repos.getRuntimeConfigValues(), "agent.maxToolRounds");
+  }
+
+  private llmRequestRuntimeConfig(): Pick<Parameters<LLMClient["complete"]>[0], "maxProviderAttempts" | "providerFetchTimeoutMs" | "streamIdleTimeoutMs"> {
+    const values = this.repos.getRuntimeConfigValues();
+    return {
+      maxProviderAttempts: runtimeConfigNumber(values, "llm.maxProviderAttempts"),
+      providerFetchTimeoutMs: runtimeConfigNumber(values, "llm.providerFetchTimeoutMs"),
+      streamIdleTimeoutMs: runtimeConfigNumber(values, "llm.streamIdleTimeoutMs")
+    };
+  }
+
+  private attentionBudgetManager(): AttentionBudgetManager {
+    return new AttentionBudgetManager(this.attentionBudgetConfig());
+  }
+
+  private attentionBudgetConfig() {
+    const values = this.repos.getRuntimeConfigValues();
+    return {
+      ...DEFAULT_ATTENTION_BUDGET,
+      history: runtimeConfigNumber(values, "context.historyTokenBudget"),
+      memory: runtimeConfigNumber(values, "context.memoryTokenBudget"),
+      tool_result: runtimeConfigNumber(values, "context.toolResultTokenBudget")
+    };
+  }
+
   async run(input: AgentRunInput): Promise<AgentRunOutput> {
     const prepared = this.prepare(input);
     let completion: ChatCompletionOutput;
@@ -154,7 +175,8 @@ export class AgentRuntime {
         messages: prepared.finalMessages,
         tools: prepared.callableTools,
         temperature: prepared.llm.temperature,
-        signal: input.abortSignal
+        signal: input.abortSignal,
+        ...this.llmRequestRuntimeConfig()
       });
       this.repos.markLlmCallCompleted(prepared.llmCallId, llmResponseSnapshot(completion));
     } catch (error) {
@@ -236,7 +258,8 @@ export class AgentRuntime {
       let messages = prepared.finalMessages;
       const memoryWrites: MemoryRow[] = [];
       try {
-        for (let round = 1; round <= MAX_TOOL_ROUNDS + 1; round += 1) {
+        const maxToolRounds = this.maxToolRounds();
+        for (let round = 1; round <= maxToolRounds + 1; round += 1) {
           let roundText = "";
           const toolCallDeltas = new Map<number, ToolCallAccumulator>();
           for await (const event of streamEvents({
@@ -246,7 +269,8 @@ export class AgentRuntime {
             messages,
             tools: prepared.callableTools,
             temperature: prepared.llm.temperature,
-            signal: input.abortSignal
+            signal: input.abortSignal,
+            ...this.llmRequestRuntimeConfig()
           })) {
             if (event.type === "content") roundText += event.text;
             if (event.type === "tool_call_delta") this.mergeToolCallDelta(toolCallDeltas, event);
@@ -323,11 +347,11 @@ export class AgentRuntime {
             return;
           }
 
-          if (round > MAX_TOOL_ROUNDS) {
+          if (round > maxToolRounds) {
             this.repos.audit(input.userId, "system", "tool_loop_stopped", "conversation", input.conversationId, {
               conversationId: input.conversationId,
               workspaceId: prepared.activeWorkspaceId,
-              maxToolRounds: MAX_TOOL_ROUNDS,
+              maxToolRounds,
               requestedToolCount: toolCalls.length,
               streamed: true
             });
@@ -494,7 +518,7 @@ export class AgentRuntime {
           this.repos.audit(input.userId, "system", "workspace_exit_missing", "conversation", input.conversationId, {
             conversationId: input.conversationId,
             workspaceId: prepared.activeWorkspaceId,
-            maxToolRounds: MAX_TOOL_ROUNDS,
+            maxToolRounds,
             streamed: true
           });
           assistantMessage = "当前步骤还没有形成可靠的可交付结果。请确认是否继续推进，或补充下一步要求。";
@@ -553,7 +577,8 @@ export class AgentRuntime {
           messages: prepared.finalMessages,
           tools: prepared.callableTools,
           temperature: prepared.llm.temperature,
-          signal: input.abortSignal
+          signal: input.abortSignal,
+          ...this.llmRequestRuntimeConfig()
         })) {
           assistantMessage += chunk;
           yield { type: "delta", text: chunk };
@@ -792,7 +817,7 @@ export class AgentRuntime {
     const history = this.selectLocalHistory(input.input.conversationId, input.workspaceId, input.input.userId, input.input.userRole);
     const callableTools = this.toolRegistry.getCallableTools(input.workspaceId);
     const toolsJson = JSON.stringify(callableTools, null, 2);
-    const baseSegments = this.contextBuilder.build({
+    const baseSegments = new ContextBuilder(this.attentionBudgetConfig()).build({
       llmCallId: input.llmCallId,
       conversationId: input.input.conversationId,
       agent: input.agent,
@@ -811,7 +836,7 @@ export class AgentRuntime {
       : baseMessages;
     const segments = [...baseSegments];
     if (input.toolMessages?.length) {
-      const toolResultContent = this.attentionBudget.fitSegment("tool_result", JSON.stringify(input.toolMessages, null, 2));
+      const toolResultContent = this.attentionBudgetManager().fitSegment("tool_result", JSON.stringify(input.toolMessages, null, 2));
       segments.push({
         id: createId("ctx"),
         llmCallId: input.llmCallId,
@@ -1489,7 +1514,7 @@ export class AgentRuntime {
       toolResults: actualToolResults.length > 0 ? actualToolResults : toolMessages
     };
     if (followUpToolContext.assistantToolCalls.length > 0 || followUpToolContext.toolResults.length > 0) {
-      const content = this.attentionBudget.fitSegment("tool_result", JSON.stringify(followUpToolContext, null, 2));
+      const content = this.attentionBudgetManager().fitSegment("tool_result", JSON.stringify(followUpToolContext, null, 2));
       segments.push({
         id: createId("ctx"),
         llmCallId,
@@ -1524,8 +1549,9 @@ export class AgentRuntime {
     const memoryWrites: MemoryRow[] = [];
     let completion = initialCompletion;
     let messages = prepared.finalMessages;
+    const maxToolRounds = this.maxToolRounds();
 
-    for (let round = 1; round <= MAX_TOOL_ROUNDS; round += 1) {
+    for (let round = 1; round <= maxToolRounds; round += 1) {
       const toolCalls = completion.message.tool_calls ?? [];
       if (toolCalls.length === 0) {
         if (prepared.activeWorkspaceId !== "main") {
@@ -1539,7 +1565,8 @@ export class AgentRuntime {
               messages,
               tools: prepared.callableTools,
               temperature: prepared.llm.temperature,
-              signal: input.abortSignal
+              signal: input.abortSignal,
+              ...this.llmRequestRuntimeConfig()
             });
             this.repos.markLlmCallCompleted(exitRequest.llmCallId, llmResponseSnapshot(completion, {
               toolLoopRound: round,
@@ -1587,7 +1614,8 @@ export class AgentRuntime {
           messages,
           tools: prepared.callableTools,
           temperature: prepared.llm.temperature,
-          signal: input.abortSignal
+          signal: input.abortSignal,
+          ...this.llmRequestRuntimeConfig()
         });
         this.repos.markLlmCallCompleted(llmCallId, llmResponseSnapshot(completion, {
           toolLoopRound: round
@@ -1603,7 +1631,7 @@ export class AgentRuntime {
       this.repos.audit(input.userId, "system", "tool_loop_stopped", "conversation", input.conversationId, {
         conversationId: input.conversationId,
         workspaceId: prepared.activeWorkspaceId,
-        maxToolRounds: MAX_TOOL_ROUNDS,
+        maxToolRounds,
         requestedToolCount: completion.message.tool_calls?.length ?? 0
       });
       completion = {
@@ -1611,14 +1639,14 @@ export class AgentRuntime {
           role: "assistant",
           content: TOOL_LOOP_LIMIT_USER_MESSAGE
         },
-        raw: { stoppedBy: "maxToolRounds", maxToolRounds: MAX_TOOL_ROUNDS }
+        raw: { stoppedBy: "maxToolRounds", maxToolRounds }
       };
     }
     if (prepared.activeWorkspaceId !== "main") {
       this.repos.audit(input.userId, "system", "workspace_exit_missing", "conversation", input.conversationId, {
         conversationId: input.conversationId,
         workspaceId: prepared.activeWorkspaceId,
-        maxToolRounds: MAX_TOOL_ROUNDS,
+        maxToolRounds,
         lastAssistantTextLength: completion.message.content?.length ?? 0
       });
       completion = {
@@ -1626,7 +1654,7 @@ export class AgentRuntime {
           role: "assistant",
           content: "当前步骤还没有形成可靠的可交付结果。请确认是否继续推进，或补充下一步要求。"
         },
-        raw: { stoppedBy: "missingWorkspaceExit", maxToolRounds: MAX_TOOL_ROUNDS }
+        raw: { stoppedBy: "missingWorkspaceExit", maxToolRounds }
       };
     }
 

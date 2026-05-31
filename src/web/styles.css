@@ -1473,6 +1473,94 @@ td button {
   overflow: hidden;
 }
 
+.config-page {
+  height: calc(100vh - 76px);
+  overflow: auto;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.config-header h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.config-header p {
+  margin: 0;
+  color: #5c6975;
+}
+
+.config-section {
+  padding: 14px;
+}
+
+.config-section h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.config-list {
+  display: grid;
+  gap: 10px;
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.config-copy {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.config-copy strong {
+  font-size: 14px;
+}
+
+.config-copy code {
+  justify-self: start;
+  color: #4a5662;
+}
+
+.config-copy p,
+.config-copy small {
+  margin: 0;
+  color: #5c6975;
+}
+
+.config-control {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.config-control input,
+.config-control select {
+  width: 100%;
+}
+
+.config-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: end;
+}
+
 .database-sidebar,
 .database-browser {
   padding: 12px;

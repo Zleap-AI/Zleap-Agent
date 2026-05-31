@@ -9,6 +9,7 @@ import type {
   LLMCallSnapshot,
   McpServerDefinition,
   MemoryRow,
+  RuntimeConfigItem,
   StoredMessage,
   ToolDefinition,
   ToolCallLog,
@@ -19,6 +20,7 @@ import type {
   WorkspaceSession
 } from "../types";
 import { createId, nowIso } from "../core/id";
+import { RUNTIME_CONFIG_DEFINITIONS, runtimeConfigDefaults, validateRuntimeConfigValue } from "../core/runtime-config";
 
 function parseJson<T>(value: string, fallback: T): T {
   try {
@@ -44,6 +46,20 @@ function quoteSqlIdentifier(value: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error(`Invalid table name: ${value}`);
   return `"${value.replace(/"/g, "\"\"")}"`;
 }
+
+type RuntimeConfigRawRow = {
+  key: string;
+  category: string;
+  label: string;
+  description: string;
+  valueType: "number" | "boolean" | "string";
+  valueJson: string;
+  defaultValueJson: string;
+  minValue: number | null;
+  maxValue: number | null;
+  step: number | null;
+  updatedAt: string;
+};
 
 export function mcpServerToBindingJson(server: Pick<McpServerDefinition, "transport" | "command" | "argsJson" | "envJson" | "cwd" | "url" | "headersJson" | "timeoutMs">): string {
   if (server.transport === "stdio") {
@@ -131,6 +147,74 @@ function normalizeWorkspace(row: Omit<WorkspaceDefinition, "tools">, tools: Tool
 
 export class Repositories {
   constructor(private readonly db: Database.Database) {}
+
+  listRuntimeConfigs(actorRole: UserRole): RuntimeConfigItem[] {
+    if (actorRole !== "creator") throw new Error("Runtime configuration requires creator role.");
+    return this.runtimeConfigRows().map((row) => this.normalizeRuntimeConfig(row));
+  }
+
+  getRuntimeConfigValues(): Record<string, unknown> {
+    const values = runtimeConfigDefaults();
+    for (const row of this.runtimeConfigRows()) {
+      values[row.key] = parseJson(row.valueJson, values[row.key]);
+    }
+    return values;
+  }
+
+  updateRuntimeConfig(input: { key: string; value: unknown; actorId: string; actorRole: UserRole }): RuntimeConfigItem {
+    if (input.actorRole !== "creator") throw new Error("Runtime configuration updates require creator role.");
+    const definition = RUNTIME_CONFIG_DEFINITIONS.find((item) => item.key === input.key);
+    if (!definition) throw new Error(`Unknown runtime config key: ${input.key}`);
+    const value = validateRuntimeConfigValue(definition, input.value);
+    const updatedAt = nowIso();
+    const previous = this.db.prepare("SELECT * FROM runtime_config WHERE key = ?").get(input.key) as RuntimeConfigRawRow | undefined;
+    this.db.prepare(`
+      INSERT INTO runtime_config
+        (key, category, label, description, valueType, valueJson, defaultValueJson, minValue, maxValue, step, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        valueJson = excluded.valueJson,
+        updatedAt = excluded.updatedAt
+    `).run(
+      definition.key,
+      definition.category,
+      definition.label,
+      definition.description,
+      definition.valueType,
+      JSON.stringify(value),
+      JSON.stringify(definition.defaultValue),
+      definition.minValue ?? null,
+      definition.maxValue ?? null,
+      definition.step ?? null,
+      updatedAt
+    );
+    this.audit(input.actorId, input.actorRole, "runtime_config_update", "runtime_config", input.key, {
+      key: input.key,
+      previousValue: previous ? parseJson(previous.valueJson, undefined) : undefined,
+      nextValue: value
+    });
+    return this.normalizeRuntimeConfig(this.db.prepare("SELECT * FROM runtime_config WHERE key = ?").get(input.key) as RuntimeConfigRawRow);
+  }
+
+  private runtimeConfigRows(): RuntimeConfigRawRow[] {
+    return this.db.prepare("SELECT * FROM runtime_config ORDER BY category, key").all() as RuntimeConfigRawRow[];
+  }
+
+  private normalizeRuntimeConfig(row: RuntimeConfigRawRow): RuntimeConfigItem {
+    return {
+      key: row.key,
+      category: row.category,
+      label: row.label,
+      description: row.description,
+      valueType: row.valueType,
+      value: parseJson(row.valueJson, parseJson(row.defaultValueJson, "")),
+      defaultValue: parseJson(row.defaultValueJson, ""),
+      minValue: row.minValue ?? undefined,
+      maxValue: row.maxValue ?? undefined,
+      step: row.step ?? undefined,
+      updatedAt: row.updatedAt
+    };
+  }
 
   listDatabaseTables(actorRole: UserRole): DatabaseTableSummary[] {
     if (actorRole !== "creator") throw new Error("Database table inspection requires creator role.");

@@ -4693,6 +4693,40 @@ async function testLlmFailureLog() {
   assert.equal(trace.auditLogs.some((log) => log.action === "failed_run_message_removed"), true);
 }
 
+async function testRuntimeConfigControlsRuntimeLimits() {
+  const repos = createRepos();
+  assert.equal(repos.listRuntimeConfigs("creator").some((item) => item.key === "memory.resultEventRecallLimit"), true);
+  assert.throws(() => repos.listRuntimeConfigs("user"), /creator role/);
+  repos.updateRuntimeConfig({ key: "memory.impressionRecallLimit", value: 11, actorId: "creator", actorRole: "creator" });
+  repos.updateRuntimeConfig({ key: "memory.resultEventRecallLimit", value: 4, actorId: "creator", actorRole: "creator" });
+  repos.updateRuntimeConfig({ key: "memory.processEventRecallLimit", value: 2, actorId: "creator", actorRole: "creator" });
+  repos.updateRuntimeConfig({ key: "llm.maxProviderAttempts", value: 3, actorId: "creator", actorRole: "creator" });
+  assert.equal(repos.getRuntimeConfigValues()["memory.resultEventRecallLimit"], 4);
+
+  const fake = new FakeLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "config-user",
+    userRole: "creator",
+    conversationId: "conv-runtime-config",
+    message: "测试运行配置",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(fake.lastInput?.maxProviderAttempts, 3);
+  const recallLog = repos
+    .listAuditLogs({ conversationId: "conv-runtime-config", limit: 20 })
+    .find((log) => log.action === "memory_recall_requested");
+  const metadata = JSON.parse(recallLog?.metadataJson ?? "{}") as { recallInput?: Record<string, unknown> };
+  assert.equal(metadata.recallInput?.impressionLimit, 11);
+  assert.equal(metadata.recallInput?.resultEventLimit, 4);
+  assert.equal(metadata.recallInput?.processEventLimit, 2);
+}
+
 async function testStreamingFollowUpFailureMarksLlmCallFailed() {
   const repos = createRepos();
   const runtime = new AgentRuntime(repos, new StreamingToolThenFailureLLMClient());
@@ -5285,6 +5319,7 @@ async function main() {
   await testSkillMemoryToolQualityGate();
   await testRuntimeStreaming();
   await testLlmFailureLog();
+  await testRuntimeConfigControlsRuntimeLimits();
   await testStreamingFollowUpFailureMarksLlmCallFailed();
   await testPendingLlmCallsInterruptedOnStartup();
   await testConversationDeletionLifecycle();

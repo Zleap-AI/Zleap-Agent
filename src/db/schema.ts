@@ -42,6 +42,20 @@ export function migrate(db: Database.Database): void {
       FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS runtime_config (
+      key TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      label TEXT NOT NULL,
+      description TEXT NOT NULL,
+      valueType TEXT NOT NULL CHECK (valueType IN ('number', 'boolean', 'string')),
+      valueJson TEXT NOT NULL,
+      defaultValueJson TEXT NOT NULL,
+      minValue REAL,
+      maxValue REAL,
+      step REAL,
+      updatedAt TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       agentId TEXT NOT NULL,

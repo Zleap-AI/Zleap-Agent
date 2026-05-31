@@ -1,10 +1,7 @@
 import type { AgentRunInput, MemoryRow, WorkspaceDefinition, WorkspaceLocalContext, WorkspaceResult, WorkspaceSession, WorkspaceTask } from "../types";
 import { createId, nowIso } from "./id";
 import { Repositories } from "../db/repositories";
-
-const IMPRESSION_RECALL_LIMIT = 20;
-const RESULT_EVENT_RECALL_LIMIT = 10;
-const PROCESS_EVENT_RECALL_LIMIT = 8;
+import { runtimeConfigNumber } from "./runtime-config";
 
 export class WorkspaceRuntime {
   private readonly universalRuntimeMemoryToolNames = new Set([
@@ -90,14 +87,15 @@ export class WorkspaceRuntime {
 
   private createLocalContext(run: AgentRunInput, workspace: WorkspaceDefinition, task: WorkspaceTask): WorkspaceLocalContext {
     const query = `${task.objective}\n${task.relevantUserRequest}`;
+    const runtimeConfig = this.repos.getRuntimeConfigValues();
     const recallInput = {
       userId: run.userId,
       agentId: run.agentId,
       workspaceId: workspace.id,
       query,
-      impressionLimit: IMPRESSION_RECALL_LIMIT,
-      resultEventLimit: workspace.memoryPolicy.eventRecallEnabled ? RESULT_EVENT_RECALL_LIMIT : 0,
-      processEventLimit: workspace.memoryPolicy.eventRecallEnabled ? PROCESS_EVENT_RECALL_LIMIT : 0,
+      impressionLimit: runtimeConfigNumber(runtimeConfig, "memory.impressionRecallLimit"),
+      resultEventLimit: workspace.memoryPolicy.eventRecallEnabled ? runtimeConfigNumber(runtimeConfig, "memory.resultEventRecallLimit") : 0,
+      processEventLimit: workspace.memoryPolicy.eventRecallEnabled ? runtimeConfigNumber(runtimeConfig, "memory.processEventRecallLimit") : 0,
       skillLimit: workspace.memoryPolicy.skillRecallEnabled ? workspace.memoryPolicy.maxSkillMemories : 0
     };
     const rawRecalled = this.repos.recallMemories(recallInput);

@@ -2,6 +2,29 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 07:15 +08:00
+
+目的：
+- 把 `RESULT_EVENT_RECALL_LIMIT` 这类运行策略参数从代码常量迁移到 SQLite 配置表，并在 Web UI 增加可调节的 `配置` tab。
+
+变更：
+- 新增 `runtime_config` 表和默认配置定义，覆盖 agent 工具循环、memory 召回/事件窗口、LLM 重试/超时和关键上下文预算。
+- 新增 `GET /api/config` 与 `PUT /api/config/:key`，仅 creator 可查看和更新，保存时写入 audit log。
+- Runtime、WorkspaceRuntime、MemoryService 和 OpenAI-compatible LLM client 改为读取数据库配置，下一次调用即可使用最新值。
+- Web UI 顶部在 `概念介绍` 左侧新增 `配置` tab，可按分类查看、编辑、保存或恢复默认值。
+- 更新主计划，明确运行参数必须集中进入 `runtime_config`，不再长期依赖不可调代码常量。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- API 验证通过：`GET /api/config?actorId=creator&actorRole=creator` 返回 `runtime_config` 配置列表。
+- 浏览器验证通过：刷新 `http://localhost:4173/`，顶部出现 `配置` tab，页面展示 `memory.resultEventRecallLimit` 和 `llm.maxProviderAttempts` 等配置项。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 07:03 +08:00
 
 目的：
