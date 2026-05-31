@@ -22,7 +22,7 @@
 - `git diff --check` 通过，仅有 Windows 换行提示。
 
 Git：
-- `57b2aef` 强化 readMemory 详情追问触发规则。
+- `bc84cbf` 强化 readMemory 详情追问触发规则。
 
 ## 2026-06-01 05:45 +08:00
 
