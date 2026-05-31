@@ -1983,6 +1983,13 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(exitEvents.every((memory) => metadataOf(memory).toolCallIds.includes(exitToolCall!.id)), true);
   assert.equal(exitEvents.every((memory) => !metadataOf(memory).toolCallIds.includes(staleToolCall.id)), true);
   assert.equal(exitEvents.every((memory) => metadataOf(memory).evidenceMessageIds.every((id: string) => !staleMessageIds.has(id))), true);
+  const processEvent = exitEvents.find((memory) => metadataOf(memory).eventKind === "process");
+  assert.equal(Boolean(processEvent), true);
+  assert.equal(processEvent!.detail.length <= 900, true);
+  assert.equal(processEvent!.detail.includes("argumentsJson"), false);
+  assert.equal(processEvent!.detail.includes("resultJson"), false);
+  assert.equal(processEvent!.detail.includes("召回的事件记忆"), false);
+  assert.equal(processEvent!.detail.includes("关键过程信号"), true);
   const persistedFileSession = trace.sessions.find((session) => session.workspaceId === "file");
   assert.equal(Boolean(persistedFileSession?.completedAt), true);
   assert.equal(persistedFileSession?.summary, "File workspace inspected available evidence.");
@@ -2426,6 +2433,12 @@ async function testEventMemoryIsHookGenerated() {
   assert.equal(events.length >= 2, true);
   assert.equal(events.every((memory) => metadataOf(memory).source === "afterConversationWindow"), true);
   assert.equal(events.every((memory) => metadataOf(memory).conversationId === "conv-event-hook-contract"), true);
+  const processEvents = events.filter((memory) => metadataOf(memory).eventKind === "process");
+  assert.equal(processEvents.length > 0, true);
+  assert.equal(processEvents.every((memory) => memory.detail.length <= 900), true);
+  assert.equal(processEvents.every((memory) => !memory.detail.includes("窗口消息：")), true);
+  assert.equal(processEvents.every((memory) => !memory.detail.includes("argumentsJson")), true);
+  assert.equal(processEvents.every((memory) => memory.detail.includes("本窗口用户意图")), true);
   const trace = repos.getTrace("conv-event-hook-contract", "creator", "creator");
   assert.equal(trace.toolCalls.some((call) => call.toolName.includes("EventMemory")), false);
   assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterConversationWindow"), true);

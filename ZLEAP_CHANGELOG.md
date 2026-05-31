@@ -688,6 +688,27 @@ Verification:
 Git:
 - Pending in this work session.
 
+## 2026-05-31 19:13 +08:00
+
+Purpose:
+- Tighten event process memory so it behaves like compact memory instead of storing noisy runtime trace payloads.
+
+Changed:
+- Replaced process-event detail generation for workspace-exit hooks with a compact task/status/observation/tool-overview summary.
+- Replaced conversation-window process-event detail generation with a compact window/user-intent/session/tool overview.
+- Stopped writing recalled memory dumps, raw message windows, `argumentsJson`, `resultJson`, and full tool/session JSON into process memory detail.
+- Added tests that process event detail stays under the compact limit and does not include raw trace fields.
+- Updated `ZLEAP_MASTER_PLAN.md` to document the process event memory boundary.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
+
+Git:
+- Pending in this work session.
+
 ## 2026-05-31 19:05 +08:00
 
 Purpose:

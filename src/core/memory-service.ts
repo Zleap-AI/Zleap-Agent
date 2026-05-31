@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import type { AgentRunInput, MemoryRow, PolicyDecision, StoredMessage, UserRole, WorkspaceSession } from "../types";
+import type { AgentRunInput, MemoryRow, PolicyDecision, StoredMessage, ToolCallLog, UserRole, WorkspaceSession } from "../types";
 import { Repositories } from "../db/repositories";
 import { PolicyEngine } from "./policy-engine";
 import { nowIso } from "./id";
 
 const DEFAULT_EVENT_WINDOW_SIZE = 20;
+const PROCESS_EVENT_DETAIL_LIMIT = 900;
 
 type MemoryWriteInput = Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail">;
 
@@ -16,10 +17,72 @@ function stableId(value: string): string {
   return createHash("sha1").update(value).digest("hex").slice(0, 12);
 }
 
-function compactMessages(messages: StoredMessage[]): string {
-  return messages
-    .map((message) => `${message.role}: ${truncate(message.content.replace(/\s+/g, " ").trim(), 500)}`)
-    .join("\n");
+function compactText(value: string, maxLength: number): string {
+  return truncate(value.replace(/\s+/g, " ").trim(), maxLength);
+}
+
+function compactLines(label: string, values: string[], maxItems = 4, maxItemLength = 180): string {
+  const cleaned = values
+    .map((value) => compactText(value, maxItemLength))
+    .filter(Boolean)
+    .slice(0, maxItems);
+  return cleaned.length ? `${label}：\n${cleaned.map((value) => `- ${value}`).join("\n")}` : "";
+}
+
+function compactToolCallOverview(toolCalls: ToolCallLog[], maxItems = 6): string {
+  const rows = toolCalls
+    .slice(-maxItems)
+    .map((toolCall) => `${toolCall.toolName}(${toolCall.status})`)
+    .filter(Boolean);
+  return rows.length ? `工具概况：${rows.join(" -> ")}` : "";
+}
+
+function sessionResultSignals(session: WorkspaceSession): string[] {
+  return [
+    ...session.result.observations,
+    ...session.observations,
+    ...session.result.errors.map((error) => `错误：${error}`),
+    ...session.errors.map((error) => `错误：${error}`)
+  ];
+}
+
+function compactWorkspaceProcessDetail(session: WorkspaceSession): string {
+  return truncate([
+    `任务目标：${compactText(session.task.objective || session.objective, 260)}`,
+    `完成状态：${session.result.status}`,
+    compactLines("关键过程信号", sessionResultSignals(session), 5, 180),
+    compactToolCallOverview(session.localContext.recentToolCalls),
+    session.result.artifacts.length
+      ? compactLines("产物引用", session.result.artifacts.map((artifact) => `${artifact.kind}:${artifact.ref}${artifact.description ? ` - ${artifact.description}` : ""}`), 4, 160)
+      : "",
+    session.result.suggestedNextSteps.length
+      ? compactLines("建议下一步", session.result.suggestedNextSteps, 3, 160)
+      : ""
+  ].filter(Boolean).join("\n"), PROCESS_EVENT_DETAIL_LIMIT);
+}
+
+function compactConversationProcessDetail(input: {
+  start: number;
+  end: number;
+  firstUser: string;
+  messages: StoredMessage[];
+  relatedSessions: WorkspaceSession[];
+  toolCalls: ToolCallLog[];
+}): string {
+  const userMessages = input.messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content);
+  const sessionSignals = input.relatedSessions.flatMap((session) => [
+    `${session.workspaceId}:${session.status}`,
+    session.result.summary
+  ]);
+  return truncate([
+    `窗口范围：第 ${input.start + 1}-${input.end} 条消息`,
+    `起始用户目标：${compactText(input.firstUser, 260)}`,
+    compactLines("本窗口用户意图", userMessages, 4, 140),
+    compactLines("相关工作空间结果", sessionSignals, 4, 160),
+    compactToolCallOverview(input.toolCalls)
+  ].filter(Boolean).join("\n"), PROCESS_EVENT_DETAIL_LIMIT);
 }
 
 function summarizeJson(value: unknown, maxLength = 900): string {
@@ -207,20 +270,7 @@ export class MemoryService {
         version: 1,
         title: `${input.session.workspaceId} 工作空间过程`,
         summary: truncate(input.session.objective, 220),
-        detail: [
-          `任务目标：${input.session.task.objective}`,
-          `父级上下文：${input.session.task.parentContextSummary}`,
-          input.session.localContext.recalledEventMemories.length
-            ? `召回的事件记忆：${summarizeJson(input.session.localContext.recalledEventMemories.map((memory) => ({ id: memory.id, title: memory.title, summary: memory.summary })))}`
-            : "",
-          input.session.localContext.recalledSkillMemories.length
-            ? `召回的经验记忆：${summarizeJson(input.session.localContext.recalledSkillMemories.map((memory) => ({ id: memory.id, title: memory.title, summary: memory.summary })))}`
-            : "",
-          input.session.localContext.recentToolCalls.length
-            ? `工作空间工具调用：${summarizeJson(input.session.localContext.recentToolCalls)}`
-            : "",
-          input.session.observations.length ? `过程观察：${input.session.observations.join("\n")}` : ""
-        ].filter(Boolean).join("\n"),
+        detail: compactWorkspaceProcessDetail(input.session),
         metadataJson: JSON.stringify({
           ...metadataBase,
           eventKind: "process",
@@ -679,13 +729,14 @@ export class MemoryService {
           version: 1,
           title: `过程事件 ${windowIndex}`,
           summary: truncate(`过程：${firstUser}`, 220),
-          detail: [
-            `窗口范围：第 ${start + 1}-${end} 条消息`,
-            "窗口消息：",
-            compactMessages(windowMessages),
-            relatedSessions.length ? `相关 workspace session：${summarizeJson(relatedSessions.map((session) => session.result))}` : "",
-            windowToolCalls.length ? `相关工具调用：${summarizeJson(windowToolCalls)}` : ""
-          ].filter(Boolean).join("\n"),
+          detail: compactConversationProcessDetail({
+            start,
+            end,
+            firstUser,
+            messages: windowMessages,
+            relatedSessions,
+            toolCalls: windowToolCalls
+          }),
           metadataJson: JSON.stringify({
             ...evidenceBase,
             eventKind: "process",
