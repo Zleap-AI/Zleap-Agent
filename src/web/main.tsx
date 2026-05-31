@@ -1809,9 +1809,20 @@ function shortText(value: string, maxLength = 220): string {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 }
 
-function memoryMetadata(memory: MemoryRow): Record<string, unknown> {
-  const parsed = parseJsonText(memory.metadataJson || "{}");
+function memoryMetadataFromValue(metadataJson?: string): Record<string, unknown> {
+  const parsed = parseJsonText(metadataJson || "{}");
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+}
+
+function memoryMetadata(memory: MemoryRow): Record<string, unknown> {
+  return memoryMetadataFromValue(memory.metadataJson);
+}
+
+function memorySourceRefIds(metadata: Record<string, unknown>, table: string): string[] {
+  const refs = metadata.sourceRefs;
+  if (!Array.isArray(refs)) return [];
+  const ref = refs.find((item) => isJsonRecord(item) && item.table === table) as Record<string, unknown> | undefined;
+  return Array.isArray(ref?.ids) ? ref.ids.map(String) : [];
 }
 
 function memoryScopeLabel(memory: MemoryRow): string {
@@ -1832,7 +1843,10 @@ function memoryWritesForVisibleTurn(output: AgentRunOutput | null, traceWrites: 
     const metadata = memoryMetadata(memory);
     if (metadata.conversationId !== output.conversationId) return false;
     const metadataTaskIds = Array.isArray(metadata.taskIds) ? metadata.taskIds.map(String) : [];
-    const metadataSessionIds = Array.isArray(metadata.workspaceSessionIds) ? metadata.workspaceSessionIds.map(String) : [];
+    const metadataSessionIds = [
+      ...(Array.isArray(metadata.workspaceSessionIds) ? metadata.workspaceSessionIds.map(String) : []),
+      ...memorySourceRefIds(metadata, "workspace_sessions")
+    ];
     if (typeof metadata.taskId === "string" && taskIds.has(metadata.taskId)) return true;
     if (typeof metadata.workspaceSessionId === "string" && sessionIds.has(metadata.workspaceSessionId)) return true;
     if (metadataTaskIds.some((id) => taskIds.has(id))) return true;
@@ -3033,6 +3047,46 @@ function memoryErrorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function MemoryEvidencePanel({ memory }: { memory: Partial<MemoryRow> }) {
+  const metadata = memoryMetadataFromValue(memory.metadataJson);
+  const sourceRefs = Array.isArray(metadata.sourceRefs) ? metadata.sourceRefs.filter(isJsonRecord) as Record<string, unknown>[] : [];
+  const evidenceEventIds = Array.isArray(metadata.evidenceEventIds) ? metadata.evidenceEventIds.map(String) : [];
+  const compactMetadata = Object.fromEntries(Object.entries(metadata).filter(([key]) => !["sourceRefs", "evidenceEventIds"].includes(key)));
+  return (
+    <section className="memory-evidence-panel">
+      <h3>证据引用</h3>
+      <p>记忆只保存语义投影；原始消息、工具结果和 LLM 日志保存在数据表中，这里只保留可追溯 ID。</p>
+      {sourceRefs.length > 0 ? (
+        <div className="evidence-ref-list">
+          {sourceRefs.map((ref, index) => {
+            const ids = Array.isArray(ref.ids) ? ref.ids.map(String) : [];
+            return (
+              <div className="evidence-ref-row" key={`${String(ref.table)}-${index}`}>
+                <span>{String(ref.table ?? "-")}</span>
+                <small>{ids.length} 条</small>
+                <code title={ids.join(", ")}>{ids.slice(0, 4).join(", ") || "-"}</code>
+              </div>
+            );
+          })}
+        </div>
+      ) : <div className="empty">这条记忆没有关联原始表引用。</div>}
+      {evidenceEventIds.length > 0 && (
+        <div className="evidence-ref-row">
+          <span>event memory</span>
+          <small>{evidenceEventIds.length} 条</small>
+          <code title={evidenceEventIds.join(", ")}>{evidenceEventIds.slice(0, 4).join(", ")}</code>
+        </div>
+      )}
+      {Object.keys(compactMetadata).length > 0 && (
+        <details>
+          <summary>结构字段</summary>
+          <JsonValueView value={compactMetadata} />
+        </details>
+      )}
+    </section>
+  );
+}
+
 function MemoryTab() {
   const [memories, setMemories] = useState<MemoryRow[]>([]);
   const [query, setQuery] = useState("");
@@ -3066,7 +3120,7 @@ function MemoryTab() {
       try {
         JSON.parse(editing.metadataJson);
       } catch {
-        setError("metadataJson 必须是合法 JSON。");
+        setError("记忆证据字段必须是合法 JSON。");
         return;
       }
     }
@@ -3186,7 +3240,7 @@ function MemoryTab() {
               <label>工作空间 ID<input value={editing.workspaceId ?? ""} onChange={(event) => setEditing({ ...editing, workspaceId: event.target.value || undefined })} /></label>
               <label>关系 ID<input value={editing.relationId ?? ""} onChange={(event) => setEditing({ ...editing, relationId: event.target.value || undefined })} /></label>
               <label>版本<input type="number" value={editing.version ?? 1} onChange={(event) => setEditing({ ...editing, version: Number(event.target.value) })} /></label>
-              <label>元数据 JSON<textarea className="json-editor" value={editing.metadataJson ?? "{}"} onChange={(event) => setEditing({ ...editing, metadataJson: event.target.value })} /></label>
+              <MemoryEvidencePanel memory={editing} />
               <button className="primary" onClick={saveMemory} disabled={busy}>保存记忆</button>
             </>
           ) : <div className="empty">请选择或添加一条记忆。</div>}

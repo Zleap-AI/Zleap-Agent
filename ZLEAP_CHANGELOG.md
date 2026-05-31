@@ -2,6 +2,29 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 04:40 +08:00
+
+目的：
+- 收紧 memory 存储边界，避免记忆行变成第二份原始 JSON 日志仓库。
+- 降低 memory metadata 冗余，让原始消息、工具调用、LLM 请求和工作空间会话只保存在各自原始表里，memory 只保存语义投影和证据引用。
+
+变更：
+- 自动事件记忆不再重复保存 `evidenceMessageIds`、`workspaceSessionIds`、`toolCallIds`、`messageCount` 等顶层冗余字段，统一通过 `sourceRefs: [{ table, ids }]` 追溯原始表。
+- runtime 写入 impression/skill 时只保留紧凑的 `activeWorkspaceId`、`workspaceSessionId`、`taskId` 来源字段，不再保存同义数组。
+- `toolCallsForEventMemories` 改为从 `sourceRefs` 读取工具调用证据，保持 skill 自动候选仍能基于事件证据判断是否有可复用经验。
+- Memory UI 移除可编辑的“元数据 JSON”大文本框，改为结构化“证据引用”视图，并明确提示原始数据在数据表中，记忆只保存语义投影和可追溯 ID。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/03-memory-model.md`、`docs/05-hooks-and-lifecycle.md`、`docs/07-context-and-prompt-contracts.md` 和 `zleap-agent-framework.md`，把 `sourceRefs` 作为 memory 证据引用的规范入口，禁止为了调试重复保存原始 payload 或同义证据数组。
+- 更新回归测试，验证事件记忆通过 `sourceRefs` 保留 20 条消息引用、排除旧窗口证据，并确认冗余字段不再写入。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 本轮待提交。
+
 ## 2026-06-01 04:20 +08:00
 
 目的：

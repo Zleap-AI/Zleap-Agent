@@ -1302,6 +1302,55 @@ pre {
   font-size: 12px;
 }
 
+.memory-evidence-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 8px;
+  background: #f8fafb;
+}
+
+.memory-evidence-panel h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.memory-evidence-panel p {
+  margin: 0;
+  color: #5d6975;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.evidence-ref-list {
+  display: grid;
+  gap: 6px;
+}
+
+.evidence-ref-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 120px) 52px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.evidence-ref-row small {
+  color: #6a7785;
+}
+
+.evidence-ref-row code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .memory-layout {
   display: grid;
   grid-template-columns: 1fr 360px;

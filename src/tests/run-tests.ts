@@ -1258,6 +1258,13 @@ function metadataOf(memory: { metadataJson: string }): Record<string, any> {
   return JSON.parse(memory.metadataJson) as Record<string, any>;
 }
 
+function metadataSourceIds(memory: { metadataJson: string }, table: string): string[] {
+  const metadata = metadataOf(memory);
+  const refs = Array.isArray(metadata.sourceRefs) ? metadata.sourceRefs : [];
+  const ref = refs.find((item: any) => item?.table === table);
+  return Array.isArray(ref?.ids) ? ref.ids : [];
+}
+
 function updateWorkspaceMemoryPolicy(repos: Repositories, workspaceId: string, patch: Record<string, unknown>) {
   const workspace = repos.getWorkspace(workspaceId);
   const memoryPolicy = { ...workspace.memoryPolicy, ...patch };
@@ -2169,10 +2176,10 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(exitEvents.every((memory) => metadataOf(memory).source === "afterWorkspaceExit"), true);
   assert.equal(exitEvents.some((memory) => metadataOf(memory).eventKind === "process"), true);
   assert.equal(exitEvents.some((memory) => metadataOf(memory).eventKind === "result"), true);
-  assert.equal(exitEvents.every((memory) => metadataOf(memory).workspaceSessionIds.includes(fileSession!.id)), true);
-  assert.equal(exitEvents.every((memory) => metadataOf(memory).toolCallIds.includes(exitToolCall!.id)), true);
-  assert.equal(exitEvents.every((memory) => !metadataOf(memory).toolCallIds.includes(staleToolCall.id)), true);
-  assert.equal(exitEvents.every((memory) => metadataOf(memory).evidenceMessageIds.every((id: string) => !staleMessageIds.has(id))), true);
+  assert.equal(exitEvents.every((memory) => metadataSourceIds(memory, "workspace_sessions").includes(fileSession!.id)), true);
+  assert.equal(exitEvents.every((memory) => metadataSourceIds(memory, "tool_calls").includes(exitToolCall!.id)), true);
+  assert.equal(exitEvents.every((memory) => !metadataSourceIds(memory, "tool_calls").includes(staleToolCall.id)), true);
+  assert.equal(exitEvents.every((memory) => metadataSourceIds(memory, "messages").every((id: string) => !staleMessageIds.has(id))), true);
   const processEvent = exitEvents.find((memory) => metadataOf(memory).eventKind === "process");
   assert.equal(Boolean(processEvent), true);
   assert.equal(processEvent!.detail.length <= 900, true);
@@ -2801,8 +2808,6 @@ async function testSkillMemoryToolQualityGate() {
   assert.equal(metadata.activeWorkspaceId, "dev");
   assert.equal(metadata.workspaceSessionId, validFileSession?.id);
   assert.equal(metadata.taskId, validFileSession?.taskId);
-  assert.equal(metadata.workspaceSessionIds.includes(validFileSession?.id), true);
-  assert.equal(metadata.taskIds.includes(validFileSession?.taskId), true);
   const validTrace = repos.getTrace("conv-skill-quality-valid", "creator", "creator");
   assert.equal(validTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "completed"), true);
 
@@ -2928,12 +2933,10 @@ async function testMemoryLifecycleHooks() {
   assert.equal(events.some((memory) => metadataOf(memory).eventKind === "process"), true);
   assert.equal(events.some((memory) => metadataOf(memory).eventKind === "result"), true);
   const resultEvent = events.find((memory) => memory.relationId === "event:user-memory:main:conv-memory-window:window:1:result");
-  assert.equal(Array.isArray(metadataOf(resultEvent!).evidenceMessageIds), true);
-  assert.equal(metadataOf(resultEvent!).evidenceMessageIds.length, 20);
-  assert.equal(Array.isArray(metadataOf(resultEvent!).workspaceSessionIds), true);
-  assert.equal(metadataOf(resultEvent!).toolCallIds.includes("tool-old-window-evidence"), false);
-  assert.equal(metadataOf(resultEvent!).workspaceSessionIds.includes("wss-old-window-evidence"), false);
-  assert.equal(metadataOf(resultEvent!).taskIds.includes("task-old-window-evidence"), false);
+  assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
+  assert.equal(metadataSourceIds(resultEvent!, "tool_calls").includes("tool-old-window-evidence"), false);
+  assert.equal(metadataSourceIds(resultEvent!, "workspace_sessions").includes("wss-old-window-evidence"), false);
+  assert.equal(JSON.stringify(metadataOf(resultEvent!)).includes("task-old-window-evidence"), false);
   assert.equal(typeof metadataOf(resultEvent!).windowStartAt, "string");
   assert.equal(typeof metadataOf(resultEvent!).windowEndAt, "string");
   const windowTrace = repos.getTrace("conv-memory-window", "creator", "creator");
@@ -3030,8 +3033,8 @@ async function testConversationWindowEventExtractionUsesAbsoluteWindows() {
   const resultEvent = repos.getMemoryByRelation("event", "event:long-window-user:main:conv-long-memory-window:window:26:result");
   assert.equal(Boolean(resultEvent), true);
   assert.equal(resultEvent!.summary.includes("long-window assistant 520"), true);
-  assert.equal(metadataOf(resultEvent!).evidenceMessageIds.length, 20);
-  assert.equal(metadataOf(resultEvent!).messageCount, 20);
+  assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
+  assert.equal(Object.prototype.hasOwnProperty.call(metadataOf(resultEvent!), "messageCount"), false);
   assert.equal(repos.listMemories({ memoryType: "event", userId: "long-window-user", workspaceId: "main" }).filter((memory) => metadataOf(memory).eventKind === "result").length, 26);
 }
 
@@ -3060,7 +3063,7 @@ async function testStreamingConversationWindowMemoryIncludesAssistantMessage() {
   const events = repos.listMemories({ memoryType: "event", userId: "stream-memory-user", workspaceId: "main" });
   const resultEvent = events.find((memory) => memory.relationId === "event:stream-memory-user:main:conv-stream-memory-window:window:1:result");
   assert.equal(Boolean(resultEvent), true);
-  assert.equal(metadataOf(resultEvent!).evidenceMessageIds.length, 20);
+  assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
   assert.equal(resultEvent!.summary.includes("streamed assistant"), true);
   const trace = repos.getTrace("conv-stream-memory-window", "creator", "creator");
   assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterConversationWindow"), true);
@@ -3177,8 +3180,6 @@ async function testMemoryToolCallLoop() {
   assert.equal(impressionMetadata.activeWorkspaceId, "main");
   assert.equal(impressionMetadata.workspaceSessionId, mainSession?.id);
   assert.equal(impressionMetadata.taskId, mainSession?.taskId);
-  assert.equal(impressionMetadata.workspaceSessionIds.includes(mainSession?.id), true);
-  assert.equal(impressionMetadata.taskIds.includes(mainSession?.taskId), true);
   const trace = repos.getTrace("conv-tool-memory", "creator", "creator");
   assert.equal(trace.llmCalls.length, 2);
   assert.equal(trace.llmCalls.every((call) => call.status === "completed"), true);

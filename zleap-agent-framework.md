@@ -178,7 +178,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 
 长对话不能通过“把原始数据再塞回上下文”来解决。原始对话、完整工具输出、完整 `metadataJson` 和证据数组应留在 SQLite、workspace session、tool call 与 audit/debug 视图里；模型上下文只接收投影后的 compact memory view。
 
-原始数据有自己的表：`messages` 保存对话消息，`llm_calls` 保存 provider 请求/响应快照，`context_segments` 保存上下文堆栈，`tool_calls` 保存 function call 参数和结果，`workspace_sessions` 保存工作空间任务与结果，`audit_logs` 保存生命周期审计。Memory row 只保存语义化的标题、摘要、详情和来源引用，例如 `sourceRefs: [{ table, ids }]`、`evidenceMessageIds`、`workspaceSessionIds`、`toolCallIds`。它不应该复制 `windowMessages`、`toolCalls`、`workspaceSessions`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson` 或 `finalMessages` 这类原始 JSON；需要追溯时从引用回查原始表。
+原始数据有自己的表：`messages` 保存对话消息，`llm_calls` 保存 provider 请求/响应快照，`context_segments` 保存上下文堆栈，`tool_calls` 保存 function call 参数和结果，`workspace_sessions` 保存工作空间任务与结果，`audit_logs` 保存生命周期审计。Memory row 只保存语义化的标题、摘要、详情和来源引用，例如 `sourceRefs: [{ table, ids }]`。它不应该复制 `windowMessages`、`toolCalls`、`workspaceSessions`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson` 或 `finalMessages` 这类原始 JSON；同一批证据 id 也不应该在 `sourceRefs` 外再重复保存一份顶层数组。需要追溯时从引用回查原始表。
 
 - **最近原始对话**：保留最近 20 条最详细的本地对话片段，用来维持当前任务连续性。
 - **Impression**：不做 query 选择性召回，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 是对人和 agent 自我的稳定印象，天然有上限，不应该像事件日志一样无限增长。

@@ -176,7 +176,7 @@ type EventMemory = {
 };
 ```
 
-event memory 是压缩后的事实投影，不是原始日志仓库。完整消息、provider 请求、上下文堆栈、工具参数/结果、workspace session 和审计记录分别保存在 `messages`、`llm_calls`、`context_segments`、`tool_calls`、`workspace_sessions` 和 `audit_logs`。event 的 `metadataJson` 只允许保存可追溯引用，例如 `conversationId`、`evidenceMessageIds`、`workspaceSessionIds`、`toolCallIds`，以及统一的 `sourceRefs: [{ table, ids }]`。它不应该复制 `windowMessages`、`toolCalls`、`workspaceSessions`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson` 或 `finalMessages` 这类原始 JSON。未来如果需要从记忆回查证据，应通过这些引用回到原始表，而不是把原始数据塞进 memory row。
+event memory 是压缩后的事实投影，不是原始日志仓库。完整消息、provider 请求、上下文堆栈、工具参数/结果、workspace session 和审计记录分别保存在 `messages`、`llm_calls`、`context_segments`、`tool_calls`、`workspace_sessions` 和 `audit_logs`。event 的 `metadataJson` 只允许保存小型生命周期字段和可追溯引用，例如 `conversationId`、`eventKind`、`outcome`、`workspaceSessionId`、`taskId`，以及统一的 `sourceRefs: [{ table, ids }]`。同一批证据 id 不应同时作为多个顶层数组和 `sourceRefs` 重复保存；`sourceRefs` 是回查原始表的规范入口。Memory 不应该复制 `windowMessages`、`toolCalls`、`workspaceSessions`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson` 或 `finalMessages` 这类原始 JSON。未来如果需要从记忆回查证据，应通过这些引用回到原始表，而不是把原始数据塞进 memory row。
 
 ## 事件的 SQLite FTS + Relation/Version 召回
 
@@ -464,7 +464,7 @@ runtime memory tool 的归属由代码绑定，不由 AI 自己传参决定。fu
 
 Runtime impression 写入工具遵循和 event/skill 工具相同的代码绑定 scope 规则。`writeUserImpression` 的 `userId` 只能来自当前 run，`writeAgentSelfImpression` 的 `agentId` 只能来自当前 agent。如果模型在任意 impression 工具调用里传入 `userId`、`agentId` 或 `workspaceId`，runtime 必须拒绝该调用，而不是忽略这些参数或把它们当成可信路由提示。
 
-Runtime 请求写入的 impression 仍然是跨工作空间身份记忆，不是工作空间记忆。不过 metadata 和 audit logs 应尽量保留来源执行证据：`activeWorkspaceId`、`workspaceSessionId`、`taskId`、`workspaceSessionIds` 和 `taskIds`。这些字段用于 Web UI 调试“agent 在哪里决定写入 impression”，不会变成 memory 的 scope。
+Runtime 请求写入的 impression 仍然是跨工作空间身份记忆，不是工作空间记忆。不过 metadata 和 audit logs 应尽量保留紧凑的来源执行证据：`activeWorkspaceId`、`workspaceSessionId` 和 `taskId`。这些字段用于 Web UI 调试“agent 在哪里决定写入 impression”，不会变成 memory 的 scope，也不需要再保存一份重复数组。
 
 直接 Memory Web UI/API 的 update 流程可以为了 creator 调试和迁移暴露 scope 字段，但每次更新都必须用同一套写入策略校验最终 patched row。只检查 actor 能编辑原始 row 是不够的；patched result 仍然必须是合法的 impression/event/skill 形状，并且不能在没有对应角色的情况下跨越 user、agent 或 workspace 边界。
 
@@ -480,4 +480,4 @@ Runtime 请求写入的 impression 仍然是跨工作空间身份记忆，不是
 
 Runtime skill 生成是另一条路径：普通用户或 agent 可以通过 active workspace 的 `writeSkillMemory` 显式触发可复用经验提取。在这条路径里，`workspaceId` 由 runtime 代码注入，不由模型提供；只有当前工作空间记忆策略允许写 skill，且候选内容可复用、已脱敏、有结构、证据安全，写入才会被接受。
 
-Runtime `writeSkillMemory` 还会携带来自 runtime state 的 trace 证据。持久化 metadata 应在可用时包含 `activeWorkspaceId`、当前 `workspaceSessionId`、当前 `taskId`，以及匹配的 `workspaceSessionIds` / `taskIds` 数组，让 Web UI 能显示哪次工作空间执行产生或请求了这条共享 skill。模型仍然不能提供这些 id。
+Runtime `writeSkillMemory` 还会携带来自 runtime state 的 trace 证据。持久化 metadata 应在可用时包含 `activeWorkspaceId`、当前 `workspaceSessionId` 和当前 `taskId`，让 Web UI 能显示哪次工作空间执行产生或请求了这条共享 skill。模型仍然不能提供这些 id，也不应该重复生成等价的证据数组。

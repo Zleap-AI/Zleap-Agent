@@ -360,7 +360,7 @@ searchMemory
 - 不允许根据自然语言关键词猜测另一个 workspace。
 - 应保存 evidence event。
 
-Runtime 请求的 `writeSkillMemory` 也必须保留来自 code-bound runtime state 的 trace evidence。可用时，metadata 包含 `activeWorkspaceId`、`workspaceSessionId`、`taskId`、`workspaceSessionIds` 和 `taskIds`，让 Web UI 可以把共享 skill 连接到请求它的具体 workspace execution。模型不能提供或覆盖这些 id。
+Runtime 请求的 `writeSkillMemory` 也必须保留来自 code-bound runtime state 的 trace evidence。可用时，metadata 包含 `activeWorkspaceId`、`workspaceSessionId` 和 `taskId`，让 Web UI 可以把共享 skill 连接到请求它的具体 workspace execution。模型不能提供或覆盖这些 id，也不应该为了调试再保存等价的重复数组。
 
 ## 工作空间生命周期示例
 
