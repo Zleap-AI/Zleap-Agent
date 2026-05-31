@@ -16,6 +16,8 @@ export type ChatCompletionOutput = {
 };
 
 const MAX_PROVIDER_ATTEMPTS = 5;
+const DEFAULT_PROVIDER_FETCH_TIMEOUT_MS = 30_000;
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 45_000;
 
 export type LLMStreamEvent =
   | { type: "content"; text: string }
@@ -78,6 +80,36 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function positiveEnvInt(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function providerFetchTimeoutMs(): number {
+  return positiveEnvInt("ZLEAP_LLM_FETCH_TIMEOUT_MS", DEFAULT_PROVIDER_FETCH_TIMEOUT_MS);
+}
+
+function streamIdleTimeoutMs(): number {
+  return positiveEnvInt("ZLEAP_LLM_STREAM_IDLE_TIMEOUT_MS", DEFAULT_STREAM_IDLE_TIMEOUT_MS);
+}
+
+async function readStreamChunkWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`LLM 流式响应超时：${Math.round(timeoutMs / 1000)} 秒没有收到新数据。`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([reader.read(), timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 function decodeCompressedBytes(bytes: Uint8Array, contentEncoding: string): Uint8Array {
   const encoding = contentEncoding.toLowerCase();
   const isGzip = encoding.includes("gzip") || (bytes[0] === 0x1f && bytes[1] === 0x8b);
@@ -133,6 +165,8 @@ async function fetchWithProviderRetry(input: {
   let lastNetworkError: unknown;
   for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt += 1) {
     let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), providerFetchTimeoutMs());
     try {
       response = await fetch(input.endpoint, {
         method: "POST",
@@ -140,7 +174,8 @@ async function fetchWithProviderRetry(input: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${input.apiKey}`
         },
-        body: JSON.stringify(input.body)
+        body: JSON.stringify(input.body),
+        signal: controller.signal
       });
     } catch (error) {
       lastNetworkError = error;
@@ -149,6 +184,8 @@ async function fetchWithProviderRetry(input: {
         continue;
       }
       throw formatFetchError(error, input.endpoint);
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (response.ok || !isRetryableStatus(response.status) || attempt === MAX_PROVIDER_ATTEMPTS) {
@@ -236,38 +273,46 @@ export class OpenAICompatibleClient implements LLMClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    const idleTimeoutMs = streamIdleTimeoutMs();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() ?? "";
-      for (const event of events) {
-        for (const line of event.split("\n")) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const data = trimmed.slice(5).trim();
-          if (data === "[DONE]") return;
-          if (!data) continue;
-          const parsed = JSON.parse(data) as any;
-          const delta = parsed.choices?.[0]?.delta;
-          const content = delta?.content;
-          if (content) yield { type: "content", text: content };
-          const toolCalls = delta?.tool_calls;
-          if (Array.isArray(toolCalls)) {
-            for (const toolCall of toolCalls) {
-              yield {
-                type: "tool_call_delta",
-                index: Number(toolCall.index ?? 0),
-                id: toolCall.id,
-                name: toolCall.function?.name,
-                arguments: toolCall.function?.arguments
-              };
+    try {
+      while (true) {
+        const { done, value } = await readStreamChunkWithIdleTimeout(reader, idleTimeoutMs);
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const event of events) {
+          for (const line of event.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const data = trimmed.slice(5).trim();
+            if (data === "[DONE]") return;
+            if (!data) continue;
+            const parsed = JSON.parse(data) as any;
+            const delta = parsed.choices?.[0]?.delta;
+            const content = delta?.content;
+            if (content) yield { type: "content", text: content };
+            const toolCalls = delta?.tool_calls;
+            if (Array.isArray(toolCalls)) {
+              for (const toolCall of toolCalls) {
+                yield {
+                  type: "tool_call_delta",
+                  index: Number(toolCall.index ?? 0),
+                  id: toolCall.id,
+                  name: toolCall.function?.name,
+                  arguments: toolCall.function?.arguments
+                };
+              }
             }
           }
         }
       }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
     }
     yield { type: "done" };
   }

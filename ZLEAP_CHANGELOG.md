@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 19:25 +08:00
+
+Purpose:
+- Prevent streamed LLM follow-up calls from staying in `pending` forever after CLI/tool results return.
+
+Changed:
+- Added a configurable provider fetch timeout and stream idle timeout to the OpenAI-compatible client.
+- Streamed response reads now fail with a clear timeout diagnostic when no new provider data arrives for the idle window.
+- Added regression coverage proving that a streamed tool-call follow-up failure is marked `failed` in `llm_calls` instead of waiting until server restart.
+- Updated the master plan with the bounded streaming/failure-finalization requirement.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
+
+Git:
+- Recorded by the Git commit titled `fix: timeout stalled llm streams`.
+
 ## 2026-05-31 08:52 +08:00
 
 Purpose:

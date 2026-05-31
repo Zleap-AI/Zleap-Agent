@@ -804,6 +804,32 @@ class StreamingToolCallingLLMClient implements LLMClient {
   }
 }
 
+class StreamingToolThenFailureLLMClient implements LLMClient {
+  calls = 0;
+
+  async complete(): Promise<ChatCompletionOutput> {
+    throw new Error("complete should not be used in streaming failure test");
+  }
+
+  async *streamEvents(): AsyncGenerator<LLMStreamEvent> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      yield { type: "tool_call_delta", index: 0, id: "stream-call-before-failure", name: "writeUserImpression" };
+      yield {
+        type: "tool_call_delta",
+        index: 0,
+        arguments: JSON.stringify({
+          title: "Streaming follow-up failure",
+          summary: "Follow-up streaming failures should close the pending LLM call",
+          detail: "When a streamed tool result is followed by a provider failure, the runtime must mark the saved follow-up LLM call failed."
+        })
+      };
+      return;
+    }
+    throw new Error("provider stream idle timeout");
+  }
+}
+
 class StreamingContentOnlyLLMClient implements LLMClient {
   async complete(): Promise<ChatCompletionOutput> {
     throw new Error("complete should not be used in streaming content-only test");
@@ -4121,6 +4147,33 @@ async function testLlmFailureLog() {
   assert.equal(trace.llmCalls[0].errorText, "provider timeout");
 }
 
+async function testStreamingFollowUpFailureMarksLlmCallFailed() {
+  const repos = createRepos();
+  const runtime = new AgentRuntime(repos, new StreamingToolThenFailureLLMClient());
+  await assert.rejects(async () => {
+    for await (const _event of runtime.runStream({
+      agentId: "default-agent",
+      userId: "stream-failure-user",
+      userRole: "user",
+      conversationId: "conv-stream-followup-fail",
+      message: "remember this, then continue",
+      llm: {
+        baseUrl: "https://api.302ai.com",
+        model: "gpt-5-mini",
+        apiKey: "test-key"
+      }
+    })) {
+      // Drain the stream until the fake provider throws on the follow-up call.
+    }
+  }, /provider stream idle timeout/);
+
+  const trace = repos.getTrace("conv-stream-followup-fail", "stream-failure-user", "user");
+  assert.equal(trace.llmCalls.length, 2);
+  assert.equal(trace.llmCalls[0].status, "failed");
+  assert.equal(trace.llmCalls[0].errorText, "provider stream idle timeout");
+  assert.equal(trace.llmCalls[1].status, "completed");
+}
+
 async function testPendingLlmCallsInterruptedOnStartup() {
   const repos = createRepos();
   repos.ensureConversation("conv-pending", "default-agent", "user");
@@ -4627,6 +4680,33 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
       () => client.complete(input),
       /LLM 请求失败（400）：bad request detail/
     );
+
+    const originalIdleTimeout = process.env.ZLEAP_LLM_STREAM_IDLE_TIMEOUT_MS;
+    try {
+      process.env.ZLEAP_LLM_STREAM_IDLE_TIMEOUT_MS = "10";
+      globalThis.fetch = (async () => {
+        const encoder = new TextEncoder();
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{\"content\":\"stalled\"}}]}\n\n"));
+          }
+        }), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" }
+        });
+      }) as typeof fetch;
+      await assert.rejects(async () => {
+        for await (const _event of client.streamEvents(input)) {
+          // The first chunk arrives, then the stream idles past the configured timeout.
+        }
+      }, /LLM 流式响应超时/);
+    } finally {
+      if (originalIdleTimeout === undefined) {
+        delete process.env.ZLEAP_LLM_STREAM_IDLE_TIMEOUT_MS;
+      } else {
+        process.env.ZLEAP_LLM_STREAM_IDLE_TIMEOUT_MS = originalIdleTimeout;
+      }
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -4656,6 +4736,7 @@ async function main() {
   await testSkillMemoryToolQualityGate();
   await testRuntimeStreaming();
   await testLlmFailureLog();
+  await testStreamingFollowUpFailureMarksLlmCallFailed();
   await testPendingLlmCallsInterruptedOnStartup();
   await testConversationDeletionLifecycle();
   await testWorkspaceDeletionLifecycle();
