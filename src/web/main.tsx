@@ -2209,13 +2209,28 @@ function JsonCell({ value, depth }: { value: unknown; depth: number }) {
 }
 
 function JsonTableCell({ value, depth }: { value: unknown; depth: number }) {
+  const [open, setOpen] = useState(false);
   if (value === undefined) return <span className="json-muted">-</span>;
   const preview = tableCellPreview(value);
   if (!isJsonScalar(value) || preview.length > 80) {
     return (
-      <span className="json-table-cell-preview" title={preview}>
-        {preview}
-      </span>
+      <>
+        <button className="json-table-cell-preview-button" type="button" title="点击查看完整内容" onClick={() => setOpen(true)}>
+          <span className="json-table-cell-preview">{preview}</span>
+          <span className="json-cell-open-hint">查看</span>
+        </button>
+        {open && (
+          <div className="json-cell-modal-backdrop" role="presentation" onClick={() => setOpen(false)}>
+            <section className="json-cell-modal" role="dialog" aria-modal="true" aria-label="完整内容" onClick={(event) => event.stopPropagation()}>
+              <header>
+                <strong>完整内容</strong>
+                <button type="button" onClick={() => setOpen(false)}>关闭</button>
+              </header>
+              <pre>{fullJsonText(value)}</pre>
+            </section>
+          </div>
+        )}
+      </>
     );
   }
   return <JsonCell value={value} depth={depth} />;
@@ -2239,6 +2254,13 @@ function tableCellPreview(value: unknown): string {
     return compactJson(value);
   }
   return formatJsonScalar(value);
+}
+
+function fullJsonText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "";
+  if (isJsonScalar(value)) return formatJsonScalar(value);
+  return JSON.stringify(value, null, 2);
 }
 
 function isJsonRecord(value: unknown): value is Record<string, unknown> {

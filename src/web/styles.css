@@ -963,6 +963,7 @@ textarea {
   text-align: right;
 }
 
+.json-table-cell-preview-button,
 .json-table-cell-preview,
 .json-table td .json-scalar,
 .json-table td .json-compact,
@@ -975,9 +976,84 @@ textarea {
   overflow-wrap: normal;
 }
 
+.json-table-cell-preview-button {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.json-table-cell-preview-button:hover .json-table-cell-preview,
+.json-table-cell-preview-button:focus-visible .json-table-cell-preview {
+  color: #155fc7;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .json-table-cell-preview {
   color: #17202a;
   line-height: 1.45;
+}
+
+.json-cell-open-hint {
+  display: block;
+  margin-top: 3px;
+  color: #6b7a89;
+  font-size: 11px;
+}
+
+.json-cell-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(13 23 33 / 0.18);
+}
+
+.json-cell-modal {
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(76vh, 680px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #d7e0e8;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgb(20 32 45 / 0.22);
+}
+
+.json-cell-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e1e7ed;
+}
+
+.json-cell-modal header button {
+  border: 1px solid #cbd6df;
+  border-radius: 6px;
+  padding: 5px 9px;
+  background: #fff;
+  color: #26313d;
+  cursor: pointer;
+}
+
+.json-cell-modal pre {
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #1d2833;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .json-list {
