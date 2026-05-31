@@ -20,7 +20,7 @@
 - `git diff --check` 通过，仅有 Windows 换行提示。
 
 Git：
-- 待提交。
+- `06728d9` 补充 handoff context 助手回复摘要。
 
 ## 2026-06-01 06:09 +08:00
 
