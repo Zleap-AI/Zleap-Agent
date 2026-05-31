@@ -90,7 +90,9 @@ function workspaceStatusLabel(value: WorkspaceSession["status"]): string {
   return value;
 }
 
-function describeWorkspaceView(output: AgentRunOutput | null): { primary: string; detail: string; involved: string[] } {
+type WorkspaceView = { primary: string; detail: string; involved: string[] };
+
+function describeWorkspaceView(output: AgentRunOutput | null): WorkspaceView {
   if (!output) return { primary: "暂无", detail: "", involved: [] };
   const sessions = output.workspaceTrace ?? [];
   const lastCapabilitySession = [...sessions].reverse().find((session) => session.workspaceId !== "main");
@@ -106,6 +108,41 @@ function describeWorkspaceView(output: AgentRunOutput | null): { primary: string
       : `状态：${statusText}`,
     involved
   };
+}
+
+function sessionStatusForWorkspace(output: AgentRunOutput | null, workspaceId: string): string {
+  const session = [...(output?.workspaceTrace ?? [])].reverse().find((item) => item.workspaceId === workspaceId);
+  return session ? workspaceStatusLabel(session.status) : "";
+}
+
+function describeSelectedWorkspaceView(input: {
+  output: AgentRunOutput | null;
+  message?: ChatMessage;
+  llmCallId: string;
+  contextSegments: ContextSegment[];
+}): WorkspaceView {
+  const involved = Array.from(new Set((input.output?.workspaceTrace ?? []).map((session) => session.workspaceId)));
+  if (input.message?.workspaceId) {
+    const statusText = input.message.status ? workspaceStatusLabel(input.message.status as WorkspaceSession["status"]) : sessionStatusForWorkspace(input.output, input.message.workspaceId);
+    return {
+      primary: input.message.workspaceId,
+      detail: statusText ? `选中消息 · 状态：${statusText}` : "选中消息关联的工作空间",
+      involved
+    };
+  }
+  if (input.llmCallId) {
+    const segments = segmentsForLlmCall(input.contextSegments, input.llmCallId);
+    const workspaceId = workspaceIdForLlmCall(segments);
+    if (workspaceId && workspaceId !== "未知") {
+      const statusText = sessionStatusForWorkspace(input.output, workspaceId);
+      return {
+        primary: workspaceId,
+        detail: statusText ? `选中 LLM 调用 · 状态：${statusText}` : "选中 LLM 调用关联的工作空间",
+        involved
+      };
+    }
+  }
+  return describeWorkspaceView(input.output);
 }
 
 function messageRoleLabel(item: ChatMessage): string {
@@ -329,9 +366,17 @@ function segmentsWithToolSnapshot(segments: ContextSegment[], call?: LLMCallSnap
 
 function workspaceIdForLlmCall(segments: ContextSegment[]): string {
   const workspaceSegment = segments.find((segment) => segment.segmentType === "workspace");
-  if (!workspaceSegment) return "未知";
-  const parsed = parseJsonText(workspaceSegment.content) as { currentWorkspace?: { id?: unknown } };
-  return typeof parsed?.currentWorkspace?.id === "string" ? parsed.currentWorkspace.id : "未知";
+  if (workspaceSegment) {
+    const parsed = parseJsonText(workspaceSegment.content) as { currentWorkspace?: { id?: unknown }; activeWorkspaceId?: unknown };
+    if (typeof parsed?.currentWorkspace?.id === "string") return parsed.currentWorkspace.id;
+    if (typeof parsed?.activeWorkspaceId === "string") return parsed.activeWorkspaceId;
+  }
+  const toolsSegment = segments.find((segment) => segment.segmentType === "tools");
+  if (toolsSegment) {
+    const parsed = parseJsonText(toolsSegment.content) as { activeWorkspaceId?: unknown };
+    if (typeof parsed?.activeWorkspaceId === "string") return parsed.activeWorkspaceId;
+  }
+  return "未知";
 }
 
 function inferMessageLlmCallId(
@@ -1000,16 +1045,21 @@ function ChatTab() {
   const currentRunControllerRef = useRef<AbortController | null>(null);
   const selectedUserMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId && item.role === "用户") : undefined;
   const visibleOutput = selectedUserMessage ? selectedUserMessage.turnOutput ?? null : output;
-  const workspaceView = describeWorkspaceView(visibleOutput);
   const traceSegments = trace?.contextSegments ?? [];
   const llmCalls = (trace?.llmCalls ?? []).slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const inspectedMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId) : undefined;
-  const inspectedOutput = inspectedMessage?.role === "鐢ㄦ埛" ? inspectedMessage.turnOutput ?? output : output;
+  const inspectedOutput = inspectedMessage?.role === "用户" ? inspectedMessage.turnOutput ?? output : output;
   const inspectedLlmCallId = selectedLlmCallId || inspectedMessage?.inspectLlmCallId || inspectedOutput?.contextSegments?.[0]?.llmCallId || llmCalls.at(-1)?.id || "";
   const inspectedLlmCall = llmCalls.find((call) => call.id === inspectedLlmCallId);
   const inspectedLlmSegments = inspectedLlmCallId ? segmentsForLlmCall(traceSegments, inspectedLlmCallId) : [];
   const inspectedRawContextSegments = inspectedLlmSegments.length > 0 ? inspectedLlmSegments : (inspectedOutput?.contextSegments ?? []);
   const inspectedContextSegments = segmentsWithToolSnapshot(inspectedRawContextSegments, inspectedLlmCall);
+  const workspaceView = describeSelectedWorkspaceView({
+    output: visibleOutput,
+    message: inspectedMessage,
+    llmCallId: inspectedLlmCallId,
+    contextSegments: traceSegments
+  });
   const displayedContextSegments = inspectedContextSegments.filter((segment) => segment.segmentType !== "final_messages");
   const rawContextLogSegment = inspectedContextSegments.find((segment) => segment.segmentType === "final_messages");
   const hasRawContextLogs = Boolean(rawContextLogSegment);
