@@ -46,6 +46,7 @@ packages/
     chat interface
     workspace view
     memory inspector
+    readonly database table viewer
     context overview 和 raw final_messages log toggle
 ```
 
@@ -390,6 +391,11 @@ Web UI 不应该只是普通聊天框。
   - database-like memory table
   - filter/add/edit/delete
   - policy and trace diagnostics
+
+数据表：
+  - creator-only readonly SQLite table viewer
+  - switch between messages / llm_calls / context_segments / tool_calls / workspace_sessions / memories / audit_logs
+  - inspect source rows referenced by memory metadata sourceRefs / evidence ids
 ```
 
 ## 已确认决策

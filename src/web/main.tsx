@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, DatabaseTableRows, DatabaseTableSummary, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
 import "./styles.css";
 
-type Tab = "chat" | "workspace" | "memory" | "logs" | "concept";
+type Tab = "chat" | "workspace" | "memory" | "logs" | "tables" | "concept";
+type GlobalRunState = {
+  running: boolean;
+  label: string;
+  stop?: () => void;
+};
 type ChatMessage = {
   id: string;
   role: string;
@@ -40,6 +45,7 @@ const TAB_LABELS: Record<Tab, string> = {
   workspace: "工作空间",
   memory: "记忆",
   logs: "日志",
+  tables: "数据表",
   concept: "概念介绍"
 };
 
@@ -676,6 +682,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 function App() {
   const [tab, setTab] = useState<Tab>("chat");
+  const [globalRun, setGlobalRun] = useState<GlobalRunState>({ running: false, label: "" });
   const renderTabPanel = (item: Tab, node: React.ReactNode) => (
     <div className={`tab-panel ${tab === item ? "active" : ""}`} aria-hidden={tab !== item}>
       {node}
@@ -690,17 +697,24 @@ function App() {
           <p>工作空间优先的智能体调试控制台</p>
         </div>
         <nav className="tabs" aria-label="主导航">
-          {(["chat", "workspace", "memory", "logs", "concept"] as Tab[]).map((item) => (
+          {(["chat", "workspace", "memory", "logs", "tables", "concept"] as Tab[]).map((item) => (
             <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
               {TAB_LABELS[item]}
             </button>
           ))}
         </nav>
+        {globalRun.running && (
+          <div className="global-run-banner">
+            <span>{globalRun.label || "对话正在生成"}</span>
+            <button className="danger" onClick={() => globalRun.stop?.()}>停止</button>
+          </div>
+        )}
       </header>
-      {renderTabPanel("chat", <ChatTab />)}
+      {renderTabPanel("chat", <ChatTab onRunStateChange={setGlobalRun} />)}
       {renderTabPanel("workspace", <WorkspaceTab />)}
       {renderTabPanel("memory", <MemoryTab />)}
       {renderTabPanel("logs", <LogsTab />)}
+      {renderTabPanel("tables", <DatabaseTablesTab />)}
       {renderTabPanel("concept", <ConceptIntroTab />)}
     </main>
   );
@@ -961,7 +975,7 @@ function ConceptIntroTab() {
   );
 }
 
-function ChatTab() {
+function ChatTab({ onRunStateChange }: { onRunStateChange?: (state: GlobalRunState) => void }) {
   const cached = loadCache();
   const [agent, setAgent] = useState<AgentConfig | null>(null);
   const [userId, setUserId] = useState(cached.userId ?? "user");
@@ -1061,6 +1075,11 @@ function ChatTab() {
     const assistantMessageId = createLocalId("assistant-msg");
     const controller = new AbortController();
     currentRunControllerRef.current = controller;
+    onRunStateChange?.({
+      running: true,
+      label: "对话正在生成，切换页面不会中断运行",
+      stop: () => controller.abort()
+    });
     setLoading(true);
     setError("");
     setRetryMessage("");
@@ -1233,6 +1252,7 @@ function ChatTab() {
       });
     } finally {
       if (currentRunControllerRef.current === controller) currentRunControllerRef.current = null;
+      onRunStateChange?.({ running: false, label: "" });
       setLoading(false);
     }
   }
@@ -2702,6 +2722,148 @@ function WorkspaceTab() {
             </div>
           </>
         ) : <div className="empty">请选择一个工作空间。</div>}
+      </section>
+    </section>
+  );
+}
+
+function databaseCellPreview(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") {
+    const parsed = parseJsonText(value);
+    if (parsed !== value) return trimOneLine(compactJson(parsed), 180);
+    return trimOneLine(value, 180);
+  }
+  if (typeof value === "object") return trimOneLine(compactJson(value), 180);
+  return String(value);
+}
+
+function DatabaseTablesTab() {
+  const [tables, setTables] = useState<DatabaseTableSummary[]>([]);
+  const [selectedTable, setSelectedTable] = useState("");
+  const [tableRows, setTableRows] = useState<DatabaseTableRows | null>(null);
+  const [selectedRow, setSelectedRow] = useState<Record<string, unknown> | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const limit = 100;
+
+  async function loadTables(preferredTable = selectedTable) {
+    setLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({ actorId: "creator", actorRole: "creator" });
+      const data = await api<{ tables: DatabaseTableSummary[] }>(`/api/db/tables?${params.toString()}`);
+      setTables(data.tables);
+      const nextTable = preferredTable && data.tables.some((table) => table.name === preferredTable)
+        ? preferredTable
+        : data.tables[0]?.name ?? "";
+      setSelectedTable(nextTable);
+      if (nextTable) await loadTableRows(nextTable, 0);
+    } catch (err) {
+      setError(`加载数据表失败：${memoryErrorText(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadTableRows(tableName = selectedTable, nextOffset = offset) {
+    if (!tableName) return;
+    setLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({
+        actorId: "creator",
+        actorRole: "creator",
+        limit: String(limit),
+        offset: String(nextOffset)
+      });
+      const data = await api<DatabaseTableRows>(`/api/db/tables/${encodeURIComponent(tableName)}?${params.toString()}`);
+      setTableRows(data);
+      setSelectedRow(data.rows[0] ?? null);
+      setOffset(data.offset);
+    } catch (err) {
+      setError(`读取数据表失败：${memoryErrorText(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadTables().catch(console.error);
+  }, []);
+
+  const canPrev = Boolean(tableRows && tableRows.offset > 0);
+  const canNext = Boolean(tableRows && tableRows.offset + tableRows.limit < tableRows.total);
+
+  return (
+    <section className="database-page">
+      <aside className="panel database-sidebar">
+        <div className="section-heading compact">
+          <h2>数据库表</h2>
+          <button onClick={() => void loadTables()} disabled={loading}>刷新</button>
+        </div>
+        <div className="database-table-list">
+          {tables.map((table) => (
+            <button
+              key={table.name}
+              className={selectedTable === table.name ? "active" : ""}
+              onClick={() => {
+                setSelectedTable(table.name);
+                void loadTableRows(table.name, 0);
+              }}
+            >
+              <span>{table.name}</span>
+              <small>{table.rowCount} 行</small>
+            </button>
+          ))}
+          {tables.length === 0 && <div className="empty">暂无可查看的数据表。</div>}
+        </div>
+      </aside>
+      <section className="panel database-browser">
+        <div className="database-toolbar">
+          <div>
+            <strong>{tableRows?.table ?? (selectedTable || "未选择表")}</strong>
+            <span>
+              {tableRows ? `共 ${tableRows.total} 行，当前 ${tableRows.offset + 1}-${Math.min(tableRows.offset + tableRows.rows.length, tableRows.total)}` : "选择左侧表后查看原始记录"}
+            </span>
+          </div>
+          <div className="database-toolbar-actions">
+            <button onClick={() => void loadTableRows(selectedTable, Math.max(0, offset - limit))} disabled={loading || !canPrev}>上一页</button>
+            <button onClick={() => void loadTableRows(selectedTable, offset + limit)} disabled={loading || !canNext}>下一页</button>
+          </div>
+        </div>
+        {error && <div className="error memory-error"><span>{error}</span></div>}
+        <div className="database-content">
+          <div className="database-table-wrap">
+            {tableRows ? (
+              <table className="database-table">
+                <thead>
+                  <tr>
+                    {tableRows.columns.map((column) => <th key={column}>{jsonFieldLabel(column)}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableRows.rows.map((row, rowIndex) => (
+                    <tr
+                      key={rowIndex}
+                      className={selectedRow === row ? "selected" : ""}
+                      onClick={() => setSelectedRow(row)}
+                    >
+                      {tableRows.columns.map((column) => (
+                        <td key={column}>{databaseCellPreview(row[column])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <div className="empty">选择一个表查看完整数据库记录。</div>}
+          </div>
+          <aside className="database-row-detail">
+            <h2>当前行详情</h2>
+            {selectedRow ? <JsonValueView value={selectedRow} /> : <div className="empty">点击一行查看字段详情。</div>}
+          </aside>
+        </div>
       </section>
     </section>
   );

@@ -15,7 +15,7 @@
 
 - Web UI:
   - The visible interface must use Chinese by default.
-  - Top-level tabs: `对话`, `工作空间`, `记忆`, `日志`, and `概念介绍`.
+  - Top-level tabs: `对话`, `工作空间`, `记忆`, `日志`, `数据表`, and `概念介绍`.
   - `对话` uses three columns: agent/LLM/prompt configuration, chatbot conversation, and workspace/context stack inspection.
   - Assistant responses must support streaming output with a character-by-character typing feel.
   - Chat messages render Markdown for common assistant output such as headings, lists, quotes, links, inline code, and fenced code blocks.
@@ -27,12 +27,13 @@
   - Context stack JSON must be parsed into readable structured views instead of raw dumps. Callable `tools` arrays should render as table-like rows with tool name, schema/binding/risk metadata, and nested values displayed compactly; raw JSON is only a fallback for unparsable text or raw-log inspection.
   - Chat composer keyboard behavior: Enter sends the message; Ctrl+Enter inserts a newline.
   - Chat composer must show a `停止` control while a turn is running. Stopping a run aborts the browser stream request, marks the visible streaming message as stopped instead of failed/retryable, and lets the server propagate client disconnect cancellation into the active runtime/provider request.
-  - 顶层 tab 切换不得中断正在进行的对话流、工具调用展示或本地消息状态。Web UI 应保活 `对话` 页组件，只隐藏非当前 tab；只有用户明确点击 `停止` 时才 abort 当前流式请求。
+  - 顶层 tab 切换不得中断正在进行的对话流、工具调用展示或本地消息状态。Web UI 应保活 `对话` 页组件，只隐藏非当前 tab；只有用户明确点击 `停止` 时才 abort 当前流式请求。运行中的全局状态和停止按钮必须在顶栏保持可见，避免用户切到其他 tab 后误以为任务已经停止。
   - The Chat timeline is user-task-first: ordinary users should experience one continuous conversation, not a forced workspace/debug mental model. Workspace switches and function-call/tool execution must appear as compact collapsible process blocks inside the same conversation stream, with simple summaries such as entering a capability workspace or running several function calls; detailed workspace ids, tool names, arguments/results, and runtime evidence live inside the expanded details and Logs/Context panels.
   - `工作空间` manages workspaces first, then registers tools inside the selected workspace. The UI must not present tools as a global shared pool that users merely pick from.
   - Workspace tool management is MCP-server-first: bind MCP Servers inside the selected workspace, discover that server's tools, then choose which discovered tools to mount into the workspace. Manual tool editing remains an advanced path, not the primary MCP workflow.
   - `记忆` is a database-like table with filtering, create, edit, and delete.
   - `日志` is the dedicated trace inspection area for lifecycle hook logs, tool call logs, approval requests, current-conversation LLM request logs, and global recent LLM request logs.
+  - `数据表` 是 creator-only 的只读 SQLite 表查看器。它用于切换查看 `messages`、`llm_calls`、`context_segments`、`tool_calls`、`workspace_sessions`、`memories`、`audit_logs` 等真实落库记录，帮助从 memory evidence id 追溯到原始数据基础，但它不是普通用户流程，也不提供任意 SQL 或写入能力。
   - `概念介绍` presents the corrected `zleap-agent-framework.md` concepts as a polished Chinese visual guide with diagrams for workspace routing, memory layers, long-conversation memory recall/context injection, context overview, lifecycle hooks, principles, and implementation modules.
   - Log panels must support clearing the current visible log view without treating audit data deletion as an ordinary UI action.
   - The Memory editor must expose `metadataJson`, show policy/save/delete errors directly, validate JSON before save, and provide policy-aware creation templates for impression/event/skill records.
@@ -91,6 +92,7 @@
   - Recalled memory must be partitioned before prompt assembly: cross-workspace impression memory, active-workspace result events, active-workspace relevant process events, and active-workspace skill memory are separate second-level sections in the memory context stack and separate fields in the synthetic runtime memory tool result.
   - Automatic runtime recall must fetch impression, result-event, process-event, and skill partitions separately. A crowded skill, impression, or result timeline partition must not consume the SQL limit for relevant process recall.
   - Prompt injection must use projected memory views, not raw `MemoryRow` records. The LLM should receive compact ids/titles/summaries and safe metadata such as event kind/outcome. Raw `detail`, full `metadataJson`, evidence arrays, long source transcripts, and full skill procedures stay in SQLite, workspace sessions, tool calls, and audit/debug views unless a dedicated runtime tool reveals them.
+  - Memory rows are semantic projections, not raw trace containers. `memories.metadataJson` may store trace-linking references such as `conversationId`, `evidenceMessageIds`, `workspaceSessionIds`, `toolCallIds`, and `sourceRefs: [{ table, ids }]`, but it must not copy raw source payloads such as `messages`, `windowMessages`, `toolCalls`, `workspaceSessions`, `argumentsJson`, `resultJson`, `messagesJson`, `responseJson`, `rawJson`, or `finalMessages`. If future recall needs source reconstruction, it should follow those references back to the canonical raw tables.
   - Prompt assembly must keep structured context out of the system message unless it is actual policy text. The system message contains system/personality/runtime rules; workspace manifest context is injected as `runtime_context.workspace`, memory as `runtime_context.memory`, and local task/history/tool evidence as `runtime_context.local_conversation`.
   - Active workspace task, completed workspace results, and recent local tool evidence are grouped under the `history` / local conversation segment instead of appearing as separate top-level context categories.
   - Follow-up LLM calls created during tool loops must persist a complete context snapshot for that exact follow-up request: cloned active `system`, `workspace`, `tools`, `memory`, `history`, and clean `user` segments, plus the accumulated function-call/tool-result protocol evidence for that loop and a `final_messages` raw debug snapshot. A follow-up stack must never degrade into only callable tools plus tool results, because the model still needs the active task, memory, workspace contract, and clean user request to avoid meaningless loops. `final_messages` is a trace/UI snapshot created after prompt assembly; it is not itself a context layer and must not be re-injected into the next LLM request.
@@ -175,6 +177,7 @@
 - SQLite:
   - Use Raw SQL and `better-sqlite3`.
   - Core tables include agents, llm_profiles, conversations, messages, workspaces, mcp_servers, tool_definitions, workspace_tools, workspace_sessions, llm_calls, context_segments, tool_calls, memories, memories_fts, approval_requests, audit_logs.
+  - 原始对话和运行证据已有独立数据基础：`messages` 保存原始会话消息，`llm_calls` 保存 provider 请求/响应快照，`context_segments` 保存每次 LLM 调用的上下文堆栈，`tool_calls` 保存函数调用参数和结果，`workspace_sessions` 保存工作空间任务/结果/local context，`audit_logs` 保存生命周期与权限审计。Memory 只引用这些表的 id，不复制这些表里的原始 JSON。
   - `approval_requests` records pending/approved/rejected creator approvals for high-risk tool calls, including conversation id, workspace id, tool name, arguments, reason, resolver, and resolution timestamps.
   - `llm_calls` tracks `userId`, request lifecycle status, and sanitized result/error diagnostics for debugging provider connectivity.
   - `mcp_servers` records include workspaceId, transport (`stdio` or `streamable-http`), local command/args/env/cwd or remote url/headers, timeout, and audit-managed timestamps. Tool records imported from MCP Servers include executor binding metadata (`bindingType`, generated `bindingJson`, `mcpServerId`, `mcpToolName`) plus input schema, risk level, and workspace assignment.
@@ -361,7 +364,7 @@
   - Lifecycle hooks are logged in `audit_logs` and visible through conversation trace.
   - Memory recall attempts are logged in `audit_logs` as `memory_recall_requested`, including zero-hit attempts, so the UI can distinguish "no recall was attempted" from "SQLite FTS recall ran but found no matching memory."
 - UI:
-  - Chinese `对话/工作空间/记忆/日志/概念介绍` tabs render.
+  - Chinese `对话/工作空间/记忆/日志/数据表/概念介绍` tabs render.
   - Chat right panel expands the real context stack, callable tool snapshots, and memory writes while keeping the visible sections limited to current workspace, context stack, and memory writes. The subtle `显示原始日志` control beside the context-stack title switches between structured inspection mode and raw provider-log mode. Structured mode shows the numbered context stack and hides `final_messages`; raw provider-log mode hides the numbered stack entirely and directly displays only the saved `final_messages` raw JSON/text, with no table formatting, no extra click-to-expand wrapper, and no horizontal scrolling; long JSON/text lines must wrap within the panel.
   - Chat right panel renders JSON context payloads as structured tables/field groups. This is especially important for the callable tools snapshot, because users need to verify the actual OpenAI-compatible `tools` array without reading a raw JSON blob.
   - Chat right panel must make Skill progressive disclosure visible in the memory context segment: `currentWorkspaceSkillMemory` shows the injected Skill title/summary plus `summary_only` and `readSkill`, while empty states explain that Skill recall is active-workspace scoped and may be absent on `main` calls.
@@ -388,6 +391,7 @@
   - Memory table supports filter/add/edit/delete.
   - Memory table shows userId, agentId, workspaceId, relationId, and a readable scope label so user impressions, agent self impressions, event memories, and workspace skills are visually distinguishable.
   - Memory editor supports metadata JSON editing, client-side JSON validation, policy-aware add buttons for event/impression/skill, and visible strategy-layer error feedback.
+  - Database table viewer lists application SQLite tables, switches between them, paginates rows, and shows a selected-row structured field view. It is read-only and creator-only, so raw trace inspection does not become an accidental ordinary user feature.
   - The dedicated `日志` tab shows lifecycle hook/audit logs, tool call logs, tool approval requests, current-conversation LLM request logs, and global recent LLM request logs.
   - The dedicated `日志` tab shows a compact LLM debug summary so endpoint/status/result/timestamp are visible without scrolling through raw request payloads.
   - The dedicated `日志` tab lets only a creator approve or reject pending requests for debugging the approval lifecycle.

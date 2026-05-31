@@ -83,6 +83,24 @@ button:disabled {
   gap: 8px;
 }
 
+.global-run-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #f2c94c;
+  border-radius: 6px;
+  background: #fff8dc;
+  color: #5f4700;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.global-run-banner button {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .tabs button.active {
   background: #172026;
   border-color: #172026;
@@ -1280,6 +1298,140 @@ td button {
   margin-right: 6px;
 }
 
+.database-page {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) 1fr;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+  height: calc(100vh - 76px);
+  overflow: hidden;
+}
+
+.database-sidebar,
+.database-browser {
+  padding: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.database-sidebar {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+}
+
+.database-table-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.database-table-list button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.database-table-list button.active {
+  background: #172026;
+  border-color: #172026;
+  color: #ffffff;
+}
+
+.database-table-list small {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.database-browser {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 10px;
+}
+
+.database-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #dce2e8;
+}
+
+.database-toolbar div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.database-toolbar span {
+  color: #5c6975;
+  font-size: 12px;
+}
+
+.database-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.database-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.database-table-wrap {
+  overflow: auto;
+  min-height: 0;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+}
+
+.database-table {
+  min-width: 720px;
+}
+
+.database-table tbody tr {
+  cursor: pointer;
+}
+
+.database-table tbody tr:hover,
+.database-table tbody tr.selected {
+  background: #eef4ff;
+}
+
+.database-table td {
+  max-width: 260px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.database-row-detail {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.database-row-detail h2 {
+  margin: 0;
+  padding: 10px;
+  border-bottom: 1px solid #dce2e8;
+  color: #4a5662;
+  font-size: 13px;
+}
+
 .concept-page {
   flex: 1;
   height: calc(100vh - 76px);
@@ -1656,6 +1808,8 @@ td button {
   .workspace-grid,
   .memory-layout,
   .logs-page,
+  .database-page,
+  .database-content,
   .concept-hero,
   .workspace-map,
   .compare-grid,

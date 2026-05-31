@@ -36,6 +36,23 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/db/tables") {
+      const actor = parseActorFromSearchParams(url.searchParams, "Database table list API");
+      sendJson(response, 200, { tables: repos.listDatabaseTables(actor.actorRole) });
+      return;
+    }
+
+    const dbTableMatch = url.pathname.match(/^\/api\/db\/tables\/([^/]+)$/);
+    if (dbTableMatch && request.method === "GET") {
+      const actor = parseActorFromSearchParams(url.searchParams, "Database table read API");
+      sendJson(response, 200, repos.readDatabaseTable(decodeURIComponent(dbTableMatch[1]), {
+        actorRole: actor.actorRole,
+        limit: Number(url.searchParams.get("limit") ?? 100),
+        offset: Number(url.searchParams.get("offset") ?? 0)
+      }));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/llm-calls") {
       const limit = Number(url.searchParams.get("limit") ?? 50);
       const actor = parseActorFromSearchParams(url.searchParams, "LLM call log API");

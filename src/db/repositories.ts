@@ -4,6 +4,8 @@ import type {
   ApprovalRequest,
   AuditLog,
   ContextSegment,
+  DatabaseTableRows,
+  DatabaseTableSummary,
   LLMCallSnapshot,
   McpServerDefinition,
   MemoryRow,
@@ -36,6 +38,11 @@ function parseStrictJson<T>(value: string, label: string): T {
 
 function sanitizeToolIdPart(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "tool";
+}
+
+function quoteSqlIdentifier(value: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new Error(`Invalid table name: ${value}`);
+  return `"${value.replace(/"/g, "\"\"")}"`;
 }
 
 export function mcpServerToBindingJson(server: Pick<McpServerDefinition, "transport" | "command" | "argsJson" | "envJson" | "cwd" | "url" | "headersJson" | "timeoutMs">): string {
@@ -121,6 +128,34 @@ function normalizeWorkspace(row: Omit<WorkspaceDefinition, "tools">, tools: Tool
 
 export class Repositories {
   constructor(private readonly db: Database.Database) {}
+
+  listDatabaseTables(actorRole: UserRole): DatabaseTableSummary[] {
+    if (actorRole !== "creator") throw new Error("Database table inspection requires creator role.");
+    const rows = this.db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type IN ('table', 'view')
+        AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+    `).all() as Array<{ name: string }>;
+    return rows.map((row) => {
+      const tableName = quoteSqlIdentifier(row.name);
+      const count = (this.db.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get() as { count: number }).count;
+      return { name: row.name, rowCount: count };
+    });
+  }
+
+  readDatabaseTable(table: string, input: { actorRole: UserRole; limit?: number; offset?: number }): DatabaseTableRows {
+    if (input.actorRole !== "creator") throw new Error("Database table inspection requires creator role.");
+    const available = new Set(this.listDatabaseTables(input.actorRole).map((item) => item.name));
+    if (!available.has(table)) throw new Error(`Database table not found: ${table}`);
+    const tableName = quoteSqlIdentifier(table);
+    const limit = Math.max(1, Math.min(500, Math.floor(input.limit ?? 100)));
+    const offset = Math.max(0, Math.floor(input.offset ?? 0));
+    const columns = (this.db.pragma(`table_info(${tableName})`) as Array<{ name: string }>).map((column) => column.name);
+    const total = (this.db.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get() as { count: number }).count;
+    const rows = this.db.prepare(`SELECT * FROM ${tableName} LIMIT ? OFFSET ?`).all(limit, offset) as Record<string, unknown>[];
+    return { table, columns, rows, total, limit, offset };
+  }
 
   getAgent(agentId: string): AgentConfig {
     const row = this.db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as AgentConfig | undefined;

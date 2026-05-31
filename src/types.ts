@@ -369,3 +369,17 @@ export type AuditLog = {
   createdAt: string;
   metadataJson: string;
 };
+
+export type DatabaseTableSummary = {
+  name: string;
+  rowCount: number;
+};
+
+export type DatabaseTableRows = {
+  table: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+  limit: number;
+  offset: number;
+};

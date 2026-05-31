@@ -1257,6 +1257,13 @@ async function testDatabaseAndMemory() {
   assert.throws(() => repos.ensureConversation("conv-empty-user", "default-agent", ""));
   repos.ensureConversation("conv-owner", "default-agent", "user-a");
   repos.addMessage("conv-owner", "user", "owner message");
+  const tableList = repos.listDatabaseTables("creator");
+  assert.equal(tableList.some((table) => table.name === "messages" && table.rowCount >= 1), true);
+  const messageRows = repos.readDatabaseTable("messages", { actorRole: "creator", limit: 10, offset: 0 });
+  assert.equal(messageRows.columns.includes("conversationId"), true);
+  assert.equal(messageRows.rows.some((row) => row.conversationId === "conv-owner"), true);
+  assert.throws(() => repos.listDatabaseTables("user"));
+  assert.throws(() => repos.readDatabaseTable("not_a_real_table", { actorRole: "creator" }));
   repos.ensureConversation("conv-owner", "default-agent", "user-a");
   assert.throws(() => repos.ensureConversation("conv-owner", "default-agent", "user-b"));
   repos.createMemory({
@@ -2554,6 +2561,10 @@ async function testEventMemoryIsHookGenerated() {
   assert.equal(events.length >= 2, true);
   assert.equal(events.every((memory) => metadataOf(memory).source === "afterConversationWindow"), true);
   assert.equal(events.every((memory) => metadataOf(memory).conversationId === "conv-event-hook-contract"), true);
+  assert.equal(events.every((memory) => Array.isArray(metadataOf(memory).sourceRefs)), true);
+  assert.equal(events.every((memory) => JSON.stringify(metadataOf(memory)).includes("\"table\":\"messages\"")), true);
+  assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), "windowMessages")), true);
+  assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), "toolCalls")), true);
   const processEvents = events.filter((memory) => metadataOf(memory).eventKind === "process");
   assert.equal(processEvents.length > 0, true);
   assert.equal(processEvents.every((memory) => memory.detail.length <= 900), true);
@@ -2585,6 +2596,26 @@ async function testEventMemoryIsHookGenerated() {
   });
   assert.equal(hiddenToolAttempt.lastToolResult.includes("Unknown tool"), true);
   assert.equal(repos.listMemories({ memoryType: "event", userId: "event-contract-user", workspaceId: "main" }).some((memory) => memory.title === "Tool event"), false);
+
+  const memoryService = new MemoryService(repos);
+  assert.throws(() => memoryService.createMemoryRecord({
+    actorId: "creator",
+    actorRole: "creator",
+    memory: {
+      memoryType: "event",
+      userId: "event-contract-user",
+      workspaceId: "main",
+      title: "Raw payload event",
+      summary: "Should be rejected.",
+      detail: "Memory metadata should reference raw tables instead of copying raw data.",
+      metadataJson: JSON.stringify({
+        source: "manualMemoryApi",
+        conversationId: "conv-event-hook-contract",
+        eventKind: "manual",
+        windowMessages: [{ role: "user", content: "raw" }]
+      })
+    }
+  }), /raw source payloads/);
 }
 
 async function testSkillMemoryToolQualityGate() {

@@ -2,6 +2,33 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-05-31 20:59 +08:00
+
+目的：
+- 让原始对话和运行证据可在 UI 中直接验收，同时确保 memory 不再复制原始 JSON，而是通过来源表和行 ID 追溯。
+- 修复运行中切换 tab 后视觉上像任务停止的问题，让生成状态和停止动作跨 tab 可见。
+
+变更：
+- 新增 creator-only 的 `数据表` 顶层 tab，可切换查看 SQLite 中的应用表、分页浏览行、查看当前行结构化详情。
+- 新增只读 HTTP API：`GET /api/db/tables` 和 `GET /api/db/tables/:table`，并在 repository 层校验表名、限制分页和 creator 权限。
+- 明确现有原始数据表职责：`messages`、`llm_calls`、`context_segments`、`tool_calls`、`workspace_sessions`、`audit_logs` 保存原始对话与运行证据。
+- 自动 event memory 的 metadata 增加 `sourceRefs: [{ table, ids }]`，继续保留 evidence id，但不复制原始消息、工具调用、workspace session 或 provider payload JSON。
+- Memory 写入策略新增 raw payload metadata 拦截，拒绝 `windowMessages`、`toolCalls`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson`、`finalMessages` 等字段。
+- 更新 `ZLEAP_MASTER_PLAN.md`、框架概念文档和相关 docs，将“memory 只保存语义投影 + 来源引用，原始数据回查走原始表”融合进正文。
+- 增加回归测试，覆盖数据表只读查看、creator 权限、event memory `sourceRefs` 和 raw payload metadata 拒绝。
+- 将运行中的状态提升到顶栏全局提示：切换到任意 tab 时仍显示“对话正在生成”，并保留可点击的 `停止` 按钮。
+- 更新 `ZLEAP_MASTER_PLAN.md`，把运行中全局状态和停止按钮跨 tab 可见写入 UI 契约。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过。
+- 已用当前服务验证 `GET /api/db/tables?actorId=creator&actorRole=creator` 和 `GET /api/db/tables/messages?actorId=creator&actorRole=creator&limit=2&offset=0` 返回正常。
+
+Git：
+- 本轮待提交。
+
 ## 2026-05-31 20:41 +08:00
 
 目的：

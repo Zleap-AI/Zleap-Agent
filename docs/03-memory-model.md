@@ -176,6 +176,8 @@ type EventMemory = {
 };
 ```
 
+event memory 是压缩后的事实投影，不是原始日志仓库。完整消息、provider 请求、上下文堆栈、工具参数/结果、workspace session 和审计记录分别保存在 `messages`、`llm_calls`、`context_segments`、`tool_calls`、`workspace_sessions` 和 `audit_logs`。event 的 `metadataJson` 只允许保存可追溯引用，例如 `conversationId`、`evidenceMessageIds`、`workspaceSessionIds`、`toolCallIds`，以及统一的 `sourceRefs: [{ table, ids }]`。它不应该复制 `windowMessages`、`toolCalls`、`workspaceSessions`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson` 或 `finalMessages` 这类原始 JSON。未来如果需要从记忆回查证据，应通过这些引用回到原始表，而不是把原始数据塞进 memory row。
+
 ## 事件的 SQLite FTS + Relation/Version 召回
 
 首版 event 存储和召回以 SQLite 为主：结构化字段进入 `memories`，全文检索进入 `memories_fts`，最新版本判断由同一 scope 分区内的 `relationId + version` 决定。
@@ -338,6 +340,8 @@ skill 有三种生成路径：
 自动生成 skill 的触发频率应该低于 event。
 
 Hook 生成的 skill 必须使用脱敏后的投影视图。`detail` 不能复制 process/result event 原文、function call 参数、工具输出、用户身份、任务原文、私有项目内容、账号或路径；这些内容只能作为 evidence id 和调试日志保存在 SQLite 的事件、tool_calls、audit_logs、workspace_sessions 中。为了避免重复污染，同一 workspace 的相似 skill 应使用稳定 fingerprint 和 relation/version 去重，复用旧记录而不是重复创建。
+
+skill 如果来自 event 证据，也只保存 event id 或 `sourceRefs` 这类引用。Skill 的价值在泛化后的方法、适用条件和避免条件，不在复刻一次原始任务过程。
 
 原因：
 

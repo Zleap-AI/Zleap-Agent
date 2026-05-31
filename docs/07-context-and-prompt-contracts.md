@@ -68,6 +68,8 @@ main workspace 可以看到的返回内容包括完整 `WorkspaceResult`：`stat
 
 Runtime memory tools 使用同一套 code-bound context contract。Event 和 skill writes 从 runtime 接收 active workspace scope。`readSkill` 也从 runtime 接收 active workspace scope，并且只接受 `skillId`，因此只能读取当前 workspace shared skill 的完整详情。Impression writes 从 runtime 接收 user/agent scope，保持跨工作空间，但在可用时仍然持久化 origin workspace/session/task evidence。Skill 和 impression trace metadata 可以包含 `activeWorkspaceId`、`workspaceSessionId`、`taskId`、`workspaceSessionIds` 和 `taskIds`；这些字段是 trace/debug evidence，不是 model-controlled arguments。
 
+Memory metadata 的证据字段必须是引用，不是原始 payload。允许保存 `conversationId`、`evidenceMessageIds`、`workspaceSessionIds`、`toolCallIds` 和 `sourceRefs: [{ table, ids }]`，用于回查 `messages`、`llm_calls`、`context_segments`、`tool_calls`、`workspace_sessions`、`audit_logs` 等原始表。禁止把 `windowMessages`、`toolCalls`、`workspaceSessions`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson` 或 `finalMessages` 复制进 memory，因为这会让 memory 退化成第二份原始日志，也会破坏长对话压缩目标。
+
 最终面向用户的语言也是系统契约：除非用户明确要求翻译或指定其他语言，assistant 应使用用户当前消息的主要语言回答。这可以避免内部 prompts、tool names 或 runtime context 混合语言时，回复在中文和英文之间意外切换。
 
 ## 为什么需要契约
