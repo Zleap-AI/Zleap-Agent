@@ -20,6 +20,7 @@
   - Assistant responses must support streaming output with a character-by-character typing feel.
   - Chat messages render Markdown for common assistant output such as headings, lists, quotes, links, inline code, and fenced code blocks.
   - Chat errors must offer a retry action for the failed user message.
+  - 请求失败只作为临时错误状态和日志记录展示，不应变成普通对话消息长期停留在中间聊天流里，也不应写入浏览器缓存的 `messages` 历史；用户可以通过临时错误条直接重试原请求。
   - The Chat page must support clearing only the current conversation while preserving cached settings and API key.
   - Each user chat message should keep the context stack snapshot for that turn; clicking a user message shows that historical context stack in the right panel.
   - The Chat right panel stays focused on three sections only: current workspace, context stack, and memory writes. It must not duplicate the selected message/turn label already shown in the central timeline, and it must not render raw workspace trace as a normal user-facing sidebar block.
@@ -43,6 +44,7 @@
   - Clearing the current conversation from the Web UI should also request server-side conversation deletion for that conversation's messages, workspace sessions, LLM calls, context segments, tool calls, and approval requests, while preserving audit logs.
 - Runtime:
   - `AgentRuntime` receives `userId`, `conversationId`, and `message`, then drives main workspace orchestration.
+  - 如果一次 LLM/provider 请求在提交可展示 assistant 回复前失败，本轮刚写入的用户消息必须从 `messages` 表清理掉；失败详情仍保留在 `llm_calls`、`audit_logs` 等调试日志里，避免失败请求污染后续本地对话上下文。
   - A `conversationId` is owned by exactly one `userId + agentId` pair. Runtime/repository entry must reject attempts to reuse an existing conversation id with a different user or agent, so history, context snapshots, workspace sessions, and event extraction cannot cross tenants.
   - `WorkspaceRuntime` executes real capability workspaces such as `main` and the unified `dev` workspace; memory is not a standalone workspace.
   - Every workspace entry creates a structured `WorkspaceTask`, `WorkspaceLocalContext`, and initial running `WorkspaceResult`; all are persisted on `workspace_sessions` and exposed in trace/debug UI.

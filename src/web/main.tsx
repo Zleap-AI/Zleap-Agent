@@ -8,6 +8,7 @@ type ChatMessage = {
   id: string;
   role: string;
   content: string;
+  runId?: string;
   inspectLlmCallId?: string;
   workspaceId?: string;
   eventKind?: string;
@@ -582,10 +583,18 @@ function clampContextPanelWidth(value: number): number {
 }
 
 function normalizeCachedMessages(messages: ChatMessage[] | undefined): ChatMessage[] {
-  return (messages ?? []).map((item) => ({
+  const normalized = (messages ?? []).map((item) => ({
     ...item,
     id: item.id ?? createLocalId(item.role === "用户" ? "user-msg" : "assistant-msg")
   }));
+  const failedRunIds = new Set(normalized.filter((item) => item.failed && item.runId).map((item) => item.runId as string));
+  return normalized.filter((item, index) => {
+    if (item.failed) return false;
+    if (item.runId && failedRunIds.has(item.runId)) return false;
+    const next = normalized[index + 1];
+    if (item.role === "用户" && next?.failed && next.requestText === item.content) return false;
+    return true;
+  });
 }
 
 function sanitizeCachedAgentDraft(draft: Partial<AgentConfig> | undefined): Partial<AgentConfig> {
@@ -1201,6 +1210,7 @@ function ChatTab() {
   async function sendMessage(retryText?: string) {
     const cleanMessage = typeof retryText === "string" ? retryText : message;
     if (loading || !cleanMessage.trim() || !agent) return;
+    const runId = createLocalId("run");
     const userMessageId = createLocalId("user-msg");
     const assistantMessageId = createLocalId("assistant-msg");
     const controller = new AbortController();
@@ -1213,8 +1223,8 @@ function ChatTab() {
     setMessage("");
     setMessages((items) => [
       ...removeFailedRetryPair(items, cleanMessage),
-      { id: userMessageId, role: "用户", content: cleanMessage },
-      { id: assistantMessageId, role: "助手", content: "", streaming: true }
+      { id: userMessageId, runId, role: "用户", content: cleanMessage },
+      { id: assistantMessageId, runId, role: "助手", content: "", streaming: true }
     ]);
 
     const effectiveBaseUrl = normalizeCachedBaseUrl(baseUrl) ?? DEFAULT_BASE_URL;
@@ -1247,6 +1257,7 @@ function ChatTab() {
         if (payload.eventKind !== "assistant") {
           setMessages((items) => insertBeforeAssistant(items, {
             id: workspaceMessageId,
+            runId,
             role: "运行过程",
             workspaceId: payload.workspaceId,
             eventKind: payload.eventKind,
@@ -1261,6 +1272,7 @@ function ChatTab() {
         }
         setMessages((items) => insertBeforeAssistant(items, {
           id: workspaceMessageId,
+          runId,
           role: "工作空间",
           workspaceId: payload.workspaceId,
           eventKind: payload.eventKind,
@@ -1370,11 +1382,10 @@ function ChatTab() {
       const messageText = err instanceof Error ? err.message : String(err);
       setError(messageText);
       setRetryMessage(cleanMessage);
-      setMessages((items) => {
-        return items.map((item) => item.id === assistantMessageId
-          ? { ...item, content: `出错：${messageText}`, streaming: false, failed: true, requestText: cleanMessage }
-          : item);
-      });
+      setMessages((items) => items.filter((item) => item.runId !== runId && item.id !== userMessageId && item.id !== assistantMessageId));
+      setSelectedTurnId((current) => current === userMessageId ? "" : current);
+      setSelectedLlmCallId("");
+      void loadConversationTrace(conversationId);
     } finally {
       if (currentRunControllerRef.current === controller) currentRunControllerRef.current = null;
       setLoading(false);

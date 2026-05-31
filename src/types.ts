@@ -65,6 +65,7 @@ export type AgentRunOutput = {
 
 export type AgentRunPrepared = Omit<AgentRunOutput, "assistantMessage"> & {
   assistantMessage?: string;
+  userMessageId: string;
   llmCallId: string;
   callableTools: ToolDefinition[];
   llm: {

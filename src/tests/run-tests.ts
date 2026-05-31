@@ -4689,6 +4689,8 @@ async function testLlmFailureLog() {
   assert.equal(trace.llmCalls.length, 1);
   assert.equal(trace.llmCalls[0].status, "failed");
   assert.equal(trace.llmCalls[0].errorText, "provider timeout");
+  assert.equal(repos.listMessagesDetailed("conv-fail").length, 0);
+  assert.equal(trace.auditLogs.some((log) => log.action === "failed_run_message_removed"), true);
 }
 
 async function testStreamingFollowUpFailureMarksLlmCallFailed() {
@@ -4715,6 +4717,8 @@ async function testStreamingFollowUpFailureMarksLlmCallFailed() {
   assert.equal(trace.llmCalls.length, 2);
   assert.equal(trace.llmCalls.some((call) => call.status === "failed" && call.errorText === "provider stream idle timeout"), true);
   assert.equal(trace.llmCalls.some((call) => call.status === "completed"), true);
+  assert.equal(repos.listMessagesDetailed("conv-stream-followup-fail").length, 0);
+  assert.equal(trace.auditLogs.some((log) => log.action === "failed_run_message_removed"), true);
 }
 
 async function testPendingLlmCallsInterruptedOnStartup() {

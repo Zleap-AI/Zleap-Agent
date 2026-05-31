@@ -214,11 +214,17 @@ export class Repositories {
     return this.db.prepare("SELECT id, agentId, userId FROM conversations WHERE id = ?").get(conversationId) as { id: string; agentId: string; userId: string } | undefined;
   }
 
-  addMessage(conversationId: string, role: string, content: string, raw: unknown = {}): void {
+  addMessage(conversationId: string, role: string, content: string, raw: unknown = {}): string {
+    const id = createId("msg");
     this.db.prepare(`
       INSERT INTO messages (id, conversationId, role, content, rawJson, createdAt)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(createId("msg"), conversationId, role, content, JSON.stringify(raw), nowIso());
+    `).run(id, conversationId, role, content, JSON.stringify(raw), nowIso());
+    return id;
+  }
+
+  deleteMessage(messageId: string): void {
+    this.db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
   }
 
   listMessages(conversationId: string, limit = 12): Array<{ role: string; content: string; rawJson: string; createdAt: string }> {

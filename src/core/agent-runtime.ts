@@ -160,10 +160,18 @@ export class AgentRuntime {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.repos.markLlmCallFailed(prepared.llmCallId, message);
+      this.cleanupFailedRunMessage(input, prepared, message);
       throw error;
     }
 
-    const loopResult = await this.runToolLoop(input, prepared, completion);
+    let loopResult: { completion: ChatCompletionOutput; memoryWrites: MemoryRow[]; finalMessages: LLMMessage[] };
+    try {
+      loopResult = await this.runToolLoop(input, prepared, completion);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.cleanupFailedRunMessage(input, prepared, message);
+      throw error;
+    }
     completion = loopResult.completion;
 
     const assistantMessage = completion.message.content ?? "我已经处理了这一步，但没有生成可展示的文字结果。";
@@ -533,6 +541,7 @@ export class AgentRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.repos.markLlmCallFailed(currentLlmCallId, message);
+        this.cleanupFailedRunMessage(input, prepared, message);
         throw error;
       }
     } else if (stream) {
@@ -557,6 +566,7 @@ export class AgentRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.repos.markLlmCallFailed(prepared.llmCallId, message);
+        this.cleanupFailedRunMessage(input, prepared, message);
         throw error;
       }
     }
@@ -616,7 +626,7 @@ export class AgentRuntime {
         resumedWorkspaceSessionId: resumableSession?.id
       }
     });
-    this.repos.addMessage(input.conversationId, "user", input.message);
+    const userMessageId = this.repos.addMessage(input.conversationId, "user", input.message);
 
     if (resumableSession) {
       const activeSession = this.resumeWorkspaceSession(input, resumableSession);
@@ -646,6 +656,7 @@ export class AgentRuntime {
         contextSegments: context.contextSegments,
         finalMessages: context.messages,
         memoryWrites: [],
+        userMessageId,
         llmCallId,
         callableTools: context.callableTools,
         llm: {
@@ -679,6 +690,7 @@ export class AgentRuntime {
       contextSegments: context.contextSegments,
       finalMessages: context.messages,
       memoryWrites: [],
+      userMessageId,
       llmCallId,
       callableTools: context.callableTools,
       llm: {
@@ -702,6 +714,18 @@ export class AgentRuntime {
       || status === "blocked"
       || status === "needs_user_input"
       || status === "needs_approval";
+  }
+
+  private cleanupFailedRunMessage(input: AgentRunInput, prepared: AgentRunPrepared, reason: string): void {
+    if (input.abortSignal?.aborted) return;
+    this.repos.deleteMessage(prepared.userMessageId);
+    this.repos.audit(input.userId, "system", "failed_run_message_removed", "conversation", input.conversationId, {
+      conversationId: input.conversationId,
+      workspaceId: prepared.activeWorkspaceId,
+      llmCallId: prepared.llmCallId,
+      userMessageId: prepared.userMessageId,
+      reason: truncateHandoffContent(reason, 600)
+    });
   }
 
   private resumeWorkspaceSession(input: AgentRunInput, session: WorkspaceSession): WorkspaceSession {
