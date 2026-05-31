@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 06:58 +08:00
+
+目的：
+- 修复 `searchMemory` 或 Memory 搜索遇到 `302.AI`、域名、URL、文件名等带点号/标点文本时报 `fts5: syntax error near "."` 的问题。
+
+变更：
+- `buildFtsQuery` 统一把自然语言 query 转成安全的 FTS5 token 表达式，并对 token 做 quoting。
+- `listMemories` 不再把原始 `filters.query` 直接传给 `memories_fts MATCH`，而是复用安全 FTS query。
+- 增加测试，覆盖 `repos.listMemories`、自动 `recallMemories` 和模型工具 `searchMemory` 对 `302.AI` 这类带点号 query 的处理。
+- 更新主计划和 memory/context 文档，明确所有进入 FTS5 `MATCH` 的 query 都必须在 repository 层安全构造。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 06:54 +08:00
 
 目的：

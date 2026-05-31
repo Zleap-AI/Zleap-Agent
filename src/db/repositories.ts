@@ -67,6 +67,7 @@ export function mcpServerToBindingJson(server: Pick<McpServerDefinition, "transp
 function buildFtsQuery(value: string): string {
   return (value.match(/[\p{L}\p{N}_]+/gu) ?? [])
     .slice(0, 8)
+    .map((term) => `"${term.replace(/"/g, "\"\"")}"`)
     .join(" OR ");
 }
 
@@ -657,9 +658,10 @@ export class Repositories {
       clauses.push("(m.workspaceId = ? OR m.workspaceId IS NULL)");
       params.push(filters.workspaceId);
     }
-    if (filters.query) {
+    const ftsQuery = filters.query ? buildFtsQuery(filters.query) : "";
+    if (ftsQuery) {
       clauses.push("m.rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?)");
-      params.push(filters.query);
+      params.push(ftsQuery);
     }
     return this.db.prepare(`SELECT m.* FROM memories m WHERE ${clauses.join(" AND ")} ORDER BY m.updatedAt DESC LIMIT 200`).all(...params) as MemoryRow[];
   }

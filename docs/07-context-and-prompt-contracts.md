@@ -277,6 +277,8 @@ workspace memory 包含三类：
 
 提示词必须让 `readMemory` 成为主动动作，而不是摆设。用户追问记忆细节、要求展开旧事实、要求解释“你为什么知道”，或当前 summary 不足以支持可靠回答时，下一步应该是 `readMemory` function call。上下文中的 `memoryDisclosureProtocol` 要给出正反例：简短身份确认可以基于 summary，详情追问必须读取 detail；没有读取 detail 时不能把 summary 扩写成详细事实。
 
+Memory 搜索 query 是自然语言和模型生成文本，不可信任为合法 FTS5 语法。`searchMemory`、直接 Memory 列表搜索、自动 process event 召回都必须在 repository 层统一构造安全 FTS query，再交给 `MATCH`；不要让点号、冒号、斜杠、括号等用户输入符号直接进入 FTS 语法层。
+
 ## 7. 当前任务上下文
 
 当前任务上下文是当前任务包。

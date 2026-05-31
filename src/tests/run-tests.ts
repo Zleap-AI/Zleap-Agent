@@ -1360,6 +1360,15 @@ async function testDatabaseAndMemory() {
     detail: "Latest detail",
     metadataJson: JSON.stringify({ source: "test", conversationId: "conv-owner", eventKind: "result" })
   }, "creator", "creator");
+  const dottedProcessEvent = repos.createMemory({
+    memoryType: "event",
+    userId: "user-a",
+    workspaceId: "dev",
+    title: "Dotted provider search",
+    summary: "Use 302.AI provider evidence when checking memory search.",
+    detail: "Dotted tokens such as 302.AI must not break SQLite FTS5.",
+    metadataJson: JSON.stringify({ source: "test", conversationId: "conv-owner", eventKind: "process" })
+  }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
     workspaceId: "dev",
@@ -1383,6 +1392,10 @@ async function testDatabaseAndMemory() {
   assert.equal(recalled.some((item) => item.memoryType === "skill"), true);
   assert.equal(recalled.filter((item) => item.memoryType === "skill").length, 8);
   assert.equal(recalled.filter((item) => item.memoryType === "event").some((item) => item.id === latestEvent.id), true);
+  const dottedList = repos.listMemories({ query: "302.AI", userId: "user-a", workspaceId: "dev" });
+  assert.equal(dottedList.some((item) => item.id === dottedProcessEvent.id), true);
+  const dottedRecall = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "302.AI", resultEventLimit: 0, skillLimit: 0 });
+  assert.equal(dottedRecall.some((item) => item.id === dottedProcessEvent.id), true);
 
   const collisionLatest = repos.createMemory({
     memoryType: "event",
@@ -4177,6 +4190,14 @@ async function testSearchMemoryToolUsesPolicyLayer() {
     summary: "Policy search alpha event",
     detail: "Visible to the owning user."
   }, "creator", "creator");
+  const dottedOwnEvent = repos.createMemory({
+    memoryType: "event",
+    userId: "search-user",
+    workspaceId: "dev",
+    title: "Search dotted provider event",
+    summary: "Policy search 302.AI event",
+    detail: "Dotted provider names must be safe in searchMemory."
+  }, "creator", "creator");
   const ownImpression = repos.createMemory({
     memoryType: "impression",
     userId: "search-user",
@@ -4251,6 +4272,20 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   assert.equal(userMemories.some((memory) => memory.id === agentSelf.id), false);
   assert.equal(JSON.stringify(userMemories).includes("stable identity detail"), false);
   assert.equal(JSON.stringify(userMemories).includes("readMemory"), true);
+  const dottedUserResult = service.executeMemoryTool({
+    run: {
+      agentId: "default-agent",
+      userId: "search-user",
+      userRole: "user",
+      conversationId: "conv-search-memory-user-dotted",
+      message: "search dotted memory"
+    },
+    activeWorkspaceId: "dev",
+    toolName: "searchMemory",
+    argumentsJson: JSON.stringify({ query: "302.AI", reason: "用户提到带点号的 provider 名称，需要安全检索记忆。" })
+  });
+  assert.equal(dottedUserResult.ok, true);
+  assert.equal(((dottedUserResult.result as { memories: MemoryRow[] }).memories).some((memory) => memory.id === dottedOwnEvent.id), true);
 
   const readMemoryResult = service.executeMemoryTool({
     run: {
