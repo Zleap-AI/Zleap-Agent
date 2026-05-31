@@ -74,6 +74,14 @@ export type AgentRunPrepared = Omit<AgentRunOutput, "assistantMessage"> & {
   };
 };
 
+export type WorkspaceProcessItem = {
+  toolName: string;
+  summary: string;
+  argumentsJson?: string;
+  resultJson?: string;
+  status?: string;
+};
+
 export type AgentStreamEvent =
   | { type: "start"; output: Omit<AgentRunOutput, "assistantMessage"> }
   | { type: "delta"; text: string }
@@ -86,6 +94,7 @@ export type AgentStreamEvent =
       llmCallId?: string;
       status?: WorkspaceStatus;
       toolNames?: string[];
+      items?: WorkspaceProcessItem[];
     }
   | { type: "done"; output: AgentRunOutput }
   | { type: "error"; error: string };

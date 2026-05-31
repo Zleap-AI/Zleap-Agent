@@ -298,6 +298,12 @@ textarea {
   max-width: 100%;
 }
 
+.process-card {
+  display: grid;
+  gap: 6px;
+  max-width: min(720px, 100%);
+}
+
 .process-details summary {
   display: inline-flex;
   align-items: center;
@@ -354,6 +360,20 @@ textarea {
   color: #24313d;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.process-preview {
+  display: grid;
+  gap: 4px;
+  color: #7a858f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.process-preview-row {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .message.failed {

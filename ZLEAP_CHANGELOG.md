@@ -2,6 +2,26 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 08:19 +08:00
+
+Purpose:
+- Make function-call and tool-result process messages readable at a glance and keep call parameters separate from returned results.
+
+Changed:
+- Added structured process items to streamed workspace/tool events so tool calls carry `argumentsJson` and tool results carry `resultJson`.
+- Updated Chat process blocks to show one-line tool call/result summaries even while collapsed.
+- Updated expanded process details so function-call blocks show actual parameters and tool-result blocks show actual returned results.
+- Updated `ZLEAP_MASTER_PLAN.md` with the expected process-message display contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
+
+Git:
+- Recorded in the Git commit titled `fix: summarize process tool events`.
+
 ## 2026-05-31 08:14 +08:00
 
 Purpose:

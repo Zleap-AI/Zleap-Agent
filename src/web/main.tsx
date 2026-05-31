@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
 import "./styles.css";
 
 type Tab = "chat" | "workspace" | "memory" | "logs" | "concept";
@@ -13,6 +13,7 @@ type ChatMessage = {
   eventKind?: string;
   title?: string;
   toolNames?: string[];
+  processItems?: WorkspaceProcessItem[];
   status?: string;
   streaming?: boolean;
   failed?: boolean;
@@ -122,7 +123,42 @@ function processMessageSummary(item: ChatMessage): string {
   return item.title || `${workspaceId} 运行过程`;
 }
 
+function prettyJsonText(value: string | undefined): string {
+  if (!value) return "";
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function processItemLine(item: WorkspaceProcessItem, eventKind?: string): string {
+  if (eventKind === "tool_call") return `已运行 ${item.summary}`;
+  if (eventKind === "tool_result") return `结果 ${item.summary}`;
+  return item.summary;
+}
+
 function processMessageDetail(item: ChatMessage): string {
+  if (item.processItems?.length) {
+    const header = [
+      item.title ? `标题：${item.title}` : "",
+      item.workspaceId ? `工作空间：${item.workspaceId}` : "",
+      item.eventKind ? `事件：${item.eventKind}` : "",
+      item.status ? `状态：${item.status}` : ""
+    ].filter(Boolean).join("\n");
+    const details = item.processItems.map((processItem, index) => {
+      const content = item.eventKind === "tool_result"
+        ? prettyJsonText(processItem.resultJson)
+        : prettyJsonText(processItem.argumentsJson);
+      const label = item.eventKind === "tool_result" ? "结果" : "参数";
+      return [
+        `${index + 1}. ${processItem.toolName}`,
+        `摘要：${processItem.summary}`,
+        content ? `${label}：\n${content}` : ""
+      ].filter(Boolean).join("\n");
+    }).join("\n\n");
+    return [header, details].filter(Boolean).join("\n\n");
+  }
   const lines = [
     item.title ? `标题：${item.title}` : "",
     item.workspaceId ? `工作空间：${item.workspaceId}` : "",
@@ -938,6 +974,7 @@ function ChatTab() {
         status?: string;
         toolNames?: string[];
         llmCallId?: string;
+        items?: WorkspaceProcessItem[];
       }) => {
         const workspaceMessageId = createLocalId(`workspace-${payload.workspaceId}`);
         const baseContent = payload.text.trim()
@@ -951,6 +988,7 @@ function ChatTab() {
             eventKind: payload.eventKind,
             title: payload.title,
             toolNames: payload.toolNames,
+            processItems: payload.items,
             status: payload.status,
             inspectLlmCallId: payload.llmCallId,
             content: baseContent
@@ -1167,14 +1205,25 @@ function ChatTab() {
               title={clickable ? "查看这条消息关联的 LLM 上下文窗口堆栈" : undefined}
             >
               {item.role === "运行过程" ? (
-                <details className="process-details">
-                  <summary>
-                    <span className="process-icon">▻</span>
-                    <span>{processMessageSummary(item)}</span>
-                    {item.workspaceId && <small>{item.workspaceId}</small>}
-                  </summary>
-                  <pre>{processMessageDetail(item)}</pre>
-                </details>
+                <div className="process-card">
+                  <details className="process-details">
+                    <summary>
+                      <span className="process-icon">▻</span>
+                      <span>{processMessageSummary(item)}</span>
+                      {item.workspaceId && <small>{item.workspaceId}</small>}
+                    </summary>
+                    <pre>{processMessageDetail(item)}</pre>
+                  </details>
+                  {item.processItems?.length ? (
+                    <div className="process-preview">
+                      {item.processItems.map((processItem, processIndex) => (
+                        <div className="process-preview-row" key={`${processItem.toolName}-${processIndex}`}>
+                          {processItemLine(processItem, item.eventKind)}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <>
                   <span>{messageRoleLabel(item)}{item.streaming ? " · 正在生成" : ""}</span>

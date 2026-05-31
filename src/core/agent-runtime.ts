@@ -41,6 +41,58 @@ function summarizeToolResultForChat(content: string, maxLength = 700): string {
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
 }
 
+function compactJsonOrText(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value));
+  } catch {
+    return value;
+  }
+}
+
+function summarizeToolArgumentsForChat(argumentsJson: string, maxLength = 180): string {
+  let text = compactJsonOrText(argumentsJson);
+  try {
+    const parsed = JSON.parse(argumentsJson) as Record<string, unknown>;
+    if (typeof parsed.command === "string") text = `$ ${parsed.command}`;
+    else if (typeof parsed.query === "string") text = parsed.query;
+    else if (typeof parsed.path === "string") text = parsed.path;
+    else if (typeof parsed.workspaceId === "string") text = parsed.workspaceId;
+    else if (typeof parsed.summary === "string") text = parsed.summary;
+    else if (typeof parsed.title === "string") text = parsed.title;
+  } catch {
+    text = argumentsJson;
+  }
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+function summarizeToolCallForChat(toolCall: LLMToolCall): string {
+  const args = summarizeToolArgumentsForChat(toolCall.function.arguments);
+  return args ? `${toolCall.function.name} ${args}` : toolCall.function.name;
+}
+
+function summarizeToolResultItemForChat(message: LLMMessage, maxLength = 220): string {
+  const name = message.name ?? "tool";
+  const content = message.content ?? "";
+  let text = content;
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (typeof parsed.error === "string") text = `失败：${parsed.error}`;
+    else if (typeof parsed.stdout === "string" && parsed.stdout.trim()) text = parsed.stdout;
+    else if (typeof parsed.output === "string" && parsed.output.trim()) text = parsed.output;
+    else if (typeof parsed.summary === "string" && parsed.summary.trim()) text = parsed.summary;
+    else if (typeof parsed.response === "string" && parsed.response.trim()) text = parsed.response;
+    else if (typeof parsed.question === "string" && parsed.question.trim()) text = parsed.question;
+    else if (typeof parsed.type === "string") text = parsed.type;
+    else text = JSON.stringify(parsed);
+  } catch {
+    text = content;
+  }
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const summary = normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+  return summary ? `${name}: ${summary}` : name;
+}
+
 function parseJsonValue<T>(value: string, fallback: T): T {
   try {
     return JSON.parse(value) as T;
@@ -310,28 +362,39 @@ export class AgentRuntime {
             };
           }
           if (activeWorkspaceBeforeTools !== "main" && toolCalls.length > 0) {
+            const toolCallItems = toolCalls.map((toolCall) => ({
+              toolName: toolCall.function.name,
+              summary: summarizeToolCallForChat(toolCall),
+              argumentsJson: toolCall.function.arguments
+            }));
             yield {
               type: "workspace",
               workspaceId: activeWorkspaceBeforeTools,
               eventKind: "tool_call",
               title: `${activeWorkspaceBeforeTools} 工具调用`,
-              text: `调用工具：${toolCalls.map((toolCall) => toolCall.function.name).join(", ")}`,
+              text: toolCallItems.map((item) => item.summary).join("\n"),
               llmCallId: currentLlmCallId,
-              toolNames: toolCalls.map((toolCall) => toolCall.function.name)
+              toolNames: toolCalls.map((toolCall) => toolCall.function.name),
+              items: toolCallItems
             };
           }
           const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
           memoryWrites.push(...toolExecution.memoryWrites);
           if (activeWorkspaceBeforeTools !== "main" && toolExecution.toolMessages.length > 0) {
+            const toolResultItems = toolExecution.toolMessages.map((message) => ({
+              toolName: message.name ?? "tool",
+              summary: summarizeToolResultItemForChat(message),
+              resultJson: message.content ?? ""
+            }));
             yield {
               type: "workspace",
               workspaceId: activeWorkspaceBeforeTools,
               eventKind: "tool_result",
               title: `${activeWorkspaceBeforeTools} 工具结果`,
-              text: toolExecution.toolMessages
-                .map((message) => `${message.name ?? "tool"}：${summarizeToolResultForChat(message.content ?? "")}`)
-                .join("\n\n"),
-              llmCallId: currentLlmCallId
+              text: toolResultItems.map((item) => item.summary).join("\n"),
+              llmCallId: currentLlmCallId,
+              toolNames: toolExecution.toolMessages.map((message) => message.name ?? "tool"),
+              items: toolResultItems
             };
           }
           const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
