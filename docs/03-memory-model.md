@@ -322,7 +322,8 @@ skill 有三种生成路径：
 
 1. hook 自动生成
    - 每次 event 提取时，判断是否有可沉淀的经验。
-   - 如果有，就生成或更新 skill。
+   - 只有出现明确可复用的方法、能力工具流程或失败恢复路径时，才生成或复用 skill。
+   - 普通任务结果、workspace 完成状态、用户内容摘要都不能单独变成 skill。
 
 2. agent 主动生成
    - agent 在执行过程中认为某个经验值得沉淀。
@@ -338,6 +339,8 @@ skill 有三种生成路径：
 好的 skill 应该记录可迁移的方法、失败后找到的稳定规避方式、经过验证的工具流程，或能降低同类任务失败率的经验。比如“某种 shell 写入方式失败后，改用脚本 API 明确写入内容和编码”。“认真检查”“合理使用工具”“保持上下文”这类泛泛提醒不应写入 skill。
 
 自动生成 skill 的触发频率应该低于 event。
+
+Hook 生成的 skill 必须使用脱敏后的投影视图。`detail` 不能复制 process/result event 原文、function call 参数、工具输出、用户身份、任务原文、私有项目内容、账号或路径；这些内容只能作为 evidence id 和调试日志保存在 SQLite 的事件、tool_calls、audit_logs、workspace_sessions 中。为了避免重复污染，同一 workspace 的相似 skill 应使用稳定 fingerprint 和 relation/version 去重，复用旧记录而不是重复创建。
 
 原因：
 

@@ -93,6 +93,10 @@ function containsPrivateLeak(value: string): boolean {
   return /([A-Za-z]:\\|\/Users\/|\/home\/|[\w.+-]+@[\w.-]+\.\w+|\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b|api[_-]?key|secret|token|password)/i.test(value);
 }
 
+function containsTaskSpecificSkillLeak(value: string): boolean {
+  return /(创始人|真实姓名|姓名|账号|账户|身份证|手机号|邮箱|公司名称|客户名称|个人身份|具体用户|任务原文|用户原文|原始对话|原始日志|未脱敏|私密内容|专有内容)/i.test(value);
+}
+
 function containsReusableSkillSignal(value: string): boolean {
   return /(failed|failure|error|retry|workaround|fallback|recover|avoid|instead|verified|validated|success|search|inspect|edit|read|write|code|test|before|失败|报错|错误|重试|改用|换成|规避|避免|最终成功|验证通过|可复用|经验|流程|procedure|命令|搜索|检查|编辑|读取|写入|文件|代码|测试|工具|mcp|cli|shell|python|node|npm)/i.test(value);
 }
@@ -104,6 +108,81 @@ function containsVagueSkillLanguage(value: string): boolean {
 
 function numberFromMetadata(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function parseObjectJson(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function stringValue(record: Record<string, unknown>, key: string): string {
+  return typeof record[key] === "string" ? record[key] as string : "";
+}
+
+function classifyCommand(command: string): string {
+  const normalized = command.toLowerCase();
+  if (/\bpython3?\b/.test(normalized)) return "python 脚本命令";
+  if (/\bnode\b/.test(normalized)) return "node 脚本命令";
+  if (/\bnpm\b/.test(normalized) && /\b(test|run test)\b/.test(normalized)) return "npm 测试命令";
+  if (/\bnpm\b/.test(normalized)) return "npm 命令";
+  if (/\brg\b|\bgrep\b|select-string/.test(normalized)) return "文本搜索命令";
+  if (/get-content|type\b|cat\b/.test(normalized)) return "文件读取命令";
+  if (/set-content|out-file|add-content/.test(normalized)) return "文件写入命令";
+  return "命令行命令";
+}
+
+function toolSignalsFromLogs(toolCalls: ToolCallLog[]): {
+  toolNames: string[];
+  toolKinds: string[];
+  hasFailureRecovery: boolean;
+  hasConcreteWorkflow: boolean;
+  procedureHints: string[];
+} {
+  const chronological = [...toolCalls]
+    .filter((toolCall) => !["enterWorkspace", "exitWorkspace", "askUser", "finishTask"].includes(toolCall.toolName))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const toolNames = [...new Set(chronological.map((toolCall) => toolCall.toolName))];
+  const toolKinds = [...new Set(chronological.map((toolCall) => {
+    if (toolCall.toolName !== "runCommand") return toolCall.toolName;
+    const args = parseObjectJson(toolCall.argumentsJson);
+    return classifyCommand(stringValue(args, "command"));
+  }))];
+  const firstFailure = chronological.findIndex((toolCall) => toolCall.status === "failed");
+  const hasFailureRecovery = firstFailure >= 0 && chronological.slice(firstFailure + 1).some((toolCall) => toolCall.status === "completed");
+  const completedCount = chronological.filter((toolCall) => toolCall.status === "completed").length;
+  const hasConcreteWorkflow = hasFailureRecovery || chronological.length >= 2 || (completedCount >= 1 && toolKinds.some((kind) => /(python|node|npm|搜索|读取|写入|searchFiles|runCommand)/i.test(kind)));
+  const procedureHints = [
+    hasFailureRecovery ? "先识别失败信号，不要重复同一路径；改用已经验证能完成目标的替代工具或命令形态。" : "",
+    toolKinds.length ? `优先复用已验证的工具类别：${toolKinds.join(" -> ")}。` : "",
+    "只把工具类别、状态和结果结论沉淀为经验，不保存原始参数、原始输出、用户内容或私有路径。"
+  ].filter(Boolean);
+  return { toolNames, toolKinds, hasFailureRecovery, hasConcreteWorkflow, procedureHints };
+}
+
+function skillFingerprint(input: {
+  workspaceId: string;
+  title: string;
+  summary: string;
+  procedure?: string[];
+  source?: string;
+}): string {
+  const normalized = [
+    input.workspaceId,
+    input.source ?? "",
+    input.title,
+    input.summary,
+    ...(input.procedure ?? [])
+  ].join(" ")
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
+    .replace(/\b\d+\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return stableId(normalized);
 }
 
 const skillTriggerPattern = /(?:请|帮我|请帮我)?(?:总结(?:一下)?经验|沉淀(?:一下)?经验|记成经验|生成经验|写入经验|保存经验|提炼(?:一下)?经验|经验记忆|把(?:这个|这条)?经验(?:记下来|保存下来|沉淀下来)|skill memory|write skill|save skill|lesson learned)[:：]?\s*/i;
@@ -154,7 +233,11 @@ function skillSeedFromTrigger(message: string, assistantMessage: string, workspa
   };
 }
 
-function skillSeedFromEventBatch(workspaceId: string, processMemory: MemoryRow, resultMemory: MemoryRow): {
+function skillSeedFromEventBatch(workspaceId: string, input: {
+  processMemory: MemoryRow;
+  resultMemory: MemoryRow;
+  toolSignals: ReturnType<typeof toolSignalsFromLogs>;
+}): {
   title: string;
   summary: string;
   detail: string;
@@ -163,8 +246,9 @@ function skillSeedFromEventBatch(workspaceId: string, processMemory: MemoryRow, 
   avoidWhen: string[];
 } {
   const workspaceLabel = `${workspaceId} workspace`;
+  const { processMemory, resultMemory, toolSignals } = input;
   const evidenceText = `${processMemory.title}\n${processMemory.summary}\n${processMemory.detail}\n${resultMemory.title}\n${resultMemory.summary}\n${resultMemory.detail}`;
-  const hasFailureRecovery = /(failed|failure|error|retry|workaround|fallback|recover|instead|失败|报错|错误|重试|改用|换成|规避|最终成功)/i.test(evidenceText);
+  const hasFailureRecovery = toolSignals.hasFailureRecovery || /(failed|failure|error|retry|workaround|fallback|recover|instead|失败|报错|错误|重试|改用|换成|规避|最终成功)/i.test(evidenceText);
   const concreteLesson = hasFailureRecovery
     ? `在 ${workspaceLabel} 遇到类似失败/重试场景时，优先复用已经验证过的替代路径，并把失败信号、替代操作和最终结果结构化记录。`
     : `在 ${workspaceLabel} 处理类似任务时，只复用已经由事件证据验证过的具体工具流程。`;
@@ -190,21 +274,25 @@ function skillSeedFromEventBatch(workspaceId: string, processMemory: MemoryRow, 
       "把验证结论、异常和建议下一步结构化返回。"
     ]
   };
-  const procedure = workspaceAdvice[workspaceId] ?? [
+  const procedure = [
+    ...(workspaceAdvice[workspaceId] ?? [
     `先确认任务属于 ${workspaceLabel} 的能力边界。`,
     "执行最小必要操作并记录关键观察。",
     "用结构化结果返回状态、产物、错误和建议下一步。"
+    ]),
+    ...toolSignals.procedureHints
   ];
   const summary = `${concreteLesson} ${procedure.join(" ")}`;
   return {
-    title: hasFailureRecovery ? `${workspaceLabel} 失败后替代路径经验` : `${workspaceLabel} 可复用执行流程`,
+    title: hasFailureRecovery ? `${workspaceLabel} 失败后替代路径经验` : `${workspaceLabel} 已验证工具流程经验`,
     summary,
     detail: [
       "触发来源：event hook 自动候选。",
-      `过程事件：${processMemory.title} - ${truncate(processMemory.summary, 260)}`,
-      `结果事件：${resultMemory.title} - ${truncate(resultMemory.summary, 260)}`,
-      "该 skill 只保留泛化流程和事件 id，不写入用户私有路径、账号或原始日志。"
-    ].join("\n"),
+      `经验类型：${hasFailureRecovery ? "失败恢复/替代路径" : "已验证工具流程"}。`,
+      toolSignals.toolKinds.length ? `可复用工具类别：${toolSignals.toolKinds.join(" -> ")}。` : "",
+      "证据事件 id 保存在 metadata.evidenceEventIds；detail 不保存源事件正文、工具参数、工具输出、用户身份或私有路径。",
+      "该 skill 只保留泛化流程，供后续相似任务通过 readSkill 渐进式读取。"
+    ].filter(Boolean).join("\n"),
     procedure,
     appliesWhen: [
       `${workspaceLabel} 后续遇到相似目标、工具集合和返回状态时。`,
@@ -595,11 +683,18 @@ export class MemoryService {
       const evidenceEventIds = stringArrayArg("evidenceEventIds");
       const confidence = Math.max(0, Math.min(1, numberArg("confidence", evidenceEventIds.length > 0 ? 0.7 : 0.5)));
       const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
+      const fingerprint = skillFingerprint({
+        workspaceId,
+        title: base.title,
+        summary: base.summary,
+        procedure,
+        source: "memoryToolCall"
+      });
       memory = {
         ...base,
         memoryType: "skill",
         workspaceId,
-        relationId: `skill:${workspaceId}:${stableId(`${base.title}:${base.summary}`)}`,
+        relationId: `skill:${workspaceId}:tool:${fingerprint}`,
         metadataJson: JSON.stringify({
           source: "memoryToolCall",
           conversationId: input.run.conversationId,
@@ -607,6 +702,7 @@ export class MemoryService {
           activeWorkspaceId: input.activeWorkspaceId,
           ...runtimeEvidence,
           desensitized: boolArg("desensitized"),
+          skillFingerprint: fingerprint,
           evidenceEventIds,
           confidence,
           qualityGate: {
@@ -625,8 +721,21 @@ export class MemoryService {
     if (!memory.title || !memory.summary || !memory.detail) return { ok: false, result: { error: "title, summary, and detail are required." } };
 
     const existing = memory.relationId ? this.repos.getMemoryByRelation(memory.memoryType, memory.relationId, this.memoryRelationScope(memory)) : undefined;
+    const metadata = this.parseMetadata(memory.metadataJson ?? "{}");
+    const duplicateSkill = !existing && memory.memoryType === "skill" && memory.workspaceId
+      ? this.findDuplicateSkill(
+        memory.workspaceId,
+        typeof metadata.skillFingerprint === "string"
+          ? metadata.skillFingerprint
+          : skillFingerprint({ workspaceId: memory.workspaceId, title: memory.title, summary: memory.summary, source: "unknown" }),
+        memory.title,
+        memory.summary
+      )
+      : undefined;
     const persisted = existing
       ? { memory: existing }
+      : duplicateSkill
+        ? { memory: duplicateSkill }
       : this.persistMemory(memory, input.run.userId, input.run.userRole);
     if (!persisted.memory) return { ok: false, result: { error: persisted.reason ?? "Memory write rejected by runtime policy." } };
     return { ok: true, result: { memory: persisted.memory }, memory: persisted.memory };
@@ -815,8 +924,10 @@ export class MemoryService {
     if (!isSkillTrigger(run.message, assistantMessage)) return undefined;
     const workspaceId = activeWorkspaceId;
     const seed = skillSeedFromTrigger(run.message, assistantMessage, workspaceId);
-    const relationId = `skill:${workspaceId}:${stableId(seed.summary)}`;
+    const fingerprint = skillFingerprint({ workspaceId, title: seed.title, summary: seed.summary, procedure: seed.procedure, source: "activeSkillTrigger" });
+    const relationId = `skill:${workspaceId}:active:${fingerprint}`;
     if (this.repos.getMemoryByRelation("skill", relationId, this.memoryRelationScope({ memoryType: "skill", workspaceId, title: "", summary: "", detail: "" }))) return undefined;
+    if (this.findDuplicateSkill(workspaceId, fingerprint, seed.title, seed.summary)) return undefined;
     const evidenceEvents = this.repos.listMemories({
       memoryType: "event",
       userId: run.userId,
@@ -838,6 +949,7 @@ export class MemoryService {
         conversationId: run.conversationId,
         requestedBy: "user_or_agent",
         desensitized: true,
+        skillFingerprint: fingerprint,
         evidenceEventIds,
         confidence: evidenceEventIds.length > 0 ? 0.68 : 0.58,
         qualityGate: {
@@ -872,9 +984,33 @@ export class MemoryService {
     const evidenceText = `${processMemory.title}\n${processMemory.summary}\n${processMemory.detail}\n${resultMemory.title}\n${resultMemory.summary}\n${resultMemory.detail}`;
     if (!containsReusableSkillSignal(evidenceText)) return undefined;
 
-    const seed = skillSeedFromEventBatch(workspaceId, processMemory, resultMemory);
-    const relationId = `skill:${workspaceId}:event-hook:${stableId(seed.summary)}`;
+    const evidenceToolCalls = this.toolCallsForEventMemories(run, eventMemories);
+    const toolSignals = toolSignalsFromLogs(evidenceToolCalls);
+    const hasExplicitLesson = /(retry|workaround|fallback|recover|instead|verified|validated|失败|报错|错误|重试|改用|换成|规避|最终成功|验证通过)/i.test(evidenceText);
+    const hasConcreteToolEvidence = /工具概况：[^\n]*(runCommand|searchFiles|readSkill|writeSkillMemory|metasoSearch)/i.test(evidenceText);
+    if (!toolSignals.hasConcreteWorkflow && !hasExplicitLesson && !hasConcreteToolEvidence) return undefined;
+
+    const effectiveToolSignals = toolSignals.hasConcreteWorkflow || !hasConcreteToolEvidence
+      ? toolSignals
+      : {
+        toolNames: [...new Set(["runCommand", "searchFiles", "readSkill", "writeSkillMemory", "metasoSearch"].filter((name) => evidenceText.includes(name)))],
+        toolKinds: [...new Set(["runCommand", "searchFiles", "readSkill", "writeSkillMemory", "metasoSearch"].filter((name) => evidenceText.includes(name)))],
+        hasFailureRecovery: hasExplicitLesson,
+        hasConcreteWorkflow: true,
+        procedureHints: ["复用源事件中已经验证过的具体工具流程；只保留工具类别和状态，不复制原始参数或输出。"]
+      };
+
+    const seed = skillSeedFromEventBatch(workspaceId, { processMemory, resultMemory, toolSignals: effectiveToolSignals });
+    const fingerprint = skillFingerprint({
+      workspaceId,
+      title: seed.title,
+      summary: seed.summary,
+      procedure: seed.procedure,
+      source: "eventSkillCandidate"
+    });
+    const relationId = `skill:${workspaceId}:event-hook:${fingerprint}`;
     if (this.repos.getMemoryByRelation("skill", relationId, this.memoryRelationScope({ memoryType: "skill", workspaceId, title: "", summary: "", detail: "" }))) return undefined;
+    if (this.findDuplicateSkill(workspaceId, fingerprint, seed.title, seed.summary)) return undefined;
 
     const evidenceEventIds = eventMemories.map((memory) => memory.id);
     return this.createOrSkip({
@@ -890,6 +1026,7 @@ export class MemoryService {
         conversationId: run.conversationId,
         requestedBy: "runtime_hook",
         desensitized: true,
+        skillFingerprint: fingerprint,
         evidenceEventIds,
         confidence: triggerSource === "afterWorkspaceExit" ? 0.66 : 0.58,
         qualityGate: {
@@ -903,6 +1040,34 @@ export class MemoryService {
         avoidWhen: seed.avoidWhen
       })
     }, run.userId, run.userRole);
+  }
+
+  private toolCallsForEventMemories(run: AgentRunInput, eventMemories: MemoryRow[]): ToolCallLog[] {
+    const ids = new Set<string>();
+    for (const memory of eventMemories) {
+      const metadata = this.parseMetadata(memory.metadataJson);
+      if (Array.isArray(metadata.toolCallIds)) {
+        for (const value of metadata.toolCallIds) {
+          if (typeof value === "string" && value.trim()) ids.add(value);
+        }
+      }
+    }
+    if (ids.size === 0) return [];
+    return this.repos
+      .listToolCalls(run.conversationId, run.userId)
+      .filter((toolCall) => ids.has(toolCall.id));
+  }
+
+  private findDuplicateSkill(workspaceId: string, fingerprint: string, title: string, summary: string): MemoryRow | undefined {
+    const normalizedTitle = compactText(title, 120).toLowerCase();
+    const normalizedSummary = compactText(summary, 240).toLowerCase();
+    return this.repos.listMemories({ memoryType: "skill", workspaceId }).find((memory) => {
+      const metadata = this.parseMetadata(memory.metadataJson);
+      if (metadata.skillFingerprint === fingerprint) return true;
+      const existingTitle = compactText(memory.title, 120).toLowerCase();
+      const existingSummary = compactText(memory.summary, 240).toLowerCase();
+      return existingTitle === normalizedTitle || existingSummary === normalizedSummary;
+    });
   }
 
   private createOrSkip(memory: MemoryWriteInput, actorId: string, actorRole: UserRole): MemoryRow | undefined {
@@ -1038,6 +1203,12 @@ export class MemoryService {
     if (confidence < 0.55) return { allowed: false, reason: "Skill memory confidence is too low to share." };
     if (containsPrivateLeak(`${memory.title}\n${memory.summary}\n${memory.detail}\n${JSON.stringify(metadata)}`)) {
       return { allowed: false, reason: "Skill memory appears to contain private user/project details and must be generalized before sharing." };
+    }
+    if (containsTaskSpecificSkillLeak(`${memory.title}\n${memory.summary}\n${memory.detail}`)) {
+      return { allowed: false, reason: "Skill memory appears to contain task-specific identity or raw conversation details and must be generalized before sharing." };
+    }
+    if (metadata.source === "eventSkillCandidate" && /(过程事件|结果事件|原始参数|原始输出)/.test(memory.detail)) {
+      return { allowed: false, reason: "Hook-generated skill detail must not copy event text, tool arguments, or raw outputs." };
     }
     return { allowed: true };
   }

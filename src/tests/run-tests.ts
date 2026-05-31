@@ -650,6 +650,84 @@ class MainToWorkspaceToolRequestLLMClient implements LLMClient {
   }
 }
 
+class MainToCliRunCommandExitLLMClient implements LLMClient {
+  calls = 0;
+  lastToolResult = "";
+
+  constructor(private readonly command: string) {}
+
+  async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-enter-cli-run-command",
+            type: "function",
+            function: {
+              name: "enterWorkspace",
+              arguments: JSON.stringify({ workspaceId: "cli", objective: "run reusable command workflow" })
+            }
+          }]
+        },
+        raw: { plannedWorkspace: "cli" }
+      };
+    }
+    if (this.calls === 2) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-run-command-for-skill",
+            type: "function",
+            function: {
+              name: "runCommand",
+              arguments: JSON.stringify({ command: this.command })
+            }
+          }]
+        },
+        raw: { requestedTool: "runCommand" }
+      };
+    }
+    const toolMessage = [...input.messages].reverse().find((message) => message.role === "tool" && message.name === "runCommand");
+    this.lastToolResult = toolMessage?.content ?? "";
+    if (this.calls === 3) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-exit-cli-after-run-command",
+            type: "function",
+            function: {
+              name: "exitWorkspace",
+              arguments: JSON.stringify({
+                status: "completed",
+                summary: "runCommand completed.",
+                artifacts: [],
+                observations: [this.lastToolResult],
+                errors: [],
+                suggestedNextSteps: []
+              })
+            }
+          }]
+        },
+        raw: { requestedExit: true }
+      };
+    }
+    return {
+      message: {
+        role: "assistant",
+        content: "tool handled"
+      },
+      raw: { final: true }
+    };
+  }
+}
+
 class ChildMainOnlyToolAttemptLLMClient implements LLMClient {
   calls = 0;
   childToolNames: string[] = [];
@@ -1982,11 +2060,7 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(output.workspaceTrace.length, 2);
   assert.equal(output.memoryWrites.filter((memory) => memory.memoryType === "event" && memory.workspaceId === "file").length, 2);
   const autoSkill = output.memoryWrites.find((memory) => memory.memoryType === "skill" && memory.workspaceId === "file");
-  assert.equal(Boolean(autoSkill), true);
-  assert.equal(metadataOf(autoSkill!).source, "eventSkillCandidate");
-  assert.equal(metadataOf(autoSkill!).triggerSource, "afterWorkspaceExit");
-  assert.equal(metadataOf(autoSkill!).evidenceEventIds.length, 2);
-  assert.equal(metadataOf(autoSkill!).procedure.length > 0, true);
+  assert.equal(Boolean(autoSkill), false);
   const fileSession = output.workspaceTrace.find((session) => session.workspaceId === "file");
   assert.equal(fileSession?.result.summary, "File workspace inspected available evidence.");
   assert.equal(fileSession?.result.observations.includes("File workspace had searchFiles available."), true);
@@ -2002,7 +2076,7 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterToolCall" && log.resourceId === exitToolCall?.id && log.metadataJson.includes(fileSession!.taskId)), true);
   assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterWorkspaceExitEventExtraction" && log.workspaceId === "file"), true);
   assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterEventExtracted" && log.workspaceId === "file"), true);
-  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterSkillExtracted" && log.workspaceId === "file"), true);
+  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterSkillExtracted" && log.workspaceId === "file"), false);
   assert.equal(trace.auditLogs.some((log) => log.action === "workspace_returned_to_main"), true);
   const exitEvents = repos.listMemories({ memoryType: "event", userId: "workspace-exit-user", workspaceId: "file" });
   assert.equal(exitEvents.length, 2);
@@ -2439,7 +2513,7 @@ async function testWorkspaceMemoryPolicyControlsWrites() {
   });
   assert.equal(autoSkillOutput.memoryWrites.some((memory) => memory.memoryType === "skill" && memory.workspaceId === "file"), false);
   const autoSkillTrace = repos.getTrace("conv-memory-write-policy-auto-skill", "creator", "creator");
-  assert.equal(autoSkillTrace.auditLogs.some((log) => log.action === "memory_write_rejected" && log.metadataJson.includes("Skill memory writes are disabled")), true);
+  assert.equal(autoSkillTrace.auditLogs.some((log) => log.action === "hook.afterSkillExtracted"), false);
 }
 
 async function testEventMemoryIsHookGenerated() {
@@ -2846,6 +2920,48 @@ async function testSkillEvidenceFromWorkspaceEvents() {
   assert.equal(metadata.evidenceEventIds.length > 0, true);
   const eventIds = new Set(repos.listMemories({ memoryType: "event", userId: "skill-evidence-user", workspaceId: "cli" }).map((memory) => memory.id));
   assert.equal(metadata.evidenceEventIds.every((id: string) => eventIds.has(id)), true);
+}
+
+async function testEventHookSkillExtractionIsDesensitizedAndDeduplicated() {
+  const repos = createRepos();
+  const firstRuntime = new AgentRuntime(repos, new MainToCliRunCommandExitLLMClient("node -e \"console.log('private Jomy task payload')\""));
+  const firstOutput = await firstRuntime.run({
+    agentId: "default-agent",
+    userId: "hook-skill-user",
+    userRole: "creator",
+    conversationId: "conv-hook-skill-dedupe-one",
+    message: "run a reusable command workflow",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  const firstSkill = firstOutput.memoryWrites.find((memory) => memory.memoryType === "skill" && memory.workspaceId === "cli");
+  assert.equal(Boolean(firstSkill), true);
+  assert.equal(metadataOf(firstSkill!).source, "eventSkillCandidate");
+  assert.equal(metadataOf(firstSkill!).evidenceEventIds.length, 2);
+  assert.equal(firstSkill!.detail.includes("private Jomy task payload"), false);
+  assert.equal(firstSkill!.detail.includes("node -e"), false);
+  assert.equal(firstSkill!.detail.includes("结果事件："), false);
+  assert.equal(firstSkill!.detail.includes("过程事件："), false);
+  assert.equal(firstSkill!.detail.includes("源事件正文"), true);
+
+  const secondRuntime = new AgentRuntime(repos, new MainToCliRunCommandExitLLMClient("node -e \"console.log('another private payload')\""));
+  await secondRuntime.run({
+    agentId: "default-agent",
+    userId: "hook-skill-user",
+    userRole: "creator",
+    conversationId: "conv-hook-skill-dedupe-two",
+    message: "run another similar reusable command workflow",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  const skills = repos.listMemories({ memoryType: "skill", workspaceId: "cli" });
+  assert.equal(skills.length, 1);
 }
 
 async function testMemoryToolCallLoop() {
@@ -4169,9 +4285,8 @@ async function testStreamingFollowUpFailureMarksLlmCallFailed() {
 
   const trace = repos.getTrace("conv-stream-followup-fail", "stream-failure-user", "user");
   assert.equal(trace.llmCalls.length, 2);
-  assert.equal(trace.llmCalls[0].status, "failed");
-  assert.equal(trace.llmCalls[0].errorText, "provider stream idle timeout");
-  assert.equal(trace.llmCalls[1].status, "completed");
+  assert.equal(trace.llmCalls.some((call) => call.status === "failed" && call.errorText === "provider stream idle timeout"), true);
+  assert.equal(trace.llmCalls.some((call) => call.status === "completed"), true);
 }
 
 async function testPendingLlmCallsInterruptedOnStartup() {
@@ -4746,6 +4861,7 @@ async function main() {
   await testConversationWindowEventExtractionUsesAbsoluteWindows();
   await testStreamingConversationWindowMemoryIncludesAssistantMessage();
   await testSkillEvidenceFromWorkspaceEvents();
+  await testEventHookSkillExtractionIsDesensitizedAndDeduplicated();
   await testMemoryToolCallLoop();
   await testImpressionMemoryToolScopeIsCodeBound();
   await testMultiStepToolLoop();

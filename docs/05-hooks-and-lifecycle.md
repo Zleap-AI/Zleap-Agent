@@ -271,7 +271,7 @@ skill 提取应该更克制。
 - 同类问题重复出现。
 - 某次失败带来明确教训。
 - 失败后找到可复用的稳定替代路径，能减少未来同类任务失败率。
-- 某个流程被验证有效。
+- 某个能力工具流程被验证有效，并能脱离具体用户、项目和任务内容复用。
 - 某个 workspace 的工具使用方式有稳定规律。
 
 不适合生成 skill 的情况：
@@ -280,7 +280,12 @@ skill 提取应该更克制。
 - 只适用于某个用户的私密上下文。
 - 结果不确定。
 - 没有验证过。
+- 只是 workspace 完成了任务或返回了任务结果，但没有可复用 procedure。
+- 与已有 skill 只是换了用户内容或任务内容的近似重复。
+- 需要复制原始 function call 参数、工具输出、用户身份、任务原文、私有路径或账号才能成立。
 - 只是“认真检查”“合理使用工具”“保持上下文”这类空泛建议。
+
+Hook 自动提取时，runtime 只能把工具类别、状态、失败恢复信号和泛化 procedure 写进 skill。完整过程证据通过 event id、tool_calls、audit_logs、workspace_sessions 追溯，不能直接进入共享 skill 的 `detail`。同一 workspace 内相似 skill 必须通过稳定 fingerprint 和 relation/version 去重。
 
 ## Agent 主动记忆工具
 

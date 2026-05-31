@@ -2,6 +2,28 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 19:41 +08:00
+
+Purpose:
+- Fix Skill memory extraction so it stores reusable, desensitized experience instead of task results or private task details.
+
+Changed:
+- Tightened hook-based Skill candidate extraction: ordinary workspace completion no longer creates Skill memory by itself.
+- Hook-generated Skills now require concrete reusable evidence such as capability-tool workflows or failure-recovery paths.
+- Hook-generated Skill detail no longer copies process/result event text, raw function-call arguments, raw tool outputs, user identity, task originals, paths, accounts, or source logs.
+- Added stable `skillFingerprint` duplicate suppression so similar Skills in the same workspace reuse an existing record instead of creating near-duplicates.
+- Extended Skill quality checks to reject task-specific identity/raw-conversation leakage and event-hook raw evidence copying.
+- Updated the master plan, framework concept doc, memory model doc, and lifecycle hook doc with the stricter Skill extraction contract.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
+
+Git:
+- Pending.
+
 ## 2026-05-31 19:25 +08:00
 
 Purpose:
