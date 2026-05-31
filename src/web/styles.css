@@ -688,7 +688,7 @@ textarea {
   border: 1px solid #d7dee7;
   border-radius: 6px;
   background: #0f1720;
-  overflow: hidden;
+  overflow: hidden auto;
 }
 
 .context-substack details {
@@ -899,7 +899,10 @@ pre {
 }
 
 .raw-json {
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: #e8eef5;
   background: transparent;
   max-height: 520px;

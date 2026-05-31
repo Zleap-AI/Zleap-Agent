@@ -2,6 +2,24 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 08:23 +08:00
+
+Purpose:
+- Remove horizontal scrolling from the Chat context inspector raw LLM log view.
+
+Changed:
+- Updated `src/web/styles.css` so raw `final_messages` logs use automatic wrapping, break long tokens, and hide horizontal overflow.
+- Updated `ZLEAP_MASTER_PLAN.md`, `docs/07-context-and-prompt-contracts.md`, `docs/README.md`, and `zleap-agent-framework.md` to record that raw provider logs must wrap within the panel instead of using X-axis scrolling.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok": true}`.
+
+Git:
+- Recorded in the Git commit titled `fix: wrap raw llm logs`.
+
 ## 2026-05-31 08:19 +08:00
 
 Purpose:
