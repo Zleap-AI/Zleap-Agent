@@ -707,7 +707,7 @@ Verification:
 - Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
 
 Git:
-- Pending in this work session.
+- Recorded in commit `27da167 fix: retry and decode llm provider errors`.
 
 ## 2026-05-31 09:02 +08:00
 
