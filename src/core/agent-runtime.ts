@@ -397,6 +397,12 @@ export class AgentRuntime {
           }
           const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
           memoryWrites.push(...toolExecution.memoryWrites);
+          const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
+            ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, assistantToolMessage, toolExecution.toolMessages);
+          const nextMessages = transition?.messages ?? [...messages, assistantToolMessage, ...toolExecution.toolMessages];
+          const followUpLlmCallId = toolExecution.terminalAssistantMessage
+            ? undefined
+            : transition?.llmCallId ?? this.saveFollowUpLlmCall(input, prepared, nextMessages, toolExecution.toolMessages);
           if (activeWorkspaceBeforeTools !== "main" && toolExecution.toolMessages.length > 0) {
             const toolResultItems = toolExecution.toolMessages.map((message) => ({
               toolName: message.name ?? "tool",
@@ -410,13 +416,11 @@ export class AgentRuntime {
               eventKind: "tool_result",
               title: `${activeWorkspaceBeforeTools} 工具结果`,
               text: toolResultItems.map((item) => item.summary).join("\n"),
-              llmCallId: currentLlmCallId,
+              llmCallId: followUpLlmCallId ?? currentLlmCallId,
               toolNames: toolExecution.toolMessages.map((message) => message.name ?? "tool"),
               items: toolResultItems
             };
           }
-          const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
-            ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, assistantToolMessage, toolExecution.toolMessages);
           if (toolExecution.enteredWorkspaceSession) {
             yield {
               type: "workspace",
@@ -439,7 +443,7 @@ export class AgentRuntime {
               status: toolExecution.exitedWorkspaceSession.status
             };
           }
-          messages = transition?.messages ?? [...messages, assistantToolMessage, ...toolExecution.toolMessages];
+          messages = nextMessages;
           if (toolExecution.terminalAssistantMessage) {
             assistantMessage = toolExecution.terminalAssistantMessage;
             yield { type: "delta", text: assistantMessage };
@@ -476,7 +480,7 @@ export class AgentRuntime {
             };
             return;
           }
-          currentLlmCallId = transition?.llmCallId ?? this.saveFollowUpLlmCall(input, prepared, messages, toolExecution.toolMessages);
+          currentLlmCallId = followUpLlmCallId ?? currentLlmCallId;
         }
         if (prepared.activeWorkspaceId !== "main") {
           this.repos.audit(input.userId, "system", "workspace_exit_missing", "conversation", input.conversationId, {

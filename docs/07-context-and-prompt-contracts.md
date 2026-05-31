@@ -30,7 +30,9 @@
 
 合成工具结果遵循同样的简化结构：`runtime_context.memory` 映射 `memory` 类别，`runtime_context.local_conversation` 映射 `history` 类别。模型仍然收到干净的最终用户消息。
 
-`final_messages` 不是真实 context stack category。它是 prompt assembly 后实际发给 provider 的 messages payload 的原始 trace/debug snapshot。Chat UI 应该在正常结构化堆栈中隐藏它。一个低调的 `显示原始日志` 控制可以把 context inspector 切换到原始 provider-log 模式；在这个模式里，UI 要完整隐藏编号结构化堆栈，并直接展示保存的 `final_messages` 原始 JSON/text，不加 click-to-expand wrapper，不做 JSON 表格格式化，也不出现横向滚动。长行必须在 inspector 面板内自动换行。
+`final_messages` 不是真实 context stack category。它是 prompt assembly 后实际发给 provider 的 messages payload 的原始 trace/debug snapshot。Chat UI 应该在正常结构化堆栈中隐藏它。一个低调的 `显示原始日志` 控制可以把 context inspector 切换到原始 provider-log 模式；在这个模式里，UI 要完整隐藏编号结构化堆栈，并直接展示当前选中 `llmCallId` 对应的原始 LLM 调用日志：`messagesJson`、`toolsJson`、response/status metadata 和必要的 endpoint/model 信息。它必须和结构化堆栈使用同一个 `llmCallId`，不加 click-to-expand wrapper，不做 JSON 表格格式化，也不出现横向滚动。长行必须在 inspector 面板内自动换行。
+
+工具调用和工具结果在 UI 中对应的是两次不同的 LLM 视角：工具调用块绑定到发出 function call 的 LLM call；工具结果块绑定到收到 tool result 后继续推理的 follow-up LLM call。这样用户点击工具结果时，看到的上下文堆栈和原始日志里必须包含 `tool_result` segment 与真实 tool message，而不是上一轮只包含 tool call 的请求。
 
 Web UI 应把可解析的 context JSON 渲染成结构化 inspection views，而不是原始 blob。记录数组，尤其是 callable `tools` snapshot，应该显示成表格化视图，用易读列展示名称、说明、schema、binding、risk 和 workspace metadata。Raw JSON 对 provider payload logs 和解析失败仍然有用，但正常 context stack 应该让 runtime partitions 一眼就能验收。
 

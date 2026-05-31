@@ -3397,10 +3397,19 @@ async function testStreamingChildWorkspaceEventsAreVisible() {
   assert.equal(workspaceEvents.some((event) => event.eventKind === "entered" && event.workspaceId === "dev"), true);
   assert.equal(workspaceEvents.some((event) => event.eventKind === "assistant" && event.text.includes("file workspace explains")), true);
   assert.equal(workspaceEvents.some((event) => event.eventKind === "tool_call" && event.toolNames?.includes("exitWorkspace")), true);
+  assert.equal(workspaceEvents.some((event) => event.eventKind === "tool_result" && event.toolNames?.includes("exitWorkspace")), true);
   assert.equal(workspaceEvents.some((event) => event.eventKind === "exit" && event.status === "completed"), true);
   const finalText = events.filter((event) => event.type === "delta").map((event) => event.text).join("");
   assert.equal(finalText, "main final answer");
   assert.equal(finalText.includes("file workspace explains"), false);
+  const trace = repos.getTrace("conv-stream-workspace-visible", "creator", "creator");
+  const toolCallEvent = workspaceEvents.find((event) => event.eventKind === "tool_call" && event.toolNames?.includes("exitWorkspace"));
+  const toolResultEvent = workspaceEvents.find((event) => event.eventKind === "tool_result" && event.toolNames?.includes("exitWorkspace"));
+  assert.equal(Boolean(toolCallEvent?.llmCallId), true);
+  assert.equal(Boolean(toolResultEvent?.llmCallId), true);
+  assert.notEqual(toolResultEvent?.llmCallId, toolCallEvent?.llmCallId);
+  assert.equal(trace.contextSegments.some((segment) => segment.llmCallId === toolResultEvent?.llmCallId && segment.segmentType === "tool_result"), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.llmCallId === toolResultEvent?.llmCallId && segment.segmentType === "final_messages"), true);
   const done = events.at(-1);
   assert.equal(done?.type, "done");
   if (done?.type === "done") {

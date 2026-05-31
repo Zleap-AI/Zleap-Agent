@@ -954,7 +954,7 @@ function ConceptIntroTab() {
           ))}
         </div>
         <p className="concept-note">
-          Final Messages 是 UI/trace 里的调试快照，用来查看最终发给 provider 的 messages；它不是新的上下文层，也不会被再次塞回 LLM。
+          原始日志是 UI/trace 里的调试快照，用来按同一个 llmCallId 查看发给 provider 的 messages、tools 和返回状态；它不是新的上下文层，也不会被再次塞回 LLM。
         </p>
         <p className="concept-note">
           可解析的 JSON 会在界面里变成表格或字段视图。特别是 tools 数组，要能直接看清每次调用暴露了哪些 function、参数结构、绑定来源和风险信息。
@@ -1070,7 +1070,7 @@ function ChatTab() {
   });
   const displayedContextSegments = inspectedContextSegments.filter((segment) => segment.segmentType !== "final_messages");
   const rawContextLogSegment = inspectedContextSegments.find((segment) => segment.segmentType === "final_messages");
-  const hasRawContextLogs = Boolean(rawContextLogSegment);
+  const hasRawContextLogs = Boolean(inspectedLlmCall || rawContextLogSegment);
   const visibleMemoryWrites = memoryWritesForVisibleTurn(visibleOutput, trace?.memoryWrites ?? []);
 
   async function loadConversationTrace(targetConversationId = conversationId): Promise<ConversationTrace | null> {
@@ -1517,7 +1517,7 @@ function ChatTab() {
         {inspectedMessage && !displayedContextSegments.length
           ? <div className="empty">这条消息还没有匹配到已保存的 LLM 上下文快照。</div>
           : showRawContextLogs
-            ? <RawContextLog segment={rawContextLogSegment} />
+            ? <RawContextLog call={inspectedLlmCall} segment={rawContextLogSegment} />
             : <ContextStack segments={displayedContextSegments} />}
         <h2>本轮记忆写入</h2>
         <MemoryWriteStack memories={visibleMemoryWrites} />
@@ -2132,11 +2132,29 @@ function SkillDisclosureList({ skills }: { skills: unknown[] }) {
   );
 }
 
-function RawContextLog({ segment }: { segment?: ContextSegment }) {
-  if (!segment) return <div className="empty">这次 LLM 调用还没有保存原始日志。</div>;
+function rawLlmCallLog(call: LLMCallSnapshot, segment?: ContextSegment): string {
+  return JSON.stringify({
+    llmCallId: call.id,
+    conversationId: call.conversationId,
+    status: call.status,
+    providerBaseUrl: call.providerBaseUrl,
+    normalizedEndpoint: call.normalizedEndpoint,
+    model: call.model,
+    createdAt: call.createdAt,
+    completedAt: call.completedAt,
+    errorText: call.errorText,
+    messages: parseJsonText(call.messagesJson || segment?.content || "[]"),
+    tools: parseJsonText(call.toolsJson || "[]"),
+    response: parseJsonText(call.responseJson || "{}")
+  }, null, 2);
+}
+
+function RawContextLog({ call, segment }: { call?: LLMCallSnapshot; segment?: ContextSegment }) {
+  if (!call && !segment) return <div className="empty">这次 LLM 调用还没有保存原始日志。</div>;
+  const content = call ? rawLlmCallLog(call, segment) : segment?.content ?? "";
   return (
     <div className="raw-context-view">
-      <pre className="raw-json">{segment.content}</pre>
+      <pre className="raw-json">{content}</pre>
     </div>
   );
 }

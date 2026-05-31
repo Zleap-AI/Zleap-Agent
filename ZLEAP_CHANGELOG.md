@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 05:38 +08:00
+
+目的：
+- 修复点击不同消息或运行过程块时，右侧“显示原始日志”和结构化上下文堆栈可能不对应的问题。
+
+变更：
+- 原始日志改为按当前选中的 `llmCallId` 展示同一次 `llm_calls` 的 request/response 快照，包括 messages、tools、状态、endpoint/model 和 response，而不是只展示 `final_messages` segment。
+- 流式运行过程中的工具结果块改为绑定到收到 tool result 后继续推理的 follow-up LLM call；工具调用块仍绑定到发起 function call 的 LLM call。
+- 增加测试，验证工具调用事件和工具结果事件绑定到不同的 LLM call，且工具结果事件对应的上下文堆栈包含 `tool_result` 和 `final_messages`。
+- 更新 `ZLEAP_MASTER_PLAN.md`、上下文契约文档、文档索引和概念说明，明确原始日志与结构化堆栈必须共用同一个 `llmCallId`。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 本工作会话中待记录。
+
 ## 2026-06-01 05:26 +08:00
 
 目的：
