@@ -159,7 +159,8 @@ interface MemoryService {
   recallEvents(query: EventRecallQuery): Promise<EventMemory[]>;
   writeEvent(input: WriteEventInput): Promise<EventMemory>;
 
-  recallSkills(query: SkillRecallQuery): Promise<SkillMemory[]>;
+  recallSkillSummaries(input: SkillSummaryRecallInput): Promise<SkillSummaryProjection[]>;
+  readSkill(skillId: string, activeWorkspaceId: string): Promise<SkillMemory>;
   writeSkill(input: WriteSkillInput): Promise<SkillMemory>;
 }
 ```

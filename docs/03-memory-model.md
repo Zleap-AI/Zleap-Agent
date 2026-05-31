@@ -310,9 +310,15 @@ type SkillMemory = {
 };
 ```
 
-## Skill 生成机制
+## Skill 渐进式披露与生成机制
 
-skill 有两种生成路径：
+Skill 不应该把完整经验一次性塞进 prompt。第一版采用渐进式披露：
+
+1. 进入 workspace 时，runtime 只按 `workspaceId` 召回最近 N 条 skill 的 `id/title/summary/confidence`。
+2. 如果 agent 判断某条简介和当前任务高度相关，或能减少失败/指导工具流程，就调用 `readSkill(skillId)` 读取完整 `detail/procedure/appliesWhen/avoidWhen`。
+3. 原始事件证据、完整工具输出、完整 metadata 仍留在 SQLite、tool_calls、audit_logs 和 workspace_sessions 中。
+
+skill 有三种生成路径：
 
 1. hook 自动生成
    - 每次 event 提取时，判断是否有可沉淀的经验。
@@ -322,9 +328,14 @@ skill 有两种生成路径：
    - agent 在执行过程中认为某个经验值得沉淀。
    - 或用户明确要求“总结经验”。
 
+3. creator 人工维护
+   - 通过 Memory UI/API 管理高质量共享 skill。
+
 主动触发的 skill memory 也必须绑定当前 active workspace。runtime 可以从用户/agent 的触发文本里提炼 title、summary、procedure、appliesWhen 和 avoidWhen，但不能根据文本里的“命令行”“文件”“测试”等关键词猜测另一个 workspace。若经验应属于某个子 workspace，agent 需要先进入该 workspace，或由人工 Memory UI/API 在权限层进行调试维护。
 中文产品表达里的“总结一下经验”“沉淀经验”“提炼经验”“把这个经验记下来”等只作为触发语，不应该原样成为 skill 内容。保存时要去掉触发口令，只保留可复用经验本身。
    - agent 调用 skill 写入工具。
+
+好的 skill 应该记录可迁移的方法、失败后找到的稳定规避方式、经过验证的工具流程，或能降低同类任务失败率的经验。比如“某种 shell 写入方式失败后，改用脚本 API 明确写入内容和编码”。“认真检查”“合理使用工具”“保持上下文”这类泛泛提醒不应写入 skill。
 
 自动生成 skill 的触发频率应该低于 event。
 
@@ -368,17 +379,17 @@ userId + workspaceId + semantic query
 
 skill 是 workspace 内召回，但不按 userid 限制。
 
-进入 workspace 时，根据 workspace task 查询：
+进入 workspace 时，根据 workspaceId 读取最近 N 条 skill 简介：
 
 ```text
-workspaceId + semantic query
+workspaceId + maxSkillMemories
 ```
 
-然后注入可用技能。
+然后只注入 skill 索引视图。完整步骤必须通过 `readSkill(skillId)` 按需读取。
 
-event/skill 的召回开关由当前 active workspace 的 `memoryPolicyJson` 控制。Event recall 不再使用单一 `maxEventMemories` 作为统一上限，而是采用固定分层策略：结果事件最多约 50 条，过程事件最多约 8 条并按当前任务文本做 SQLite FTS 相关性筛选。Skill recall 仍由 `maxSkillMemories` 控制。
+event/skill 的召回开关由当前 active workspace 的 `memoryPolicyJson` 控制。Event recall 不再使用单一 `maxEventMemories` 作为统一上限，而是采用固定分层策略：结果事件最多约 50 条，过程事件最多约 8 条并按当前任务文本做 SQLite FTS 相关性筛选。Skill recall 由 `maxSkillMemories` 控制，并暂时使用最近 N 条；未来可以升级成 RAG 选择简介。
 
-长对话上下文注入遵循“原始近邻 + 事件投影”的策略：最近 20 条本地对话保留详细文本；更早的上下文通过 result event 时间线和相关 process event 投影视图进入 prompt。召回 memory 注入模型前必须转为 compact projection，不把完整 `detail`、完整 `metadataJson`、证据数组或原始对话窗口重新塞回上下文。
+长对话上下文注入遵循“原始近邻 + 事件投影”的策略：最近 20 条本地对话保留详细文本；更早的上下文通过 result event 时间线和相关 process event 投影视图进入 prompt。召回 memory 注入模型前必须转为 compact projection，不把完整 `detail`、完整 `metadataJson`、证据数组、完整 skill procedure 或原始对话窗口重新塞回上下文。
 
 Impression recall 不做 query 选择性筛选，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 表达对人和 agent 自我的稳定认知，预期数量有自然上限，不像 event log 一样无限增长。
 
@@ -433,11 +444,11 @@ Zleap 的 memory 系统要解决的不是“无限记住”，而是“在正确
 
 ## 2026-05-30 更新：记忆工具与 workspace 边界
 
-记忆不再作为独立 `Memory Workspace` 存在。模型可见的 memory 工具只包括 `searchMemory`、`writeUserImpression`、`writeAgentSelfImpression` 和 `writeSkillMemory`，并挂载在每个 workspace 中。`writeEventMemory`、`updateMemory` 和 `deleteMemory` 不是模型可调用工具。
+记忆不再作为独立 `Memory Workspace` 存在。模型可见的 memory 工具只包括 `searchMemory`、`readSkill`、`writeUserImpression`、`writeAgentSelfImpression` 和 `writeSkillMemory`，并挂载在每个 workspace 中。`writeEventMemory`、`updateMemory` 和 `deleteMemory` 不是模型可调用工具。
 
 运行时模型调用这些工具时，event/skill 记忆必须被当前 active workspace 约束：在 `file` workspace 中不能搜索、写入、更新或删除 CLI 的 event/skill 记忆。user impression 和 agent self impression 仍然是跨 workspace 的身份层记忆，但写入和管理继续受 userId/creator policy 限制。
 
-runtime memory tool 的归属由代码绑定，不由 AI 自己传参决定。function-call schema 不应暴露 `userId`、`agentId`、`workspaceId` 这类 scope 字段；`writeEventMemory` 和 `writeSkillMemory` 的 `workspaceId` 必须来自当前 active workspace，`writeUserImpression` 的 `userId` 必须来自当前 run，`writeAgentSelfImpression` 的 `agentId` 必须来自当前 agent。模型如果幻觉传入这些 scope 字段，runtime 必须拒绝该 tool call。
+runtime memory tool 的归属由代码绑定，不由 AI 自己传参决定。function-call schema 不应暴露 `userId`、`agentId`、`workspaceId` 这类 scope 字段；`readSkill` 和 `writeSkillMemory` 的 `workspaceId` 必须来自当前 active workspace，`writeUserImpression` 的 `userId` 必须来自当前 run，`writeAgentSelfImpression` 的 `agentId` 必须来自当前 agent。模型如果幻觉传入这些 scope 字段，runtime 必须拒绝该 tool call。
 
 跨 workspace 的全局调试、筛选、人工编辑和迁移属于 Web UI/API 的 Memory 管理层能力，不属于普通模型 tool use。
 

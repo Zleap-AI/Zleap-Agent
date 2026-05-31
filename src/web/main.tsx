@@ -807,7 +807,7 @@ function ConceptIntroTab() {
           <article>
             <strong>Skill</strong>
             <span>记可复用方法</span>
-            <p>模型、人工和保守 hook 都可以触发，但必须脱敏、泛化，并保留适用条件和置信度。</p>
+            <p>上下文默认只显示近 N 条名称和简介；高度相关时由 Agent 调用 readSkill 读取完整步骤，避免把所有经验细节一次性塞进窗口。</p>
           </article>
         </div>
         <table className="concept-table">
@@ -849,6 +849,11 @@ function ConceptIntroTab() {
             <strong>稳定印象</strong>
             <span>固定最新 20 条</span>
             <p>Impression 不按 query 筛选；它是对人和 agent 自我的稳定认知，天然有上限。</p>
+          </article>
+          <article>
+            <strong>经验披露</strong>
+            <span>Skill 名称简介 + readSkill</span>
+            <p>Skill 先作为索引出现；只有当简介能明显降低失败率或指导工具流程时，才读取 detail、procedure、适用和避免条件。</p>
           </article>
         </div>
       </section>

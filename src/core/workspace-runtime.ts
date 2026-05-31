@@ -9,6 +9,7 @@ const PROCESS_EVENT_RECALL_LIMIT = 8;
 export class WorkspaceRuntime {
   private readonly universalRuntimeMemoryToolNames = new Set([
     "searchMemory",
+    "readSkill",
     "writeUserImpression",
     "writeAgentSelfImpression",
     "writeSkillMemory"

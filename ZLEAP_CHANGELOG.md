@@ -139,7 +139,7 @@ Verification:
 - `npm run build` passed.
 
 Git:
-- Pending in this work session.
+- Recorded by the Git commit titled `feat: add progressive skill disclosure`.
 
 ## 2026-05-31 07:43 +08:00
 
@@ -661,6 +661,28 @@ Verification:
 - `npm test` passed.
 - `npm run build` passed.
 - In-app browser verification could not complete because Browser Use rejected the localhost action under its URL policy.
+
+Git:
+- Pending in this work session.
+
+## 2026-05-31 08:39 +08:00
+
+Purpose:
+- Implement progressive Skill memory disclosure so the prompt sees recent Skill names/summaries first, and the agent reads full Skill details only when a Skill is clearly relevant to the current task.
+
+Changed:
+- Added the runtime memory tool `readSkill`, registered into every workspace beside `searchMemory`, impression writes, and `writeSkillMemory`.
+- Changed Skill recall to load recent active-workspace Skill summaries without FTS filtering, and changed prompt projection so Skill detail/procedure are not automatically injected.
+- Updated the hidden runtime prompt to teach the agent when to call `readSkill`, and tightened `writeSkillMemory` guidance around concrete reusable procedures, failure recovery, verified tool flows, and non-vague lessons.
+- Strengthened Skill quality gates and hook extraction so low-confidence or vague Skill records are rejected, while concrete search/inspect/edit/tool workflows remain valid.
+- Updated the concept tab and concept/master docs to explain progressive Skill disclosure and the stricter Skill generation standard.
+- Added tests for `readSkill` schema/binding/scope isolation and for summary-only Skill prompt injection.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
 
 Git:
 - Pending in this work session.

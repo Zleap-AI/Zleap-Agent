@@ -20,6 +20,7 @@ export type ToolExecutionResult = {
 export class ToolRegistry {
   private readonly universalRuntimeMemoryToolNames = new Set([
     "searchMemory",
+    "readSkill",
     "writeUserImpression",
     "writeAgentSelfImpression",
     "writeSkillMemory"

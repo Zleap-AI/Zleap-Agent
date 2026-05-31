@@ -30,6 +30,15 @@ function containsPrivateLeak(value: string): boolean {
   return /([A-Za-z]:\\|\/Users\/|\/home\/|[\w.+-]+@[\w.-]+\.\w+|\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b|api[_-]?key|secret|token|password)/i.test(value);
 }
 
+function containsReusableSkillSignal(value: string): boolean {
+  return /(failed|failure|error|retry|workaround|fallback|recover|avoid|instead|verified|validated|success|search|inspect|edit|read|write|code|test|before|失败|报错|错误|重试|改用|换成|规避|避免|最终成功|验证通过|可复用|经验|流程|procedure|命令|搜索|检查|编辑|读取|写入|文件|代码|测试|工具|mcp|cli|shell|python|node|npm)/i.test(value);
+}
+
+function containsVagueSkillLanguage(value: string): boolean {
+  const normalized = value.replace(/\s+/g, "");
+  return /(认真检查|合理使用工具|保持上下文|根据需要选择工具|灵活处理|总结经验|提高效率|确保准确|注意细节|充分理解任务)/.test(normalized);
+}
+
 function numberFromMetadata(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
 }
@@ -91,11 +100,16 @@ function skillSeedFromEventBatch(workspaceId: string, processMemory: MemoryRow, 
   avoidWhen: string[];
 } {
   const workspaceLabel = `${workspaceId} workspace`;
+  const evidenceText = `${processMemory.title}\n${processMemory.summary}\n${processMemory.detail}\n${resultMemory.title}\n${resultMemory.summary}\n${resultMemory.detail}`;
+  const hasFailureRecovery = /(failed|failure|error|retry|workaround|fallback|recover|instead|失败|报错|错误|重试|改用|换成|规避|最终成功)/i.test(evidenceText);
+  const concreteLesson = hasFailureRecovery
+    ? `在 ${workspaceLabel} 遇到类似失败/重试场景时，优先复用已经验证过的替代路径，并把失败信号、替代操作和最终结果结构化记录。`
+    : `在 ${workspaceLabel} 处理类似任务时，只复用已经由事件证据验证过的具体工具流程。`;
   const workspaceAdvice: Record<string, string[]> = {
     cli: [
       "先确认命令目标、风险级别和最小可执行命令。",
-      "执行命令后记录退出状态、关键输出和错误摘要。",
-      "把命令结果结构化返回给 main workspace，再决定是否进入其他 workspace。"
+      hasFailureRecovery ? "如果一种命令写入/执行方式失败，不要重复同一路径；改用已验证的替代方式，例如用脚本 API 明确写入内容和编码。" : "执行命令后记录退出状态、关键输出和错误摘要。",
+      "把命令结果、失败原因和成功路径结构化返回给 main workspace。"
     ],
     file: [
       "先搜索或读取相关文件证据，确认修改/检查范围。",
@@ -118,9 +132,9 @@ function skillSeedFromEventBatch(workspaceId: string, processMemory: MemoryRow, 
     "执行最小必要操作并记录关键观察。",
     "用结构化结果返回状态、产物、错误和建议下一步。"
   ];
-  const summary = `在 ${workspaceLabel} 处理类似任务时，采用已验证的 workspace 流程：${procedure.join(" ")}`;
+  const summary = `${concreteLesson} ${procedure.join(" ")}`;
   return {
-    title: `${workspaceLabel} 可复用执行流程`,
+    title: hasFailureRecovery ? `${workspaceLabel} 失败后替代路径经验` : `${workspaceLabel} 可复用执行流程`,
     summary,
     detail: [
       "触发来源：event hook 自动候选。",
@@ -414,6 +428,53 @@ export class MemoryService {
       summary: textArg("summary"),
       detail: textArg("detail")
     };
+
+    if (input.toolName === "readSkill") {
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId", "relationId", "version"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
+      const skillId = textArg("skillId") || textArg("id");
+      if (!skillId) return { ok: false, result: { error: "skillId is required." } };
+      const workspaceScope = this.requireActiveWorkspaceScope(input.activeWorkspaceId);
+      if (!workspaceScope.allowed) return { ok: false, result: { error: workspaceScope.reason } };
+      let skill: MemoryRow;
+      try {
+        skill = this.repos.getMemory(skillId);
+      } catch (error) {
+        return { ok: false, result: { error: error instanceof Error ? error.message : String(error) } };
+      }
+      if (skill.memoryType !== "skill") return { ok: false, result: { error: "readSkill can only read skill memory." } };
+      const activeWorkspaceDecision = this.canUseMemoryRecordInActiveWorkspace(skill, workspaceScope.workspaceId);
+      if (!activeWorkspaceDecision.allowed) {
+        return { ok: false, result: { error: activeWorkspaceDecision.reason ?? "Skill is outside the active workspace." } };
+      }
+      if (!this.canReadMemoryRecord(input.run.userId, skill)) {
+        return { ok: false, result: { error: "Skill is not visible to the current runtime scope." } };
+      }
+      const metadata = this.parseMetadata(skill.metadataJson);
+      this.repos.audit(input.run.userId, input.run.userRole, "memory_tool_read_skill", "memory", skill.id, {
+        conversationId: input.run.conversationId,
+        workspaceId: skill.workspaceId,
+        activeWorkspaceId: input.activeWorkspaceId
+      });
+      return {
+        ok: true,
+        result: {
+          skill: {
+            id: skill.id,
+            title: skill.title,
+            summary: skill.summary,
+            detail: skill.detail,
+            relationId: skill.relationId,
+            version: skill.version,
+            updatedAt: skill.updatedAt,
+            procedure: Array.isArray(metadata.procedure) ? metadata.procedure : [],
+            appliesWhen: Array.isArray(metadata.appliesWhen) ? metadata.appliesWhen : [],
+            avoidWhen: Array.isArray(metadata.avoidWhen) ? metadata.avoidWhen : [],
+            confidence: metadata.confidence
+          }
+        }
+      };
+    }
 
     if (input.toolName === "searchMemory") {
       const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
@@ -727,7 +788,7 @@ export class MemoryService {
         requestedBy: "user_or_agent",
         desensitized: true,
         evidenceEventIds,
-        confidence: evidenceEventIds.length > 0 ? 0.68 : 0.45,
+        confidence: evidenceEventIds.length > 0 ? 0.68 : 0.58,
         qualityGate: {
           reusable: true,
           userPrivateDetailRemoved: true,
@@ -757,6 +818,8 @@ export class MemoryService {
     const resultMetadata = this.parseMetadata(resultMemory.metadataJson);
     const outcome = typeof resultMetadata.outcome === "string" ? resultMetadata.outcome : "";
     if (outcome !== "success" && outcome !== "completed") return undefined;
+    const evidenceText = `${processMemory.title}\n${processMemory.summary}\n${processMemory.detail}\n${resultMemory.title}\n${resultMemory.summary}\n${resultMemory.detail}`;
+    if (!containsReusableSkillSignal(evidenceText)) return undefined;
 
     const seed = skillSeedFromEventBatch(workspaceId, processMemory, resultMemory);
     const relationId = `skill:${workspaceId}:event-hook:${stableId(seed.summary)}`;
@@ -777,7 +840,7 @@ export class MemoryService {
         requestedBy: "runtime_hook",
         desensitized: true,
         evidenceEventIds,
-        confidence: triggerSource === "afterWorkspaceExit" ? 0.62 : 0.52,
+        confidence: triggerSource === "afterWorkspaceExit" ? 0.66 : 0.58,
         qualityGate: {
           reusable: true,
           userPrivateDetailRemoved: true,
@@ -913,8 +976,15 @@ export class MemoryService {
     if (procedure.length === 0) return { allowed: false, reason: "Skill memory requires at least one reusable procedure step." };
     if (appliesWhen.length === 0) return { allowed: false, reason: "Skill memory requires appliesWhen conditions." };
     if (avoidWhen.length === 0) return { allowed: false, reason: "Skill memory requires avoidWhen conditions." };
+    const skillText = `${memory.title}\n${memory.summary}\n${memory.detail}\n${procedure.join("\n")}\n${appliesWhen.join("\n")}\n${avoidWhen.join("\n")}`;
+    if (!containsReusableSkillSignal(skillText)) {
+      return { allowed: false, reason: "Skill memory must capture a concrete reusable procedure, failure recovery, tool workflow, or verified method." };
+    }
+    if (containsVagueSkillLanguage(skillText) && skillText.length < 420) {
+      return { allowed: false, reason: "Skill memory is too vague; record a concrete reusable lesson instead." };
+    }
     const confidence = typeof metadata.confidence === "number" ? metadata.confidence : 0;
-    if (confidence < 0.4) return { allowed: false, reason: "Skill memory confidence is too low to share." };
+    if (confidence < 0.55) return { allowed: false, reason: "Skill memory confidence is too low to share." };
     if (containsPrivateLeak(`${memory.title}\n${memory.summary}\n${memory.detail}\n${JSON.stringify(metadata)}`)) {
       return { allowed: false, reason: "Skill memory appears to contain private user/project details and must be generalized before sharing." };
     }

@@ -179,7 +179,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 - **Impression**：不做 query 选择性召回，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 是对人和 agent 自我的稳定印象，天然有上限，不应该像事件日志一样无限增长。
 - **Result Event**：载入当前 user + workspace 下最新有效的约 50 条结果事件，作为较早任务的结果时间线。
 - **Process Event**：只用 SQLite FTS / 未来向量检索召回与当前任务相关的少量过程事件。无关过程不进入上下文，避免浪费注意力。
-- **Skill**：继续按当前 workspace 召回少量高质量、已脱敏、可复用的经验。
+- **Skill**：按当前 workspace 召回近 N 条高质量、已脱敏、可复用经验的名称和简介。完整经验不自动进上下文，只有当 agent 判断某条简介与当前任务高度相关时，才通过 `readSkill` 主动读取详情。
 
 因此，`runtime_context.memory` 不是原始 memory 表的 dump，而是一个分区投影：
 
@@ -196,17 +196,28 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 
 ### 4.4 Skill 生成机制
 
-Skill 有两种生成路径：
+Skill 采用渐进式披露：
+
+1. 第一层：上下文只显示当前 workspace 最近的 skill `id/title/summary/confidence`，让模型知道“有哪些经验可能有用”。
+2. 第二层：模型判断某条 skill 与当前任务高度相关时，调用 `readSkill(skillId)` 读取完整 `detail/procedure/appliesWhen/avoidWhen`。
+3. 第三层：原始事件证据、完整工具输出和更长的调试材料仍保留在 SQLite、tool_calls、audit_logs、workspace_sessions 中，不直接进入普通 prompt。
+
+这个设计借鉴 Claude Skills 的 progressive disclosure：先给最小索引，相关时再加载详细说明，从而节省 token，同时保持专业经验可用。
+
+Skill 有三种生成路径：
 
 - **Hook 自动生成**：workspace exit event extraction 后，判断是否有可沉淀的经验。
 - **Agent 主动生成**：agent 在执行过程中认为某个经验值得沉淀，或用户明确要求总结经验。
+- **人工维护**：creator 在 Memory UI/API 中维护高质量共享经验。
 
 **适合生成 skill 的情况**
 
 - 同类问题重复出现。
 - 某次失败带来明确教训。
+- 失败若干次之后找到可复用的成功路径，例如某种命令写入方式失败后改用更稳定的脚本/API 方式。
 - 某个流程被验证有效。
 - 某个 workspace 的工具使用方式有稳定规律。
+- 能降低未来同类任务失败率，且可以脱离具体用户和私有项目复用。
 
 **不适合生成 skill 的情况**
 
@@ -214,14 +225,16 @@ Skill 有两种生成路径：
 - 只适用于某个用户的私密上下文。
 - 结果不确定或没有验证过。
 - 包含未脱敏的用户、项目、路径、账号或业务细节。
+- 只是“认真检查”“合理使用工具”“保持上下文”这类空泛提醒。
 
 ### 4.5 记忆写入来源与 Workspace 边界
 
-记忆不作为独立 Memory Workspace 存在。模型可见的 runtime memory tools 只包括 `searchMemory`、`writeUserImpression`、`writeAgentSelfImpression`、`writeSkillMemory`。
+记忆不作为独立 Memory Workspace 存在。模型可见的 runtime memory tools 只包括 `searchMemory`、`readSkill`、`writeUserImpression`、`writeAgentSelfImpression`、`writeSkillMemory`。
 
 - Impression Memory 是 agentic：当模型判断用户表达了稳定长期偏好、背景、身份或约束时，可以主动请求写入；agent self impression 需要 creator 权限。
 - Event Memory 是 programmatic：由 runtime hook 按会话窗口、workspace 退出等时机自动提取，模型没有 event 写入工具。
 - Skill Memory 同时有 agentic 和 programmatic 来源：模型或用户可以主动请求沉淀经验；hook 也可以从成功且有泛化价值的事件中保守提取，但必须脱敏，且不能为了写记忆而强行总结经验。
+- `readSkill` 是读取完整 skill 详情的渐进式披露工具。模型不能把 skill 简介当成完整操作手册；只有高度相关时读取详情，再根据完整 procedure 执行。
 - 模型调用 skill 记忆工具时，workspaceId 由当前 active workspace 代码绑定。
 - 模型不能通过传入 `workspaceId` 操作其他 workspace 的 event/skill。
 - 记忆演化以追加新记录、读取最新有效记录为主；更新和删除不作为模型可调用工具。

@@ -116,7 +116,7 @@ load:
 
 The memory partitions recalled here become the authoritative `WorkspaceSession.localContext` for the next LLM call in that workspace. Later prompt assembly must reuse this persisted local context rather than recalling memory again with a different query, so trace/debug UI and final LLM messages stay consistent.
 
-Recall uses the long-conversation projection strategy: latest 20 impression projections are loaded without query filtering; result events provide an older outcome timeline; process events are searched by current task relevance; skill memory remains workspace-scoped. `final_messages` is only a raw provider-payload log for inspection and must not become an input to hooks or later prompt assembly.
+Recall uses the long-conversation projection strategy: latest 20 impression projections are loaded without query filtering; result events provide an older outcome timeline; process events are searched by current task relevance; skill memory remains workspace-scoped and is injected only as recent title/summary/index projections. Full skill detail/procedure is loaded later through `readSkill` when the agent judges a skill highly relevant. `final_messages` is only a raw provider-payload log for inspection and must not become an input to hooks or later prompt assembly.
 
 ## afterWorkspaceEnter
 
@@ -270,6 +270,7 @@ skill 提取应该更克制。
 
 - 同类问题重复出现。
 - 某次失败带来明确教训。
+- 失败后找到可复用的稳定替代路径，能减少未来同类任务失败率。
 - 某个流程被验证有效。
 - 某个 workspace 的工具使用方式有稳定规律。
 
@@ -279,6 +280,7 @@ skill 提取应该更克制。
 - 只适用于某个用户的私密上下文。
 - 结果不确定。
 - 没有验证过。
+- 只是“认真检查”“合理使用工具”“保持上下文”这类空泛建议。
 
 ## Agent 主动记忆工具
 
@@ -289,11 +291,26 @@ skill 提取应该更克制。
 ```text
 writeUserImpression
 writeAgentSelfImpression
+readSkill
 writeSkillMemory
 searchMemory
 ```
 
-模型可见的记忆工具面必须保持很小：没有 `writeEventMemory`，也没有模型可调用的 `updateMemory` / `deleteMemory`。事件记忆由生命周期 hook 程序化写入；更新和删除属于 Web UI/API 管理层调试能力。
+模型可见的记忆工具面必须保持很小：`readSkill` 只读取当前 active workspace 的某条 skill 详情；没有 `writeEventMemory`，也没有模型可调用的 `updateMemory` / `deleteMemory`。事件记忆由生命周期 hook 程序化写入；更新和删除属于 Web UI/API 管理层调试能力。
+
+### readSkill
+
+适用：
+
+- 当前 prompt 已经看到某条 skill 的名称和简介。
+- 该简介与当前任务高度相关，或者能明显减少工具失败/重试。
+- Agent 准备按这条经验执行前，需要读取完整 procedure、appliesWhen 和 avoidWhen。
+
+限制：
+
+- 只接受 `skillId`。
+- workspaceId 由当前 active workspace 代码绑定。
+- 不能读取其他 workspace 的 skill，也不能用作全局 memory debugger。
 
 ### writeUserImpression
 

@@ -691,8 +691,7 @@ export class Repositories {
     const skills = recallPartition(
       "m.memoryType = 'skill' AND m.workspaceId = ?",
       [input.workspaceId],
-      input.skillLimit ?? 8,
-      { useFts: true }
+      input.skillLimit ?? 8
     );
 
     return [...impressions, ...resultEvents, ...processEvents, ...skills];

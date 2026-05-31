@@ -61,7 +61,7 @@ Main workspace has two terminal orchestration tools: `askUser` and `finishTask`.
 
 The active `WorkspaceSession.localContext` remains the authoritative persisted runtime snapshot for a workspace LLM call, but it is not exposed as a top-level prompt category. After `WorkspaceRuntime` recalls impressions/events/skills for a session, `ContextBuilder` and `PromptAssembler` must inject those exact partitions into the `memory` segment and the synthetic `runtime_context.memory` tool result. Runtime must not perform a second independent recall during prompt assembly, because that would make the persisted session trace differ from what the model actually saw.
 
-Runtime memory-write tools use the same code-bound context contract. Event and skill writes receive active workspace scope from runtime. Impression writes receive user/agent scope from runtime and stay cross-workspace, but still persist origin workspace/session/task evidence when available. Skill and impression trace metadata can include `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`; these fields are trace/debug evidence, not model-controlled arguments.
+Runtime memory tools use the same code-bound context contract. Event and skill writes receive active workspace scope from runtime. `readSkill` also receives active workspace scope from runtime and accepts only `skillId`, so it can reveal full details only for the current workspace's shared skill. Impression writes receive user/agent scope from runtime and stay cross-workspace, but still persist origin workspace/session/task evidence when available. Skill and impression trace metadata can include `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`; these fields are trace/debug evidence, not model-controlled arguments.
 
 ## 为什么需要契约
 
@@ -234,6 +234,8 @@ Relevant Process Event Memory:
 
 Skill Memory:
   scoped by workspaceId
+  injected as recent title/summary/id projections
+  full procedure loaded only through readSkill(skillId)
 ```
 
 注入时应分开呈现，避免模型混淆事实和方法。
@@ -348,7 +350,7 @@ type AttentionBudget = {
 2. workspace instructions 必须准确，不能过长。
 3. impression memory 固定注入最新有效 20 条投影，不做 query 选择性召回。
 4. event memory 分层注入：约 50 条 result event 保留旧结果时间线，少量 process event 按当前任务相关性召回。
-5. skill memory 数量要少，优先高置信度和高相关度。
+5. skill memory 数量要少，默认只注入最近 N 条名称和简介；高度相关时用 `readSkill` 渐进读取完整步骤。
 6. tool result 长输出必须摘要。
 7. local history 只保留当前 workspace 的必要片段。
 
