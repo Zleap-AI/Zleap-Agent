@@ -2140,6 +2140,7 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(returnedMainPayload.handoffContext?.some((packet) => packet.direction === "child_to_parent"), true);
   assert.equal(JSON.stringify(returnedMainPayload.handoffContext).includes("File workspace inspected available evidence"), true);
   assert.equal(JSON.stringify(returnedMainPayload.handoffContext).includes("\"kind\":\"tool_call\""), false);
+  assert.equal(JSON.stringify(returnedMainPayload.handoffContext).includes("enterWorkspace"), false);
   assert.equal(output.assistantMessage, "main integrated file result");
   assert.equal(output.activeWorkspaceId, "main");
   assert.equal(output.workspaceTrace.length, 2);
@@ -2415,8 +2416,14 @@ async function testWorkspaceSessionLocalToolCallsAreSessionScoped() {
 
   const secondFileInput = fake.inputs[3];
   const localConversationToolMessage = secondFileInput.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
-  const localConversationPayload = JSON.parse(localConversationToolMessage?.content ?? "{}") as { messages: Array<{ content: string }>; recentToolEvidence: unknown[] };
+  const localConversationPayload = JSON.parse(localConversationToolMessage?.content ?? "{}") as {
+    messages: Array<{ content: string }>;
+    completedWorkspaceResults: Array<{ workspaceId: string }>;
+    recentToolEvidence: unknown[];
+  };
   assert.equal(localConversationPayload.messages.some((message) => message.content.includes("exitWorkspace")), true);
+  assert.equal(localConversationPayload.messages.some((message) => message.content.includes("enterWorkspace")), false);
+  assert.equal(localConversationPayload.completedWorkspaceResults.every((result) => result.workspaceId === "dev"), true);
   assert.equal(localConversationPayload.recentToolEvidence.length, 0);
 
   const trace = repos.getTrace("conv-session-scope", "creator", "creator");

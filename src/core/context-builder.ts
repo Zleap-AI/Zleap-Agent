@@ -211,6 +211,7 @@ export class ContextBuilder {
     const availableWorkspaces = input.workspaceRegistry.map((workspace) => workspace.manifest);
     const completedWorkspaceResults = input.workspaceTrace
       .filter((session) => session.status !== "running")
+      .filter((session) => input.workspace.id === "main" || session.workspaceId === input.workspace.id)
       .map((session) => session.result);
 
     const segments: Array<Omit<ContextSegment, "id" | "llmCallId" | "conversationId" | "tokenEstimate">> = [

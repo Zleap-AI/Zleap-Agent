@@ -44,6 +44,8 @@ main workspace 可以看到的返回内容包括完整 `WorkspaceResult`：`stat
 
 子 workspace 内部保留的内容包括完整 tool call 参数、冗长中间过程、召回的 event/skill、局部 scratch/evidence、审计日志和 memory 提取证据。这些内容进入 trace/debug UI，而不是默认进入 main workspace 的 prompt。这样 main workspace 得到的是可决策的交付物和必要结果上下文，不会被子 workspace 的全部执行噪声污染。
 
+反过来也成立：子 workspace 的 `history` 不能把 main planning 对话、sibling workspace 对话、或 main-only 编排工具协议消息当成本地对话回放。子 workspace 可以看到共享 workspace manifest 以理解能力地图，也可以通过 `handoffContext` 获得 main 程序化交付的当前请求和必要结果证据，但普通 `messages`、`completedWorkspaceResults`、`recentToolEvidence` 必须按当前 workspace 隔离。`completedWorkspaceResults` 在 main 中用于编排整合；在子 workspace 中只表示同一 workspace 的持续本地记录。
+
 完整 workspace registry 是跨 workspace 共享的能力地图。main 和子 workspace 都可以知道有哪些 sibling workspace 存在；区别是只有 main 拥有 `enterWorkspace` 调度权。子 workspace 如果判断需要其他 workspace，应该把这个判断写进 `suggestedNextSteps`，由 main workspace 决定下一次切换。
 
 对话入口需要区分“新任务”和“续跑任务”。默认情况下，新的用户请求先进入 main workspace，由 main 决定是否切换能力工作空间；但如果同一 conversation 里最后还有未完成、失败、阻塞、待用户输入或待审批的子 workspace session，下一条用户消息应直接恢复这个子 workspace。这样用户可以在任意工作空间暂停、停止、失败后继续输入，或者中途纠正任务方向，而不会因为 UI 中断或用户说“继续”就丢失子 workspace 的本地上下文。恢复后的上下文仍然使用当前子 workspace 的 `WorkspaceTask`、manifest、memory、local history、tool evidence 和可调用工具；main 只有在子 workspace 调用 `exitWorkspace` 交付结构化结果后才重新接管。

@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 04:20 +08:00
+
+目的：
+- 修复子工作空间上下文隔离问题，避免不同工作空间的对话记录、编排工具协议和已完成结果混进同一个本地 history。
+- 将“跨工作空间只通过 handoffContext 交付结果，本地历史只属于当前 workspace”的契约写回核心文档。
+
+变更：
+- `ContextBuilder` 在生成 `history.completedWorkspaceResults` 时按当前 workspace 过滤：`main` 仍可看到已完成工作空间结果用于编排整合，子工作空间只能看到同一 workspace 的历史结果。
+- `AgentRuntime.selectLocalHistory` 回放子工作空间本地记录时，只保留当前 workspace 可见工具产生的 function call / tool result，避免把 `enterWorkspace` 等 main-only 编排协议当成本地对话片段。
+- `AgentRuntime.selectWorkspaceRawTail` 返回子空间 handoff 尾巴时，同样过滤非当前 workspace 工具结果，避免 `enterWorkspace` 从 raw tail 泄漏回 main 的结果包。
+- 增加回归测试，验证子空间 handoff 不包含 `enterWorkspace`，第二次进入同一 `dev` 工作空间时本地 history 只含同空间 `exitWorkspace`，不含 main 编排消息。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/07-context-and-prompt-contracts.md` 和 `zleap-agent-framework.md`，明确子 workspace 的普通 `messages`、`completedWorkspaceResults`、`recentToolEvidence` 必须按当前 workspace 隔离，跨空间内容只能作为受控 `handoffContext` 出现。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 本轮待提交。
+
 ## 2026-06-01 04:10 +08:00
 
 目的：

@@ -861,6 +861,10 @@ export class AgentRuntime {
     }));
 
     const trace = this.repos.getTrace(conversationId, userId, userRole);
+    const localToolNames = this.localWorkspaceToolNames(workspaceId);
+    const localToolCallNames = (toolCalls: LLMToolCall[] | undefined): string[] => (toolCalls ?? [])
+      .map((toolCall) => toolCall.function.name)
+      .filter((toolName) => localToolNames.has(toolName));
     const workspaceCallIds = new Set(
       trace.contextSegments
         .filter((segment) => segment.segmentType === "workspace")
@@ -881,10 +885,13 @@ export class AgentRuntime {
         localMessages.push({ role: "assistant", content: message.content });
       }
       if (message?.tool_calls?.length) {
-        localMessages.push({
-          role: "assistant",
-          content: `调用工具：${message.tool_calls.map((toolCall) => toolCall.function.name).join(", ")}`
-        });
+        const toolNames = localToolCallNames(message.tool_calls);
+        if (toolNames.length > 0) {
+          localMessages.push({
+            role: "assistant",
+            content: `调用工具：${toolNames.join(", ")}`
+          });
+        }
       }
     }
     for (const segment of trace.contextSegments.filter((item) => item.segmentType === "final_messages" && workspaceCallIds.has(item.llmCallId))) {
@@ -894,12 +901,15 @@ export class AgentRuntime {
           localMessages.push({ role: "assistant", content: message.content });
         }
         if (message.role === "assistant" && message.tool_calls?.length) {
-          localMessages.push({
-            role: "assistant",
-            content: `调用工具：${message.tool_calls.map((toolCall) => toolCall.function.name).join(", ")}`
-          });
+          const toolNames = localToolCallNames(message.tool_calls);
+          if (toolNames.length > 0) {
+            localMessages.push({
+              role: "assistant",
+              content: `调用工具：${toolNames.join(", ")}`
+            });
+          }
         }
-        if (message.role === "tool" && message.name && !message.name.startsWith("runtime_context.")) {
+        if (message.role === "tool" && message.name && localToolNames.has(message.name)) {
           localMessages.push({
             role: "tool",
             content: `${message.name}: ${summarizeToolResultForChat(message.content ?? "", 500)}`
@@ -908,6 +918,10 @@ export class AgentRuntime {
       }
     }
     return localMessages.slice(-20);
+  }
+
+  private localWorkspaceToolNames(workspaceId: string): Set<string> {
+    return new Set(this.toolRegistry.getCallableTools(workspaceId).map((tool) => tool.name));
   }
 
   private createParentToChildHandoff(input: AgentRunInput, prepared: AgentRunPrepared, session: WorkspaceSession, toolMessages: LLMMessage[]): WorkspaceHandoffContext {
@@ -991,6 +1005,7 @@ export class AgentRuntime {
 
   private selectWorkspaceRawTail(conversationId: string, workspaceId: string, userId: string, userRole: AgentRunInput["userRole"], limit: number): WorkspaceHandoffContext["items"] {
     const trace = this.repos.getTrace(conversationId, userId, userRole);
+    const localToolNames = this.localWorkspaceToolNames(workspaceId);
     const workspaceCallIds = new Set(
       trace.contextSegments
         .filter((segment) => segment.segmentType === "workspace")
@@ -1016,7 +1031,7 @@ export class AgentRuntime {
             llmCallId: segment.llmCallId
           });
         }
-        if (message.role === "tool" && message.name && !message.name.startsWith("runtime_context.")) {
+        if (message.role === "tool" && message.name && localToolNames.has(message.name)) {
           items.push({
             kind: "tool_result",
             role: "tool",
