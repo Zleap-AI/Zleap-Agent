@@ -43,11 +43,6 @@ function memoryEventKind(memory: MemoryRow): string {
   return typeof metadata.eventKind === "string" ? metadata.eventKind : "";
 }
 
-function truncate(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
-}
-
 function projectMemoryBase(memory: MemoryRow): Record<string, unknown> {
   return {
     id: memory.id,
@@ -88,8 +83,7 @@ function projectProcessEvent(memory: MemoryRow): Record<string, unknown> {
     ...projectMemoryBase(memory),
     eventKind: "process",
     source: metadata.source,
-    conversationId: metadata.conversationId,
-    detailSnippet: truncate(memory.detail, 480)
+    conversationId: metadata.conversationId
   };
 }
 
@@ -116,7 +110,7 @@ function memoryDisclosureProtocol(userMessage: string): Record<string, unknown> 
     skillReadTool: "readSkill",
     currentUserMessageLooksLikeDetailRequest: detailIntent,
     rules: [
-      "自动召回的 impression/event 只提供 id、标题、摘要、少量片段和读取入口，不包含完整 detail。",
+      "自动召回的 impression/event 只提供 id、标题、摘要和读取入口；过程事件也不注入 detailSnippet，不包含完整 detail。",
       "如果用户追问某条已召回记忆的详情、要求展开说明，或回答需要依赖完整事实，必须先调用 readMemory(memoryId)。",
       "不要把 summary/snippet 扩写成看似详细的事实；没有 readMemory 返回的 detail，就只能明确基于摘要简述。"
     ]

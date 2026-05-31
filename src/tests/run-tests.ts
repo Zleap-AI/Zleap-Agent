@@ -1926,8 +1926,17 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   assert.equal(fileSession?.localContext.recalledSkillMemories.some((memory) => memory.title === "Objective-only file skill"), true);
   const childInput = fake.inputs[1];
   const childMemoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
-  const childMemoryPayload = JSON.parse(childMemoryToolMessage?.content ?? "{}") as { currentWorkspaceResultEvents: MemoryRow[]; currentWorkspaceRelevantProcessEvents: MemoryRow[]; currentWorkspaceSkillMemory: MemoryRow[] };
+  const childMemoryPayload = JSON.parse(childMemoryToolMessage?.content ?? "{}") as {
+    currentWorkspaceResultEvents: Array<Record<string, unknown>>;
+    currentWorkspaceRelevantProcessEvents: Array<Record<string, unknown>>;
+    currentWorkspaceSkillMemory: Array<Record<string, unknown>>;
+  };
   assert.equal(childMemoryPayload.currentWorkspaceRelevantProcessEvents.some((memory) => memory.title === "Objective-only file event"), true);
+  const recalledProcessProjection = childMemoryPayload.currentWorkspaceRelevantProcessEvents.find((memory) => memory.title === "Objective-only file event");
+  assert.equal(Boolean(recalledProcessProjection?.detailSnippet), false);
+  assert.equal(JSON.stringify(recalledProcessProjection).includes("This memory should be found by the child WorkspaceTask objective"), false);
+  assert.equal(recalledProcessProjection?.readTool, "readMemory");
+  assert.equal(recalledProcessProjection?.detailInjected, false);
   assert.equal(childMemoryPayload.currentWorkspaceSkillMemory.some((memory) => memory.title === "Objective-only file skill"), true);
   assert.equal(JSON.stringify(childMemoryPayload.currentWorkspaceSkillMemory).includes("This skill should travel"), false);
   assert.equal(JSON.stringify(childMemoryPayload.currentWorkspaceSkillMemory).includes("summary_only"), true);

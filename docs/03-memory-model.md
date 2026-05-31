@@ -397,9 +397,9 @@ workspaceId + maxSkillMemories
 
 然后只注入 skill 索引视图。完整步骤必须通过 `readSkill(skillId)` 按需读取。
 
-event/skill 的召回开关由当前 active workspace 的 `memoryPolicyJson` 控制。Event recall 不再使用单一 `maxEventMemories` 作为统一上限，而是采用固定分层策略：结果事件最多约 50 条，过程事件最多约 8 条并按当前任务文本做 SQLite FTS 相关性筛选。Skill recall 由 `maxSkillMemories` 控制，并暂时使用最近 N 条；未来可以升级成 RAG 选择简介。
+event/skill 的召回开关由当前 active workspace 的 `memoryPolicyJson` 控制。Event recall 不再使用单一 `maxEventMemories` 作为统一上限，而是采用固定分层策略：结果事件最多约 50 条，过程事件最多约 8 条并按当前任务文本做 SQLite FTS 相关性筛选。过程事件被选中后也只注入索引/摘要投影，不注入 `detail`、`detailSnippet`、原始操作日志或来源转录；模型需要过程细节时必须用 `readMemory(memoryId)` 读取。Skill recall 由 `maxSkillMemories` 控制，并暂时使用最近 N 条；未来可以升级成 RAG 选择简介。
 
-长对话上下文注入遵循“原始近邻 + 事件投影”的策略：最近 20 条本地对话保留详细文本；更早的上下文通过 result event 时间线和相关 process event 投影视图进入 prompt。召回 memory 注入模型前必须转为 compact projection，不把完整 `detail`、完整 `metadataJson`、证据数组、完整 skill procedure 或原始对话窗口重新塞回上下文。
+长对话上下文注入遵循“原始近邻 + 事件投影”的策略：最近 20 条本地对话保留详细文本；更早的上下文通过 result event 时间线和相关 process event 索引/摘要投影视图进入 prompt。召回 memory 注入模型前必须转为 compact projection，不把完整 `detail`、`detailSnippet`、完整 `metadataJson`、证据数组、完整 skill procedure 或原始对话窗口重新塞回上下文。
 
 Impression recall 不做 query 选择性筛选，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 表达对人和 agent 自我的稳定认知，预期数量有自然上限，不像 event log 一样无限增长。
 

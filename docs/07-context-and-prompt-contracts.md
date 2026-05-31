@@ -250,6 +250,7 @@ workspace memory 包含三类：
 相关过程事件记忆：
   按 userId + workspaceId 隔离
   通过 SQLite FTS 按当前 task/query 选择
+  只注入 id/title/summary/readMemory 等投影，不注入 detail/detailSnippet
 
 经验记忆：
   按 workspaceId 隔离
@@ -266,13 +267,13 @@ workspace memory 包含三类：
 - [event/result] 上次在这个工作空间中，当前用户需要使用 pnpm test，而不是 npm test。
 
 相关过程事件记忆：
-- [event/process] 之前的相关运行先发现命令配置问题，再继续处理文件。
+- [event/process] 之前的相关运行与当前任务有关；如需过程细节，用 readMemory(memoryId) 读取。
 
 相关经验记忆：
 - [skill] 在 Node 项目中，选择包管理命令前先检查 package.json 和 lockfile。
 ```
 
-`runtime_context.memory` 必须是投影视图，而不是原始 `MemoryRow[]` dump。不要注入完整 `detail`、完整 `metadataJson`、原始 evidence arrays 或 source transcript windows；这些内容留在 SQLite、workspace sessions、tool calls 和 audit/debug views 中。
+`runtime_context.memory` 必须是投影视图，而不是原始 `MemoryRow[]` dump。不要注入完整 `detail`、`detailSnippet`、完整 `metadataJson`、原始 evidence arrays 或 source transcript windows；这些内容留在 SQLite、workspace sessions、tool calls 和 audit/debug views 中，需要时由模型通过 `readMemory(memoryId)` 渐进读取。
 
 ## 7. 当前任务上下文
 

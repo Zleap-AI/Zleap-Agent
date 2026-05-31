@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 06:09 +08:00
+
+目的：
+- 修正“当前工作空间相关过程事件记忆”自动注入过多细节的问题，确保过程事件只作为索引/摘要投影进入上下文，完整过程详情由 Agent 通过 `readMemory(memoryId)` 主动读取。
+
+变更：
+- 移除 `currentWorkspaceRelevantProcessEvents` 投影里的 `detailSnippet` 字段，新生成的 LLM 上下文不再把过程事件详情片段注入 prompt。
+- `runtime_context.memory` 的披露协议改为明确说明 impression/event 只提供 id、标题、摘要和读取入口，过程事件也不注入 `detailSnippet`。
+- 右侧结构化记忆视图对历史已保存的过程事件快照做展示过滤，不显示旧的 `detail`、`detailSnippet` 或 `metadataJson` 字段；原始日志模式仍保留真实历史 payload 供调试。
+- 更新主计划、memory 模型、hook 生命周期、上下文契约、文档索引、框架概念文档和 Web UI 概念文案，统一“过程事件详情按需读取”的规则。
+- 增加测试，确认相关过程事件仍可被召回，但投影中不包含 `detailSnippet` 或原始 detail。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+- 浏览器验证通过：刷新 `http://localhost:4173/` 后，当前对话页可加载，上下文结构化视图中没有可见 `detailSnippet`。
+
+Git：
+- `9043f3f` 移除过程事件记忆详情注入。
+
 ## 2026-06-01 06:02 +08:00
 
 目的：

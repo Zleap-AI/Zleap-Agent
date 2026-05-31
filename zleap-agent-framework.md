@@ -183,7 +183,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 - **最近原始对话**：保留最近 20 条最详细的本地对话片段，用来维持当前任务连续性。
 - **Impression**：不做 query 选择性召回，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 是对人和 agent 自我的稳定印象，天然有上限，不应该像事件日志一样无限增长。
 - **Result Event**：载入当前 user + workspace 下最新有效的约 50 条结果事件，作为较早任务的结果时间线。
-- **Process Event**：只用 SQLite FTS / 未来向量检索召回与当前任务相关的少量过程事件。无关过程不进入上下文，避免浪费注意力。
+- **Process Event**：只用 SQLite FTS / 未来向量检索召回与当前任务相关的少量过程事件索引/摘要投影。无关过程不进入上下文，相关过程也不直接注入 detail；需要过程细节时由模型调用 `readMemory(memoryId)`。
 - **Skill**：按当前 workspace 召回近 N 条高质量、已脱敏、可复用经验的名称和简介。完整经验不自动进上下文，只有当 agent 判断某条简介与当前任务高度相关时，才通过 `readSkill` 主动读取详情。
 
 因此，`runtime_context.memory` 不是原始 memory 表的 dump，而是一个分区投影：
@@ -418,7 +418,7 @@ Zleap 把上下文窗口当成预算，而不是仓库。
 - Workspace 说明必须准确，避免重复字段。
 - Tools 单独展示和预算，便于确认模型到底看到了哪些 function call。
 - Impression memory 固定注入最新有效 20 条投影视图，不做 query 选择性召回。
-- Event memory 分两层注入：约 50 条 result event 保留旧结果时间线，少量 process event 通过 FTS / 未来向量按当前任务相关性召回。
+- Event memory 分两层注入：约 50 条 result event 保留旧结果时间线，少量 process event 通过 FTS / 未来向量按当前任务相关性召回，但只注入 id/title/summary/readMemory 等投影，不注入 detail/detailSnippet。
 - Memory 注入使用 compact projection，不回灌完整原始对话、完整 `metadataJson`、完整 evidence 数组或长 detail。
 - Skill memory 数量要少，优先高置信度和高相关度。
 - Tool result 长输出必须摘要；原始证据保留在日志、artifact 或 workspace session。

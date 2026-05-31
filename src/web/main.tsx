@@ -915,8 +915,8 @@ function ConceptIntroTab() {
           </article>
           <article>
             <strong>事件投影</strong>
-            <span>50 条结果 + 相关过程</span>
-            <p>结果事件提供旧任务时间线；过程事件只按当前任务相关性召回少量片段，并只注入摘要投影。</p>
+            <span>50 条结果 + 相关过程索引</span>
+            <p>结果事件提供旧任务时间线；过程事件只按当前任务相关性召回少量索引和摘要投影，完整细节按 id 用 readMemory 读取。</p>
           </article>
           <article>
             <strong>稳定印象</strong>
@@ -2070,7 +2070,7 @@ function MemoryContextView({ memory }: { memory: Record<string, unknown> }) {
     {
       key: "currentWorkspaceRelevantProcessEvents",
       title: "当前工作空间相关过程事件记忆",
-      note: "只召回与当前任务相关的过程片段，避免把无关旧过程塞进窗口。",
+      note: "只召回与当前任务相关的过程事件索引和摘要；完整过程细节需要通过 readMemory 按 id 读取。",
       empty: "本次没有召回相关过程事件。"
     },
     {
@@ -2085,7 +2085,7 @@ function MemoryContextView({ memory }: { memory: Record<string, unknown> }) {
     <div className="memory-context-view">
       {sections.map((section) => {
         const value = memory[section.key];
-        const rows = Array.isArray(value) ? value : [];
+        const rows = sanitizeMemoryContextRows(section.key, Array.isArray(value) ? value : []);
         const isSkillSection = section.key === "currentWorkspaceSkillMemory";
         return (
           <details className="memory-context-section" key={section.key} open>
@@ -2104,6 +2104,18 @@ function MemoryContextView({ memory }: { memory: Record<string, unknown> }) {
       })}
     </div>
   );
+}
+
+function sanitizeMemoryContextRows(sectionKey: string, rows: unknown[]): unknown[] {
+  if (sectionKey !== "currentWorkspaceRelevantProcessEvents") return rows;
+  return rows.map((row) => {
+    if (!isJsonRecord(row)) return row;
+    const { detail, detailSnippet, metadataJson, ...projection } = row;
+    void detail;
+    void detailSnippet;
+    void metadataJson;
+    return projection;
+  });
 }
 
 function SkillDisclosureList({ skills }: { skills: unknown[] }) {

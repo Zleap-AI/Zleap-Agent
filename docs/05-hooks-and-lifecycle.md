@@ -119,7 +119,7 @@ load:
 
 这里召回的记忆分区会成为该工作空间下一次 LLM 调用的权威 `WorkspaceSession.localContext`。后续 prompt assembly 必须复用这份已持久化的 local context，而不是用另一个 query 再做一次独立召回；这样 trace/debug UI 和 final LLM messages 才能保持一致。
 
-召回使用长对话投影策略：最新 20 条 impression projection 不做 query 筛选直接载入；result events 提供更早的结果时间线；process events 按当前任务相关性搜索；skill memory 保持 workspace-scoped，并且只注入最近的标题/简介/索引投影。完整 skill detail/procedure 只有在 agent 判断某条 skill 高度相关时，才通过 `readSkill` 读取。`final_messages` 只是用于检查的原始 provider-payload log，不能成为 hook 或后续 prompt assembly 的输入。
+召回使用长对话投影策略：最新 20 条 impression projection 不做 query 筛选直接载入；result events 提供更早的结果时间线；process events 按当前任务相关性搜索，但只注入 id/title/summary/readMemory 等索引投影，不注入 `detail` 或 `detailSnippet`。skill memory 保持 workspace-scoped，并且只注入最近的标题/简介/索引投影。完整 process detail 必须通过 `readMemory(memoryId)` 读取，完整 skill detail/procedure 只有在 agent 判断某条 skill 高度相关时，才通过 `readSkill` 读取。`final_messages` 只是用于检查的原始 provider-payload log，不能成为 hook 或后续 prompt assembly 的输入。
 
 ## afterWorkspaceEnter
 
