@@ -942,6 +942,7 @@ export class Repositories {
         },
         memoryPolicy: defaultMemoryPolicy,
         parentContextSummary: "",
+        handoffContext: [],
         recalledImpressions: [],
         recalledEventMemories: [],
         recalledSkillMemories: [],

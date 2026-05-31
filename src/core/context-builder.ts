@@ -128,6 +128,7 @@ function runtimeSystemContract(input: {
     `- 当前工作空间：${input.workspace.id}`,
     "- 只使用当前工作空间暴露的 function call 工具；代码会强制决定 active workspace、可见工具、memory scope、approval、tenant ownership 和持久化边界。",
     "- 不要向用户暴露 runtime、workspace、context stack、memory injection、tool orchestration 等内部机制；需要工具时直接 function call。",
+    "- 面向用户的回答必须使用用户当前消息的主要语言；用户用中文就用中文，用户用英文就用英文。除非用户明确要求翻译或指定语言，不要中英混杂或随意切换语言。",
     `- ${workspaceRule}`,
     "",
     "记忆写入协议：",
@@ -158,8 +159,8 @@ function workspaceDecisionContract(input: {
       `- 你当前在子 workspace：${input.workspace.id}。子 workspace 是一个专门能力环境，只能使用当前暴露的工具和当前局部上下文。`,
       "- 子 workspace 也会看到可用 workspace manifest 清单；这是一份跨 workspace 共享的环境记忆/能力地图，类似一个人使用某个软件时也知道还有别的软件存在。",
       "- 这份能力地图只用于判断是否需要其他能力；子 workspace 不能直接进入其他 workspace，也不会暴露 enterWorkspace。",
-      "- 子 workspace 自己决定何时退出：任务完成、失败、阻塞、需要用户信息、需要审批、或发现当前工具无法继续满足目标时，都应调用 exitWorkspace。",
-      "- 如果需要另一个 workspace 的工具，不要在子 workspace 里直接切换；用 exitWorkspace 把已完成内容、困难、缺失能力和建议下一步交给 main，由 main 决定是否进入其他 workspace。"
+    "- 子 workspace 自己决定何时退出：任务完成、失败、阻塞、需要用户信息、需要审批、或发现当前工具无法继续满足目标时，都应调用 exitWorkspace。",
+    "- 如果需要另一个 workspace 的工具，不要在子 workspace 里直接切换；用 exitWorkspace 把已完成内容、困难、缺失能力和建议下一步交给 main，由 main 决定是否进入其他 workspace。"
     ];
 
   return [
@@ -167,6 +168,8 @@ function workspaceDecisionContract(input: {
     "- workspace 是内部能力边界，不是面向用户解释的概念。用户只看到一条连续任务线；不要在最终答复里解释 workspace、runtime、context stack 或 tool orchestration。",
     "- 每次 user message 保持干净。系统/人格/策略/工作空间说明在 system message；记忆和本地对话由 runtime 作为工具结果注入。",
     "- 选择 workspace 的核心标准是能力匹配：当前工具能解决就继续；当前工具不足、目标属于其他专业能力、或需要组合多个能力时，回到 main 重新编排。",
+    "- runtime 会在 workspace 切换时自动注入有限的 handoffContext：进入子 workspace 时携带 main 的相关近期上下文；返回 main 时只携带子 workspace 的结果上下文、最后助手结论和关键工具结果，不携带工具调用参数或冗长中间过程。模型不要自己伪造这些交叉上下文，也不要在最终答复里解释它。",
+    "- 像软件之间交付产物一样对待 handoffContext：不需要复述子 workspace 的完整操作过程，但必须忠于子 workspace 交付的 WorkspaceResult、最终结论和关键工具结果。不要把这些结果再随意压缩、改写或遗漏关键事实。",
     ...roleRule,
     "- exitWorkspace 的输出必须是 WorkspaceResult：status、summary、artifacts、observations、errors、suggestedNextSteps。",
     "- status 用 completed、failed、blocked、needs_user_input 或 needs_approval。不要返回 running。",
@@ -264,6 +267,7 @@ export class ContextBuilder {
           messages: input.history,
           currentTask: input.activeSession.task,
           completedWorkspaceResults,
+          handoffContext: input.activeSession.localContext.handoffContext ?? [],
           recentToolEvidence: input.activeSession.localContext.recentToolCalls
         }, null, 2),
         sortOrder: 40
@@ -367,6 +371,7 @@ export class PromptAssembler {
           messages: [],
           currentTask: {},
           completedWorkspaceResults: [],
+          handoffContext: [],
           recentToolEvidence: []
         }), null, 2)
       },

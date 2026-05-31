@@ -33,11 +33,11 @@ Provider messages must keep the same boundary. The system message contains only 
 
 ## 2026-05-30 更新：子 workspace 上下文交付契约
 
-子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`。
+子 workspace 不是把内部上下文整包交还给 main workspace 的分支 agent。进入子 workspace 后，active context 应围绕 `WorkspaceTask`、workspace manifest、当前 workspace 工具、局部 memory 和局部 tool evidence 重建；退出时模型只通过 `exitWorkspace` 交付结构化 `WorkspaceResult`，runtime 再自动附加有上限的结果型 `handoffContext`。
 
-main workspace 可以看到的返回内容是 `status`、`summary`、`artifacts`、`observations`、`errors` 和 `suggestedNextSteps`。这些字段用于继续编排、决定是否进入下一个 workspace、向用户提问，或生成最终答复。
+main workspace 可以看到的返回内容包括完整 `WorkspaceResult`：`status`、`summary`、`artifacts`、`observations`、`errors`、`suggestedNextSteps`，以及 runtime 生成的结果上下文尾巴：最后助手结论和关键工具结果。这些字段用于继续编排、决定是否进入下一个 workspace、向用户提问，或生成最终答复。main 必须忠于这些结果上下文，不能随意再做一层删减导致事实损耗。
 
-子 workspace 内部保留的内容包括原始工具输出、完整 tool call 参数和结果、召回的 event/skill、局部 scratch/evidence、审计日志和 memory 提取证据。这些内容进入 trace/debug UI，而不是默认进入 main workspace 的 prompt。这样 main workspace 得到的是可决策的交付物，不会被子 workspace 的全部执行噪声污染。
+子 workspace 内部保留的内容包括完整 tool call 参数、冗长中间过程、召回的 event/skill、局部 scratch/evidence、审计日志和 memory 提取证据。这些内容进入 trace/debug UI，而不是默认进入 main workspace 的 prompt。这样 main workspace 得到的是可决策的交付物和必要结果上下文，不会被子 workspace 的全部执行噪声污染。
 
 完整 workspace registry 是跨 workspace 共享的能力地图。main 和子 workspace 都可以知道有哪些 sibling workspace 存在；区别是只有 main 拥有 `enterWorkspace` 调度权。子 workspace 如果判断需要其他 workspace，应该把这个判断写进 `suggestedNextSteps`，由 main workspace 决定下一次切换。
 
@@ -62,6 +62,8 @@ Main workspace has two terminal orchestration tools: `askUser` and `finishTask`.
 The active `WorkspaceSession.localContext` remains the authoritative persisted runtime snapshot for a workspace LLM call, but it is not exposed as a top-level prompt category. After `WorkspaceRuntime` recalls impressions/events/skills for a session, `ContextBuilder` and `PromptAssembler` must inject those exact partitions into the `memory` segment and the synthetic `runtime_context.memory` tool result. Runtime must not perform a second independent recall during prompt assembly, because that would make the persisted session trace differ from what the model actually saw.
 
 Runtime memory tools use the same code-bound context contract. Event and skill writes receive active workspace scope from runtime. `readSkill` also receives active workspace scope from runtime and accepts only `skillId`, so it can reveal full details only for the current workspace's shared skill. Impression writes receive user/agent scope from runtime and stay cross-workspace, but still persist origin workspace/session/task evidence when available. Skill and impression trace metadata can include `activeWorkspaceId`, `workspaceSessionId`, `taskId`, `workspaceSessionIds`, and `taskIds`; these fields are trace/debug evidence, not model-controlled arguments.
+
+Final user-facing language is also a system contract: the assistant should answer in the primary language of the user's current message unless the user explicitly asks for translation or a different language. This prevents accidental Chinese/English switching when internal prompts, tool names, or runtime context contain mixed-language text.
 
 ## 为什么需要契约
 

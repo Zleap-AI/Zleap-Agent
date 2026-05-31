@@ -2,6 +2,29 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 08:52 +08:00
+
+Purpose:
+- Reduce information loss during workspace switching by adding runtime-controlled result handoff context, and stabilize user-facing reply language.
+
+Changed:
+- Added `WorkspaceHandoffContext` to workspace local context.
+- When entering a child workspace, runtime now carries only the current user request, workspace-entry result, and bounded parent result evidence instead of unrelated global history.
+- When returning to main, runtime now carries the full child `WorkspaceResult`, the child workspace's final assistant context, and key tool results; tool-call parameters and long intermediate process logs stay in trace/debug storage.
+- Updated the hidden runtime prompt so main must treat child handoff results as authoritative and must not casually re-summarize away or omit key facts.
+- Added a system-level language rule: user-facing replies follow the user's current message language unless the user asks for translation or another language.
+- Updated the master plan and context/workspace docs with the software handoff model: transfer the finished result, not the full editing history.
+- Added tests proving handoff context exists in child/main transitions while excluding `tool_call` process items, and tests for the language rule in the system prompt.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web UI server at `http://localhost:4173/`; `/api/health` returned `{ "ok": true }`.
+
+Git:
+- Recorded by the Git commit titled `feat: add workspace handoff context`.
+
 ## 2026-05-31 08:27 +08:00
 
 Purpose:

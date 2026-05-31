@@ -199,10 +199,29 @@ export type WorkspaceResult = {
   suggestedNextSteps: string[];
 };
 
+export type WorkspaceHandoffContext = {
+  id: string;
+  direction: "parent_to_child" | "child_to_parent";
+  fromWorkspaceId: string;
+  toWorkspaceId: string;
+  reason: string;
+  createdAt: string;
+  items: Array<{
+    kind: "message" | "tool_call" | "tool_result" | "workspace_result" | "tool_evidence";
+    role?: string;
+    title: string;
+    content: string;
+    workspaceId?: string;
+    llmCallId?: string;
+    toolName?: string;
+  }>;
+};
+
 export type WorkspaceLocalContext = {
   workspaceManifest: WorkspaceManifest;
   memoryPolicy: WorkspaceMemoryPolicy;
   parentContextSummary: string;
+  handoffContext: WorkspaceHandoffContext[];
   recalledImpressions: MemoryRow[];
   recalledEventMemories: MemoryRow[];
   recalledSkillMemories: MemoryRow[];

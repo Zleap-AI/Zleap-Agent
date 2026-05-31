@@ -146,6 +146,7 @@ export class WorkspaceRuntime {
       workspaceManifest: workspace.manifest,
       memoryPolicy: workspace.memoryPolicy,
       parentContextSummary: task.parentContextSummary,
+      handoffContext: [],
       recalledImpressions,
       recalledEventMemories,
       recalledSkillMemories,

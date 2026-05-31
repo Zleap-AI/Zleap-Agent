@@ -99,17 +99,20 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 2. **构造 WorkspaceTask**：包含 `objective`、`constraints`、`expectedOutput`、`parentContextSummary`。
 3. **进入子 Workspace**：runtime 创建 workspace session，召回 memory，恢复同 workspace 的本地记录，绑定当前 workspace 工具。
 4. **执行 Workspace 任务**：模型在当前 workspace 的上下文里循环调用允许的工具。
-5. **退出 Workspace**：子 workspace 调用 `exitWorkspace`，返回结构化 `WorkspaceResult`。
+5. **退出 Workspace**：子 workspace 调用 `exitWorkspace`，返回结构化 `WorkspaceResult`；runtime 同时生成有限的结果型 handoffContext。
 6. **Hook 提取记忆**：runtime 根据 workspace session、工具证据和结果提取 event，并谨慎生成 skill。
 7. **Main Workspace 整合结果**：决定继续进入其他 workspace、询问用户，或生成最终答复。
 
 ### 3.3 Workspace 输入输出契约
 
-子 workspace 不是把内部上下文整包交还给 main。
+子 workspace 不是把内部上下文整包交还给 main，但也不能只交一条摘要导致信息损失。交叉上下文由 runtime 程序化控制。
 
 - **输入**：用户请求或 main 转移过来的结构化 `WorkspaceTask`。
 - **输出**：结构化 `WorkspaceResult`，字段为 `status`、`summary`、`artifacts`、`observations`、`errors`、`suggestedNextSteps`。
-- **隔离**：子 workspace 的原始工具输出、完整 tool call 参数、召回的 event/skill、局部证据保留在 trace/debug UI、tool_calls、audit_logs、workspace_sessions 中，不直接污染 main context。
+- **进入 handoff**：runtime 自动带一小段 main/用户近期上下文进入子 workspace。
+- **返回 handoff**：runtime 自动把完整 `WorkspaceResult`、子 workspace 最后助手结论和关键工具结果带回 main。类比软件工程中的产物交付：在 Photoshop 完成图片后放进 PPT，需要的是完整结果图片和必要导出信息，而不是 P 图历史。
+- **忠于结果**：main 整合时必须把子 workspace 的 `WorkspaceResult` 和结果上下文当成权威证据，不能再随意删减、改写或遗漏关键事实。
+- **隔离**：完整 tool call 参数、冗长中间过程、召回的 event/skill、局部证据保留在 trace/debug UI、tool_calls、audit_logs、workspace_sessions 中，不直接污染 main context。
 
 ---
 

@@ -1569,6 +1569,9 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("writeEventMemory"), false);
   assert.equal(systemMessage.includes("writeAgentSelfImpression"), true);
   assert.equal(systemMessage.includes("不要把用户偏好或用户身份写进 agent self impression"), true);
+  assert.equal(systemMessage.includes("用户用中文就用中文"), true);
+  assert.equal(systemMessage.includes("不要中英混杂或随意切换语言"), true);
+  assert.equal(systemMessage.includes("必须忠于子 workspace 交付的 WorkspaceResult"), true);
   assert.equal(systemMessage.includes("workspace 是内部能力边界"), true);
   assert.equal(systemMessage.includes("enterWorkspace"), true);
   assert.equal(systemMessage.includes("exitWorkspace"), true);
@@ -1933,6 +1936,16 @@ async function testWorkspaceExitReturnsToMain() {
   });
 
   assert.equal(fake.calls, 3);
+  const childLocalMessage = fake.inputs[1]?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
+  const childLocalPayload = JSON.parse(childLocalMessage?.content ?? "{}") as { handoffContext?: Array<{ direction: string; items: Array<{ kind: string; content: string }> }> };
+  assert.equal(childLocalPayload.handoffContext?.some((packet) => packet.direction === "parent_to_child"), true);
+  assert.equal(JSON.stringify(childLocalPayload.handoffContext).includes("inspect file evidence then answer"), true);
+  assert.equal(JSON.stringify(childLocalPayload.handoffContext).includes("\"kind\":\"tool_call\""), false);
+  const returnedMainLocalMessage = fake.inputs[2]?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
+  const returnedMainPayload = JSON.parse(returnedMainLocalMessage?.content ?? "{}") as { handoffContext?: Array<{ direction: string; items: Array<{ kind: string; title: string; content: string }> }> };
+  assert.equal(returnedMainPayload.handoffContext?.some((packet) => packet.direction === "child_to_parent"), true);
+  assert.equal(JSON.stringify(returnedMainPayload.handoffContext).includes("File workspace inspected available evidence"), true);
+  assert.equal(JSON.stringify(returnedMainPayload.handoffContext).includes("\"kind\":\"tool_call\""), false);
   assert.equal(output.assistantMessage, "main integrated file result");
   assert.equal(output.activeWorkspaceId, "main");
   assert.equal(output.workspaceTrace.length, 2);

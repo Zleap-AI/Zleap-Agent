@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRunInput, AgentRunOutput, AgentRunPrepared, AgentStreamEvent, ContextSegment, LLMCallSnapshot, LLMMessage, MemoryRow, WorkspaceResult, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunInput, AgentRunOutput, AgentRunPrepared, AgentStreamEvent, ContextSegment, LLMCallSnapshot, LLMMessage, MemoryRow, WorkspaceHandoffContext, WorkspaceResult, WorkspaceSession } from "../types";
 import { Repositories } from "../db/repositories";
 import { ContextBuilder, PromptAssembler } from "./context-builder";
 import { AttentionBudgetManager, estimateTokens } from "./attention-budget";
@@ -91,6 +91,11 @@ function summarizeToolResultItemForChat(message: LLMMessage, maxLength = 220): s
   const normalized = text.replace(/\s+/g, " ").trim();
   const summary = normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
   return summary ? `${name}: ${summary}` : name;
+}
+
+function truncateHandoffContent(value: string, maxLength = 1200): string {
+  const normalized = value.trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
 }
 
 function parseJsonValue<T>(value: string, fallback: T): T {
@@ -798,6 +803,128 @@ export class AgentRuntime {
     return localMessages.slice(-20);
   }
 
+  private createParentToChildHandoff(input: AgentRunInput, prepared: AgentRunPrepared, session: WorkspaceSession, toolMessages: LLMMessage[]): WorkspaceHandoffContext {
+    const parentSession = this.findActiveWorkspaceSession(prepared);
+    const recentMessages = [{
+      kind: "message" as const,
+      role: "user",
+      title: "当前用户请求",
+      content: truncateHandoffContent(input.message, 900),
+      workspaceId: prepared.activeWorkspaceId
+    }];
+    const toolResultItems = toolMessages
+      .filter((message) => message.name === "enterWorkspace")
+      .map((message) => ({
+        kind: "tool_result" as const,
+        role: "tool",
+        title: "进入工作空间结果",
+        content: truncateHandoffContent(message.content ?? "", 1200),
+        workspaceId: prepared.activeWorkspaceId,
+        toolName: message.name
+      }));
+    const parentEvidence = parentSession?.localContext.recentToolCalls.slice(0, 4).map((toolCall) => ({
+      kind: "tool_evidence" as const,
+      title: `父工作空间工具结果 ${toolCall.toolName}`,
+      content: truncateHandoffContent(JSON.stringify({
+        result: parseJsonValue(toolCall.resultJson, toolCall.resultJson),
+        status: toolCall.status
+      }), 1200),
+      workspaceId: parentSession.workspaceId,
+      toolName: toolCall.toolName
+    })) ?? [];
+    return {
+      id: createId("handoff"),
+      direction: "parent_to_child",
+      fromWorkspaceId: prepared.activeWorkspaceId,
+      toWorkspaceId: session.workspaceId,
+      reason: "workspace_enter",
+      createdAt: nowIso(),
+      items: [...recentMessages, ...toolResultItems, ...parentEvidence].slice(-14)
+    };
+  }
+
+  private createChildToMainHandoff(input: AgentRunInput, session: WorkspaceSession, toolMessages: LLMMessage[]): WorkspaceHandoffContext {
+    const tailItems = this.selectWorkspaceRawTail(input.conversationId, session.workspaceId, input.userId, input.userRole, 10);
+    const resultItem = {
+      kind: "workspace_result" as const,
+      title: `${session.workspaceId} WorkspaceResult`,
+      content: JSON.stringify(session.result, null, 2),
+      workspaceId: session.workspaceId
+    };
+    const exitToolResultItems = toolMessages
+      .filter((message) => message.name === "exitWorkspace")
+      .map((message) => ({
+        kind: "tool_result" as const,
+        role: "tool",
+        title: "退出工作空间结果",
+        content: truncateHandoffContent(message.content ?? "", 1200),
+        workspaceId: session.workspaceId,
+        toolName: message.name
+      }));
+    const toolEvidence = session.localContext.recentToolCalls.slice(0, 8).map((toolCall) => ({
+      kind: "tool_evidence" as const,
+      title: `子工作空间工具结果 ${toolCall.toolName}`,
+      content: truncateHandoffContent(JSON.stringify({
+        result: parseJsonValue(toolCall.resultJson, toolCall.resultJson),
+        status: toolCall.status
+      }), 1600),
+      workspaceId: session.workspaceId,
+      toolName: toolCall.toolName
+    }));
+    return {
+      id: createId("handoff"),
+      direction: "child_to_parent",
+      fromWorkspaceId: session.workspaceId,
+      toWorkspaceId: "main",
+      reason: "workspace_exit",
+      createdAt: nowIso(),
+      items: [resultItem, ...tailItems, ...exitToolResultItems, ...toolEvidence].slice(-14)
+    };
+  }
+
+  private selectWorkspaceRawTail(conversationId: string, workspaceId: string, userId: string, userRole: AgentRunInput["userRole"], limit: number): WorkspaceHandoffContext["items"] {
+    const trace = this.repos.getTrace(conversationId, userId, userRole);
+    const workspaceCallIds = new Set(
+      trace.contextSegments
+        .filter((segment) => segment.segmentType === "workspace")
+        .filter((segment) => {
+          const payload = parseJsonValue<{ currentWorkspace?: { id?: string } }>(segment.content, {});
+          return payload.currentWorkspace?.id === workspaceId;
+        })
+        .map((segment) => segment.llmCallId)
+    );
+    const items: WorkspaceHandoffContext["items"] = [];
+    for (const segment of trace.contextSegments.filter((item) => item.segmentType === "final_messages" && workspaceCallIds.has(item.llmCallId))) {
+      const messages = parseJsonValue<LLMMessage[]>(segment.content, []);
+      for (const message of messages) {
+        if (message.role === "system") continue;
+        if (message.name?.startsWith("runtime_context.")) continue;
+        if (message.role === "assistant" && message.content?.trim()) {
+          items.push({
+            kind: "message",
+            role: "assistant",
+            title: `${workspaceId} 助手上下文`,
+            content: truncateHandoffContent(message.content, 1200),
+            workspaceId,
+            llmCallId: segment.llmCallId
+          });
+        }
+        if (message.role === "tool" && message.name && !message.name.startsWith("runtime_context.")) {
+          items.push({
+            kind: "tool_result",
+            role: "tool",
+            title: `${workspaceId} 工具结果 ${message.name}`,
+            content: truncateHandoffContent(message.content ?? "", 1600),
+            workspaceId,
+            llmCallId: segment.llmCallId,
+            toolName: message.name
+          });
+        }
+      }
+    }
+    return items.slice(-limit);
+  }
+
   private async executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): Promise<{ toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string }> {
     const memoryWrites: MemoryRow[] = [];
     const toolMessages: LLMMessage[] = [];
@@ -1020,6 +1147,14 @@ export class AgentRuntime {
     const agent = this.repos.getAgent(input.agentId);
     const llmCallId = createId("llm");
     const workspaceTrace = [...prepared.workspaceTrace, session];
+    const handoffContext = this.createParentToChildHandoff(input, prepared, session, toolMessages);
+    session.localContext.handoffContext = [
+      handoffContext,
+      ...(session.localContext.handoffContext ?? [])
+    ].slice(0, 6);
+    session.task.parentContextSummary = `从 ${handoffContext.fromWorkspaceId} 进入 ${handoffContext.toWorkspaceId}，runtime 已携带 ${handoffContext.items.length} 条父级结果/近期上下文。`;
+    session.localContext.parentContextSummary = session.task.parentContextSummary;
+    this.repos.updateWorkspaceSessionLocalContext(session);
     const context = this.buildLlmContext({
       input,
       agent,
@@ -1061,6 +1196,12 @@ export class AgentRuntime {
     if (!mainSession) return undefined;
     const agent = this.repos.getAgent(input.agentId);
     const llmCallId = createId("llm");
+    const handoffContext = this.createChildToMainHandoff(input, session, toolMessages);
+    mainSession.localContext.handoffContext = [
+      handoffContext,
+      ...(mainSession.localContext.handoffContext ?? [])
+    ].slice(0, 8);
+    this.repos.updateWorkspaceSessionLocalContext(mainSession);
     const context = this.buildLlmContext({
       input,
       agent,

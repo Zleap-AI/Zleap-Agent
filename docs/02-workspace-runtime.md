@@ -48,7 +48,7 @@ type WorkspaceResult = {
 };
 ```
 
-交付给 main workspace 的内容应该是可编排的结果：状态、摘要、产物引用、关键观察、错误和下一步建议。子 workspace 的原始工具输出、召回的 event/skill、局部证据、recent tool calls、调试细节和后续 event/skill 提取证据，应保留在 `WorkspaceSession`、`tool_calls`、`audit_logs` 和 memory metadata 中供 Web UI 检查，而不是全部塞回 main workspace。
+交付给 main workspace 的核心内容是可编排的结果：状态、摘要、产物引用、关键观察、错误和下一步建议。但只交摘要会造成信息损失，所以 runtime 会额外生成有上限的 `handoffContext`：返回 main 时带上完整 `WorkspaceResult`、子 workspace 最后的助手结论和关键工具结果。完整工具调用参数、冗长中间过程、召回的 event/skill、局部证据、recent tool calls、调试细节和后续 event/skill 提取证据，应保留在 `WorkspaceSession`、`tool_calls`、`audit_logs` 和 memory metadata 中供 Web UI 检查，而不是全部塞回 main workspace。main 整合时必须忠于这个结果上下文，不应二次删减掉关键事实。
 
 `running` 是 runtime 内部 session 状态，不是可交付的 `WorkspaceResult.status`。如果模型试图用 `running` 退出，runtime 必须拒绝该 tool call，并保持子 workspace 仍处于 active/running 状态。
 
