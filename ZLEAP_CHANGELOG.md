@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 05:26 +08:00
+
+目的：
+- 为普通记忆增加 `readMemory` 渐进读取机制，避免召回和搜索阶段直接塞入完整详情，同时让 Agent 在用户主动要求回忆或摘要不足时能够按 id 读取具体记忆详情。
+
+变更：
+- 新增 runtime memory tool `readMemory(memoryId)`，只读取当前 runtime scope 可见的记忆详情，并拒绝模型传入 `userId`、`workspaceId`、`memoryType` 等 scope 字段。
+- `searchMemory` 改为返回紧凑投影，只包含 id、标题、摘要、片段、类型、更新时间和读取工具提示，不再默认返回完整 `detail`。
+- 自动召回的普通 memory 投影增加 `readTool: "readMemory"`，让上下文窗口和模型都能看到下一步读取详情的入口。
+- 更新系统提示词：当用户主动要求回忆、摘要不足以回答、或需要核对某条 impression/event 详情时，应调用 `readMemory(memoryId)`，不要凭摘要脑补。
+- 更新 Web UI 概念介绍和核心文档，把普通 memory 与 skill 的渐进式披露逻辑统一起来。
+- 增加工具 schema、工作空间工具绑定、scope 隔离、搜索紧凑投影和详情读取的测试覆盖。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 本工作会话中待记录。
+
 ## 2026-06-01 05:16 +08:00
 
 目的：

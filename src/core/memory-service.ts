@@ -627,6 +627,39 @@ export class MemoryService {
       detail: textArg("detail")
     };
 
+    if (input.toolName === "readMemory") {
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId", "relationId", "version", "memoryType"]);
+      if (scopeError) return { ok: false, result: { error: scopeError } };
+      const memoryId = textArg("memoryId") || textArg("id");
+      if (!memoryId) return { ok: false, result: { error: "memoryId is required." } };
+      let memory: MemoryRow;
+      try {
+        memory = this.repos.getMemory(memoryId);
+      } catch (error) {
+        return { ok: false, result: { error: error instanceof Error ? error.message : String(error) } };
+      }
+      const activeWorkspaceDecision = this.canUseMemoryRecordInActiveWorkspace(memory, input.activeWorkspaceId);
+      if (!activeWorkspaceDecision.allowed) {
+        return { ok: false, result: { error: activeWorkspaceDecision.reason ?? "Memory is outside the active workspace." } };
+      }
+      if (!this.canReadMemoryRecord(input.run.userId, memory)) {
+        return { ok: false, result: { error: "Memory is not visible to the current runtime scope." } };
+      }
+      const metadata = this.parseMetadata(memory.metadataJson);
+      this.repos.audit(input.run.userId, input.run.userRole, "memory_tool_read_memory", "memory", memory.id, {
+        conversationId: input.run.conversationId,
+        workspaceId: memory.workspaceId,
+        activeWorkspaceId: input.activeWorkspaceId,
+        memoryType: memory.memoryType
+      });
+      return {
+        ok: true,
+        result: {
+          memory: this.projectMemoryReadResult(memory, metadata)
+        }
+      };
+    }
+
     if (input.toolName === "readSkill") {
       const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId", "relationId", "version"]);
       if (scopeError) return { ok: false, result: { error: scopeError } };
@@ -689,7 +722,7 @@ export class MemoryService {
       return {
         ok: true,
         result: {
-          memories
+          memories: memories.map((memory) => this.projectMemorySearchResult(memory))
         }
       };
     }
@@ -1424,6 +1457,87 @@ export class MemoryService {
       allowed: false,
       reason: `Workspace memory tools can only manage event/skill records in the active workspace (${activeWorkspaceId}).`
     };
+  }
+
+  private projectMemoryReadResult(memory: MemoryRow, metadata: Record<string, unknown>): Record<string, unknown> {
+    const base = {
+      id: memory.id,
+      memoryType: memory.memoryType,
+      title: memory.title,
+      summary: memory.summary,
+      detail: memory.detail,
+      relationId: memory.relationId,
+      version: memory.version,
+      userId: memory.userId,
+      agentId: memory.agentId,
+      workspaceId: memory.workspaceId,
+      createdAt: memory.createdAt,
+      updatedAt: memory.updatedAt
+    };
+    if (memory.memoryType === "event") {
+      return {
+        ...base,
+        eventKind: typeof metadata.eventKind === "string" ? metadata.eventKind : undefined,
+        outcome: metadata.outcome,
+        source: metadata.source,
+        conversationId: metadata.conversationId
+      };
+    }
+    if (memory.memoryType === "skill") {
+      return {
+        ...base,
+        disclosure: "detail",
+        procedure: Array.isArray(metadata.procedure) ? metadata.procedure : [],
+        appliesWhen: Array.isArray(metadata.appliesWhen) ? metadata.appliesWhen : [],
+        avoidWhen: Array.isArray(metadata.avoidWhen) ? metadata.avoidWhen : [],
+        confidence: metadata.confidence
+      };
+    }
+    if (memory.memoryType === "impression") {
+      return {
+        ...base,
+        scope: memory.userId ? "user" : "agent",
+        impressionKind: metadata.impressionKind
+      };
+    }
+    return base;
+  }
+
+  private projectMemorySearchResult(memory: MemoryRow): Record<string, unknown> {
+    const metadata = this.parseMetadata(memory.metadataJson);
+    const base = {
+      id: memory.id,
+      memoryType: memory.memoryType,
+      title: memory.title,
+      summary: memory.summary,
+      relationId: memory.relationId,
+      version: memory.version,
+      workspaceId: memory.workspaceId,
+      updatedAt: memory.updatedAt,
+      readTool: memory.memoryType === "skill" ? "readSkill" : "readMemory"
+    };
+    if (memory.memoryType === "event") {
+      return {
+        ...base,
+        eventKind: typeof metadata.eventKind === "string" ? metadata.eventKind : undefined,
+        outcome: metadata.outcome,
+        detailSnippet: compactText(memory.detail, 360)
+      };
+    }
+    if (memory.memoryType === "skill") {
+      return {
+        ...base,
+        disclosure: "summary_only",
+        confidence: metadata.confidence
+      };
+    }
+    if (memory.memoryType === "impression") {
+      return {
+        ...base,
+        scope: memory.userId ? "user" : "agent"
+      };
+    }
+    return base;
   }
 
   private memoryManageDecision(input: { run: AgentRunInput; memory: MemoryRow; action: "update" | "delete" }): PolicyDecision {

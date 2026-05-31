@@ -435,6 +435,8 @@ const SYSTEM_TOOL_NAMES = new Set([
   "askUser",
   "finishTask",
   "searchMemory",
+  "readMemory",
+  "readSkill",
   "writeUserImpression",
   "writeAgentSelfImpression",
   "writeSkillMemory"
@@ -873,7 +875,7 @@ function ConceptIntroTab() {
           <article>
             <strong>Event</strong>
             <span>记事情过程和结果</span>
-            <p>由 runtime hook 自动提取；结果事件保留旧结果时间线，过程事件只按当前任务相关性少量召回。</p>
+            <p>由 runtime hook 自动提取；结果事件保留旧结果时间线，过程事件只按当前任务相关性少量召回，完整详情按需用 readMemory 读取。</p>
           </article>
           <article>
             <strong>Skill</strong>
@@ -918,8 +920,8 @@ function ConceptIntroTab() {
           </article>
           <article>
             <strong>稳定印象</strong>
-            <span>固定最新 20 条</span>
-            <p>Impression 不按 query 筛选；它是对人和 agent 自我的稳定认知，天然有上限。</p>
+            <span>固定最新 20 条 + readMemory</span>
+            <p>Impression 不按 query 筛选；默认只注入紧凑投影。用户主动要求回忆或摘要不足时，再按 id 读取完整详情。</p>
           </article>
           <article>
             <strong>经验披露</strong>

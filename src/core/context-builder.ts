@@ -53,6 +53,7 @@ function projectMemoryBase(memory: MemoryRow): Record<string, unknown> {
     id: memory.id,
     title: memory.title,
     summary: memory.summary,
+    readTool: "readMemory",
     relationId: memory.relationId,
     version: memory.version,
     updatedAt: memory.updatedAt
@@ -139,6 +140,7 @@ function runtimeSystemContract(input: {
     "- 事件记忆由 runtime 生命周期 hook 按会话窗口、工作空间退出等程序化时机自动提取；模型没有事件记忆写入工具。",
     "- searchMemory 是低频补查工具，不是每轮默认动作。runtime 每轮已经自动召回印象、当前工作空间结果事件、相关过程事件和 Skill 简介；只有自动上下文明显不足、用户明确问“你还记得/之前说过/以前做过什么”、需要核对不在当前上下文里的旧事件/偏好/经验，或当前任务明确依赖旧记忆证据时，才调用 searchMemory。",
     "- 不要为了确认当前上下文里已经出现的信息而调用 searchMemory；不要把 searchMemory 当作普通搜索、workspace 发现、工具发现或每轮安全检查；不要连续用多个泛泛 query 试探记忆库。调用时必须使用具体 query，并优先用 memoryType 限定 impression/event/skill。",
+    "- Memory 也采用渐进式披露：上下文和 searchMemory 结果通常只适合先看 id/title/summary/snippet。若用户主动要求回忆、你需要依据某条 impression/event 的具体内容回答、或摘要不足以确认事实，应调用 readMemory(memoryId) 读取该条记忆的完整 detail；不要凭摘要脑补。",
     "- Skill 采用渐进式披露：上下文里只会看到当前工作空间最近的 skill 名称和简介。如果某条 skill 简介与当前任务高度相关、能减少失败或能指导工具使用，先调用 readSkill 读取完整 procedure/appliesWhen/avoidWhen/detail，再应用该经验。",
     "- 当用户或 agent 明确要求沉淀可复用经验，或你发现了已经脱敏、可复用且能减少未来失败的方法时，可以调用 writeSkillMemory；skill 必须属于当前工作空间，并包含 procedure、appliesWhen、avoidWhen、desensitized=true 和 confidence。",
     "- Skill 不是普通总结。只有可迁移的方法、失败后找到的稳定规避方式、经过验证的工具流程、或能降低同类任务失败率的经验才值得写入。不要写“认真检查”“合理使用工具”“保持上下文”这类空泛内容。",

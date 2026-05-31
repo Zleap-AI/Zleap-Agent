@@ -143,7 +143,8 @@ Agent
   - 只负责浏览器操作、页面检查、截图、交互相关工具和经验
 
 记忆工具
-  - 记忆不是独立 workspace；记忆检索、写入、整理、归档工具挂在每个 workspace 内
+  - 记忆不是独立 workspace；记忆检索、详情读取和写入工具挂在每个 workspace 内
+  - 默认上下文只注入紧凑投影；需要某条普通记忆详情时用 readMemory(memoryId) 渐进读取
   - 每个 workspace 只能通过自己的记忆工具操作当前 workspace 的 event/skill 记忆
   - 跨 workspace 的记忆调试和维护属于 Web UI/API 的策略层能力，不属于模型普通 tool use
 ```

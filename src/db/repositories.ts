@@ -81,6 +81,8 @@ const defaultMemoryPolicy: WorkspaceMemoryPolicy = {
 
 const builtInMemoryToolIds = [
   "tool-search-memory",
+  "tool-read-memory",
+  "tool-read-skill",
   "tool-write-user-impression",
   "tool-write-agent-self-impression",
   "tool-write-skill-memory"

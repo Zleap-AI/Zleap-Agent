@@ -160,6 +160,7 @@ interface MemoryService {
   writeEvent(input: WriteEventInput): Promise<EventMemory>;
 
   recallSkillSummaries(input: SkillSummaryRecallInput): Promise<SkillSummaryProjection[]>;
+  readMemory(memoryId: string, runtimeScope: RuntimeMemoryScope): Promise<MemoryDetailProjection>;
   readSkill(skillId: string, activeWorkspaceId: string): Promise<SkillMemory>;
   writeSkill(input: WriteSkillInput): Promise<SkillMemory>;
 }

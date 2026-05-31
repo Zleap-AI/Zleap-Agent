@@ -1761,6 +1761,8 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("自动上下文明显不足"), true);
   assert.equal(systemMessage.includes("不要把 searchMemory 当作普通搜索"), true);
   assert.equal(systemMessage.includes("优先用 memoryType 限定"), true);
+  assert.equal(systemMessage.includes("readMemory(memoryId)"), true);
+  assert.equal(systemMessage.includes("不要凭摘要脑补"), true);
   assert.equal(systemMessage.includes("渐进式披露"), true);
   assert.equal(systemMessage.includes("生命周期 hook"), true);
   assert.equal(systemMessage.includes("writeEventMemory"), false);
@@ -1790,6 +1792,7 @@ async function testRuntimeContextAndTools() {
   assert.equal(lastInput?.tools.some((tool) => tool.name === "searchFiles"), false);
   assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
   assert.equal(lastInput?.tools.some((tool) => tool.name === "writeUserImpression"), true);
+  assert.equal(lastInput?.tools.some((tool) => tool.name === "readMemory"), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "final_messages"), true);
   const firstWorkspaceToolMessage = firstInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
@@ -1808,6 +1811,7 @@ async function testRuntimeContextAndTools() {
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "history" && segment.content.includes("\"suggestedNextSteps\"")), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Search style")), true);
+  assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("\"readTool\": \"readMemory\"")), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledEventMemories.some((memory) => memory.title === "Runtime file search event"), true);
   assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.local_conversation"), true);
   const childLocalConversationToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
@@ -4097,6 +4101,14 @@ async function testSearchMemoryToolUsesPolicyLayer() {
     summary: "Policy search alpha event",
     detail: "Visible to the owning user."
   }, "creator", "creator");
+  const ownImpression = repos.createMemory({
+    memoryType: "impression",
+    userId: "search-user",
+    title: "Search own impression",
+    summary: "Policy search alpha impression",
+    detail: "The user has a stable identity detail that should only be loaded through readMemory.",
+    metadataJson: JSON.stringify({ impressionKind: "userImpression" })
+  }, "creator", "creator");
   const otherEvent = repos.createMemory({
     memoryType: "event",
     userId: "other-search-user",
@@ -4157,9 +4169,28 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   assert.equal(userResult.ok, true);
   const userMemories = (userResult.result as { memories: MemoryRow[] }).memories;
   assert.equal(userMemories.some((memory) => memory.id === ownEvent.id), true);
+  assert.equal(userMemories.some((memory) => memory.id === ownImpression.id), true);
   assert.equal(userMemories.some((memory) => memory.id === sharedSkill.id), true);
   assert.equal(userMemories.some((memory) => memory.id === otherEvent.id), false);
   assert.equal(userMemories.some((memory) => memory.id === agentSelf.id), false);
+  assert.equal(JSON.stringify(userMemories).includes("stable identity detail"), false);
+  assert.equal(JSON.stringify(userMemories).includes("readMemory"), true);
+
+  const readMemoryResult = service.executeMemoryTool({
+    run: {
+      agentId: "default-agent",
+      userId: "search-user",
+      userRole: "user",
+      conversationId: "conv-search-memory-user",
+      message: "read memory"
+    },
+    activeWorkspaceId: "dev",
+    toolName: "readMemory",
+    argumentsJson: JSON.stringify({ memoryId: ownImpression.id })
+  });
+  assert.equal(readMemoryResult.ok, true);
+  assert.equal((readMemoryResult.result as { memory: { detail: string; memoryType: string } }).memory.memoryType, "impression");
+  assert.equal((readMemoryResult.result as { memory: { detail: string } }).memory.detail.includes("stable identity detail"), true);
 
   const readSkillResult = service.executeMemoryTool({
     run: {
@@ -4206,6 +4237,21 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   });
   assert.equal(scopedRead.ok, false);
   assert.equal(JSON.stringify(scopedRead.result).includes("code-bound"), true);
+
+  const siblingMemoryRead = service.executeMemoryTool({
+    run: {
+      agentId: "default-agent",
+      userId: "search-user",
+      userRole: "user",
+      conversationId: "conv-search-memory-user",
+      message: "read sibling memory"
+    },
+    activeWorkspaceId: "dev",
+    toolName: "readMemory",
+    argumentsJson: JSON.stringify({ memoryId: siblingSkill.id })
+  });
+  assert.equal(siblingMemoryRead.ok, false);
+  assert.equal(JSON.stringify(siblingMemoryRead.result).includes("active workspace"), true);
 
   const userTargetingOther = service.executeMemoryTool({
     run: {
@@ -4272,6 +4318,7 @@ async function testToolBindingsAndMcpReadiness() {
   const writeUserImpression = repos.listTools().find((tool) => tool.name === "writeUserImpression");
   const writeSkillMemory = repos.listTools().find((tool) => tool.name === "writeSkillMemory");
   const searchMemory = repos.listTools().find((tool) => tool.name === "searchMemory");
+  const readMemory = repos.listTools().find((tool) => tool.name === "readMemory");
   const readSkill = repos.listTools().find((tool) => tool.name === "readSkill");
   assert.equal(searchFiles?.bindingType, "runtime");
   assert.equal(searchFiles?.mcpServerId, null);
@@ -4285,6 +4332,8 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(searchMemory?.bindingType, "runtime");
   assert.equal(searchMemory?.description.includes("低频补查记忆"), true);
   assert.equal(searchMemory?.description.includes("自动召回不足"), true);
+  assert.equal(readMemory?.bindingType, "runtime");
+  assert.equal(readMemory?.description.includes("完整详情"), true);
   assert.equal(readSkill?.bindingType, "runtime");
   assert.equal(repos.listTools().some((tool) => tool.name === "writeEventMemory"), false);
   assert.equal(repos.listTools().some((tool) => tool.name === "updateMemory"), false);
@@ -4302,6 +4351,11 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(Boolean(searchMemorySchema.properties?.userId), false);
   assert.equal(Boolean(searchMemorySchema.properties?.agentId), false);
   assert.equal(Boolean(searchMemorySchema.properties?.workspaceId), false);
+  const readMemorySchema = JSON.parse(readMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  assert.equal(readMemorySchema.required?.includes("memoryId"), true);
+  assert.equal(Boolean(readMemorySchema.properties?.workspaceId), false);
+  assert.equal(Boolean(readMemorySchema.properties?.userId), false);
+  assert.equal(Boolean(readMemorySchema.properties?.memoryType), false);
   const readSkillSchema = JSON.parse(readSkill?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
   assert.equal(readSkillSchema.required?.includes("skillId"), true);
   assert.equal(Boolean(readSkillSchema.properties?.workspaceId), false);
@@ -4871,7 +4925,7 @@ async function testWorkspaceBoundary() {
   const repos = createRepos();
   const mainTools = repos.listToolsForWorkspace("main").map((tool) => tool.name);
   const devTools = repos.listToolsForWorkspace("dev").map((tool) => tool.name);
-  const memoryTools = ["searchMemory", "readSkill", "writeUserImpression", "writeAgentSelfImpression", "writeSkillMemory"];
+  const memoryTools = ["searchMemory", "readMemory", "readSkill", "writeUserImpression", "writeAgentSelfImpression", "writeSkillMemory"];
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "memory"), false);
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "file" || workspace.id === "cli"), false);
   assert.equal(["askUser", "enterWorkspace", "finishTask"].every((tool) => mainTools.includes(tool)), true);
