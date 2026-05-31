@@ -181,18 +181,21 @@ export function seedDefaults(db: Database.Database): void {
   `);
 
   insertWorkspace.run("main", "主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。", "只使用编排工具。", "low", now, now);
-  insertWorkspace.run("file", "文件工作空间", "搜索和检查项目文件。", "只处理文件相关任务，不执行命令。", "通过已注册的文件工具搜索和读取文件状态。", "medium", now, now);
-  insertWorkspace.run("cli", "命令行工作空间", "运行经过允许的命令行任务。", "只处理命令行任务。高风险命令需要 creator 批准。", "只通过已注册的 CLI 工具运行命令。", "high", now, now);
+  insertWorkspace.run("dev", "开发工作空间", "统一处理项目文件搜索、代码检查和命令行执行。", "处理需要本地项目上下文的任务，可以搜索文件、检查代码，并在必要时运行命令。高风险命令仍由工具级审批控制。", "优先用 searchFiles 定位证据，再用 runCommand 执行最小必要命令；把结果、错误和下一步建议结构化返回 main。", "medium", now, now);
 
   const updateWorkspace = db.prepare(`
     UPDATE workspaces SET name = ?, description = ?, instructions = ?, toolInstructions = ?, updatedAt = ?
     WHERE id = ?
   `);
   updateWorkspace.run("主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。", "只使用编排工具。", now, "main");
-  updateWorkspace.run("文件工作空间", "搜索和检查项目文件。", "只处理文件相关任务，不执行命令。", "通过已注册的文件工具搜索和读取文件状态。", now, "file");
-  updateWorkspace.run("命令行工作空间", "运行经过允许的命令行任务。", "只处理命令行任务。高风险命令需要 creator 批准。", "只通过已注册的 CLI 工具运行命令。", now, "cli");
+  updateWorkspace.run("开发工作空间", "统一处理项目文件搜索、代码检查和命令行执行。", "处理需要本地项目上下文的任务，可以搜索文件、检查代码，并在必要时运行命令。高风险命令仍由工具级审批控制。", "优先用 searchFiles 定位证据，再用 runCommand 执行最小必要命令；把结果、错误和下一步建议结构化返回 main。", now, "dev");
   db.prepare("DELETE FROM workspace_tools WHERE workspaceId = 'memory'").run();
   db.prepare("DELETE FROM workspaces WHERE id = 'memory'").run();
+  db.prepare("UPDATE memories SET workspaceId = 'dev', updatedAt = ? WHERE workspaceId IN ('file', 'cli')").run(now);
+  db.prepare("UPDATE approval_requests SET workspaceId = 'dev' WHERE workspaceId IN ('file', 'cli')").run();
+  db.prepare("UPDATE mcp_servers SET workspaceId = 'dev', updatedAt = ? WHERE workspaceId IN ('file', 'cli')").run(now);
+  db.prepare("DELETE FROM workspace_tools WHERE workspaceId IN ('file', 'cli')").run();
+  db.prepare("DELETE FROM workspaces WHERE id IN ('file', 'cli')").run();
 
   const defaultMemoryPolicy = {
     eventRecallEnabled: true,
@@ -222,22 +225,13 @@ export function seedDefaults(db: Database.Database): void {
     "main"
   );
   updateWorkspaceManifest.run(
-    JSON.stringify(["文件搜索", "代码阅读", "文档检查"]),
-    JSON.stringify(["search_query", "file_path", "workspace_task"]),
-    JSON.stringify(["file_matches", "file_summary", "workspace_result"]),
+    JSON.stringify(["文件搜索", "代码阅读", "命令执行", "终端诊断", "测试运行"]),
+    JSON.stringify(["user_request", "workspace_task"]),
+    JSON.stringify(["file_matches", "command_output", "exit_status", "workspace_result"]),
     0,
     JSON.stringify(defaultMemoryPolicy),
     now,
-    "file"
-  );
-  updateWorkspaceManifest.run(
-    JSON.stringify(["命令执行", "终端诊断", "测试运行"]),
-    JSON.stringify(["command", "workspace_task"]),
-    JSON.stringify(["command_output", "exit_status", "workspace_result"]),
-    1,
-    JSON.stringify(defaultMemoryPolicy),
-    now,
-    "cli"
+    "dev"
   );
 
   const insertTool = db.prepare(`
@@ -298,15 +292,14 @@ export function seedDefaults(db: Database.Database): void {
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeSkillMemory" }), null, null, now, "tool-write-skill-memory");
 
   db.prepare("UPDATE tool_definitions SET workspaceId = NULL WHERE bindingType = 'runtime'").run();
-  db.prepare("UPDATE tool_definitions SET workspaceId = 'file' WHERE id = 'tool-search-files'").run();
-  db.prepare("UPDATE tool_definitions SET workspaceId = 'cli' WHERE id = 'tool-run-command'").run();
+  db.prepare("UPDATE tool_definitions SET workspaceId = 'dev' WHERE id IN ('tool-search-files', 'tool-run-command')").run();
 
   const link = db.prepare("INSERT OR IGNORE INTO workspace_tools (workspaceId, toolId, createdAt) VALUES (?, ?, ?)");
   link.run("main", "tool-enter-workspace", now);
   link.run("main", "tool-ask-user", now);
   link.run("main", "tool-finish-task", now);
-  link.run("file", "tool-search-files", now);
-  link.run("cli", "tool-run-command", now);
+  link.run("dev", "tool-search-files", now);
+  link.run("dev", "tool-run-command", now);
   const memoryToolIds = [
     "tool-search-memory",
     "tool-read-skill",

@@ -2,6 +2,30 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 20:13 +08:00
+
+Purpose:
+- Merge the default File and CLI workspaces into one unified development workspace.
+
+Changed:
+- Replaced the default `file` and `cli` built-in workspaces with `dev` / 开发工作空间.
+- Mounted both built-in runtime tools, `searchFiles` and `runCommand`, into `dev`.
+- Updated runtime tool guards so both tools execute only inside `dev`.
+- Updated workspace selection hints, UI built-in workspace protection, and concept guide workspace map.
+- Seed now migrates legacy `file`/`cli` memory, approval, MCP server, workspace-tool, and workspace records toward `dev` so existing local databases stop showing separate default File/CLI workspaces.
+- Updated master plan and docs so prompts/concepts describe `main + dev + MCP extensions`, not `main/file/cli`.
+- Updated tests for the new default workspace boundary: main cannot call dev tools directly, while dev can use both file search and command execution.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
+- Verified `/api/workspaces` now shows built-in `dev` and `main`, with `dev` exposing both `searchFiles` and `runCommand`.
+
+Git:
+- Pending.
+
 ## 2026-05-31 19:56 +08:00
 
 Purpose:

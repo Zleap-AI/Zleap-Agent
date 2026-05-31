@@ -253,6 +253,11 @@ function skillSeedFromEventBatch(workspaceId: string, input: {
     ? `在 ${workspaceLabel} 遇到类似失败/重试场景时，优先复用已经验证过的替代路径，并把失败信号、替代操作和最终结果结构化记录。`
     : `在 ${workspaceLabel} 处理类似任务时，只复用已经由事件证据验证过的具体工具流程。`;
   const workspaceAdvice: Record<string, string[]> = {
+    dev: [
+      "先用 searchFiles 定位相关文件、脚本或配置证据，避免盲目运行命令。",
+      hasFailureRecovery ? "如果一种文件/命令路径失败，不要重复同一路径；改用已验证的替代方式，并记录失败信号、替代操作和最终结果。" : "运行命令前确认目标、风险级别和最小可执行命令；执行后记录退出状态、关键输出和错误摘要。",
+      "把文件证据、命令结果、失败原因和成功路径结构化返回给 main workspace。"
+    ],
     cli: [
       "先确认命令目标、风险级别和最小可执行命令。",
       hasFailureRecovery ? "如果一种命令写入/执行方式失败，不要重复同一路径；改用已验证的替代方式，例如用脚本 API 明确写入内容和编码。" : "执行命令后记录退出状态、关键输出和错误摘要。",

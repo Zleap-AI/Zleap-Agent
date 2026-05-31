@@ -39,7 +39,7 @@
 - Runtime:
   - `AgentRuntime` receives `userId`, `conversationId`, and `message`, then drives main workspace orchestration.
   - A `conversationId` is owned by exactly one `userId + agentId` pair. Runtime/repository entry must reject attempts to reuse an existing conversation id with a different user or agent, so history, context snapshots, workspace sessions, and event extraction cannot cross tenants.
-  - `WorkspaceRuntime` executes real capability workspaces such as `main`, `file`, and `cli`; memory is not a standalone workspace.
+  - `WorkspaceRuntime` executes real capability workspaces such as `main` and the unified `dev` workspace; memory is not a standalone workspace.
   - Every workspace entry creates a structured `WorkspaceTask`, `WorkspaceLocalContext`, and initial running `WorkspaceResult`; all are persisted on `workspace_sessions` and exposed in trace/debug UI.
   - Main workspace direct natural-language final answers must also commit the main `WorkspaceSession` from `running` to `completed` with an inspectable `WorkspaceResult` and audit event. A main session must not appear completed before the LLM has produced a terminal tool result or final user-facing response.
   - `WorkspaceLocalContext` captures the active workspace manifest, memory policy, parent context summary, recalled impression/event/skill partitions, available tool binding metadata, and recent tool calls produced inside the current workspace session.
@@ -81,7 +81,7 @@
   - Runtime must enforce the active workspace memory policy during recall and writes: impressions remain cross-workspace context, user impressions are scoped to the current user, agent self impressions are scoped to the current agent, event/skill memory can be disabled independently, skill recall is capped by `maxSkillMemories`, and `eventWriteEnabled`/`skillWriteEnabled` block runtime or tool-requested writes.
   - Automatic prompt recall uses fixed layered defaults for long conversations: load up to 20 latest effective impression memories without query selection, load up to 50 latest active-workspace result events as an older outcome timeline, and load up to 8 active-workspace process events through SQLite FTS against the current task/query. This keeps recent raw local conversation detailed while older conversation history becomes compact event memory.
   - The boundary between model freedom and code authority is explicit: the model may choose whether to answer, ask, call an exposed tool, enter an exposed workspace, or request a memory write; code decides identity scope, active workspace scope, callable tool set, memory policy, approval policy, tenant ownership, and persistence/audit behavior.
-  - Built-in foundational capabilities do not need MCP indirection. The default `file` workspace exposes `searchFiles` through an internal runtime executor, and the default `cli` workspace exposes `runCommand` through an internal runtime executor. MCP remains the extension mechanism for external or user-provided tools.
+  - Built-in foundational capabilities do not need MCP indirection. The default `dev` workspace exposes both `searchFiles` and `runCommand` through internal runtime executors, because file inspection and command execution are frequently used together and should behave like one development software surface. MCP remains the extension mechanism for external or user-provided tools.
   - Memory/context recall is performed by runtime and injected as a synthetic tool result.
   - Every automatic memory recall attempt must be audited as `memory_recall_requested`, even when it returns zero rows. The audit metadata must include the active conversation/workspace/task, query text, recall algorithm, vector-enabled flag, per-partition limits, raw hit counts, injected partition counts, and injected memory ids so the Logs tab can prove whether recall happened.
   - The first recall algorithm is SQLite FTS plus relation/version latest-row filtering. Vector recall is explicitly disabled for now (`vectorEnabled: false`) until a future design update changes the memory strategy.
@@ -127,7 +127,7 @@
   - Main-scoped orchestration tools are code-enforced, not only prompt-guided. A child workspace cannot ask the user directly, finish the user response directly, or jump to a sibling workspace; it can only return a structured `WorkspaceResult` to main.
   - Successful `askUser` and `finishTask` calls are terminal main-workspace outcomes for the current turn: runtime commits a main `WorkspaceResult`, records `main_workspace_result_committed`, persists the tool call, and returns the tool-provided question/final response directly without making a follow-up LLM call to restate the result.
   - Runtime memory tools are policy-gated function-call tools in every workspace, so each workspace can search allowed memory and request impression/skill writes without gaining access to unrelated child capability tools.
-  - Runtime memory tools are active-workspace scoped for event/skill records: when a model is inside `file`, it cannot search `cli` event/skill memory or write `cli` skills. Cross-workspace debug maintenance belongs to the direct Memory Web UI/API policy layer, not ordinary model tool use.
+  - Runtime memory tools are active-workspace scoped for event/skill records: when a model is inside `dev`, it can search and write only `dev` event/skill memory, not sibling MCP workspace memory. Cross-workspace debug maintenance belongs to the direct Memory Web UI/API policy layer, not ordinary model tool use.
   - Runtime memory tool scope is code-bound. Function-call schemas must not expose `userId`, `agentId`, or `workspaceId` as model-controlled scope fields; runtime injects current user/agent identity and active workspace from execution state. If the model hallucinates those scope fields in memory tool arguments, runtime rejects the call instead of treating them as assertions.
   - Impression write tools follow the same rule: `writeUserImpression` receives `userId` only from the current run, `writeAgentSelfImpression` receives `agentId` only from the current agent, and either tool must reject hallucinated `userId`, `agentId`, or `workspaceId` arguments.
   - Runtime policy prompts must include an explicit memory-write/read protocol: use `writeUserImpression` only for stable user preferences/background/identity/constraints, use `readSkill` before applying a highly relevant summarized skill, use `writeSkillMemory` only for user/agent-triggered reusable desensitized methods or concrete failure-reduction lessons, do not write event memory directly because lifecycle hooks own event extraction, and require creator authorization for `writeAgentSelfImpression`.
@@ -266,7 +266,7 @@
   - After `exitWorkspace`, follow-up LLM calls return to `main`, hide child workspace tools again, and expose the returned `WorkspaceResult` for integration.
   - Duplicate `exitWorkspace` calls cannot overwrite an already committed child `WorkspaceResult`; only the first valid exit for a running session is accepted.
   - A child workspace direct natural-language response without `exitWorkspace` is forced back into the tool loop as an internal `workspace_exit_required` event and is not accepted as final output.
-  - `file` cannot call `cli` tools.
+  - `main` cannot call `dev` tools directly; `dev` exposes both `searchFiles` and `runCommand` after `main` enters it.
   - Workspace sessions persist structured task/local-context/result JSON.
   - Tool call logs preserve `workspaceSessionId + taskId`, and `afterToolCall` audit events include the saved tool call id plus the same session/task evidence.
   - Tool call logs preserve `userId + workspaceSessionId + taskId`; mismatched tool log user ids are rejected before persistence.
@@ -274,7 +274,7 @@
   - Workspace registry context exposes full manifests with capabilities/inputKinds/outputKinds/requiresApproval, not only names and descriptions.
   - Skill memory is workspace-scoped and user-shared.
   - Agent self impression requires creator role.
-  - High-risk file/CLI tools require creator approval.
+  - High-risk tools such as `runCommand` require creator approval even when the containing `dev` workspace itself is enterable.
   - High-risk or approval-required workspace entry requires creator approval before a child `WorkspaceSession` is created.
   - High-risk policy denials create pending approval requests that can be resolved through the HTTP API and inspected in conversation trace.
   - Approval request listing is tenant-scoped: ordinary users cannot inspect another user's pending tool/workspace arguments.
@@ -376,7 +376,7 @@
   - Chat right panel can inspect follow-up LLM context stacks created after tool execution, including the exact callable tools exposed to that LLM request and the exact tool result messages returned into the model loop. The raw `final_messages` provider payload is available only when the context inspector is switched into raw provider-log mode.
   - Browser refresh restores cached settings, API key, messages, and latest context stack.
   - Workspace creation/editing manages one workspace explanation, manifest capabilities, approval flag, risk level, and memory policy JSON. It must not ask users to configure redundant input/output types, duplicate description/instructions fields, or workspace-level tool usage instructions. A saved workspace id is an immutable stable primary key in the UI; editing the ID field is only allowed before a new workspace is saved, so changing a saved workspace's identity cannot accidentally create a second workspace.
-  - Workspace UI supports deleting non-built-in workspaces through the existing creator-gated delete API. Built-in `main/file/cli` workspaces cannot be deleted from the UI.
+  - Workspace UI supports deleting non-built-in workspaces through the existing creator-gated delete API. Built-in `main` and `dev` workspaces cannot be deleted from the UI.
   - Workspace tool UI is workspace-first: after selecting or creating a workspace, the user registers tools into that workspace.
   - Workspace tool UI supports MCP Server registration/editing/deletion, local stdio and remote Streamable HTTP configuration, discovery from the selected server, choosing discovered tools to mount, and deleting mounted tools. Manual JSON binding editing is advanced/debug-only and must not be the normal MCP setup path.
   - Workspace UI must not auto-expand an empty MCP Server registration form when the selected workspace has no MCP Server. The empty state should stay compact until the user chooses to add a server.
@@ -404,7 +404,7 @@
   - Tests may use a fake provider only for protocol verification.
 - MCP:
   - The runtime uses the official `@modelcontextprotocol/sdk` TypeScript SDK.
-  - MCP is for external/user-provided tool expansion, not a requirement for core local capabilities such as file search or CLI execution.
+  - MCP is for external/user-provided tool expansion, not a requirement for core local `dev` capabilities such as file search or command execution.
   - MCP Server definitions are stored per workspace, not globally and not primarily per tool.
   - Local MCP Servers use `StdioClientTransport` with `{ command, args, env, cwd }`.
   - Remote MCP Servers use `StreamableHTTPClientTransport` with `{ url, headers }`.
@@ -417,5 +417,5 @@
 - Major implementation decisions must update `ZLEAP_MASTER_PLAN.md` before or alongside code.
 - React + Vite + TypeScript is the Web UI stack.
 - Web UI and terminal CLI share the same headless TypeScript core.
-- First version includes `main/file/cli` workspaces, not Browser workspace and not a standalone Memory workspace.
+- First version includes `main` and unified `dev` workspaces, not separate File/CLI workspaces, not Browser workspace, and not a standalone Memory workspace.
 - First product version does not provide mock LLM mode; only tests may fake provider.

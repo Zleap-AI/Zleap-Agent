@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import Database from "better-sqlite3";
@@ -70,16 +70,16 @@ class MainToFileLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "search files for runtime" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "search files for runtime" })
             }
           }]
         },
-        raw: { plannedWorkspace: "file" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     if (this.calls === 2) {
       assert.equal(input.tools.some((tool) => tool.name === "searchFiles"), true);
-      assert.equal(input.tools.some((tool) => tool.name === "runCommand"), false);
+      assert.equal(input.tools.some((tool) => tool.name === "runCommand"), true);
       assert.equal(input.messages.some((message) => message.role === "tool" && message.name === "enterWorkspace"), true);
       return {
         message: {
@@ -112,7 +112,7 @@ class MainToFileLLMClient implements LLMClient {
             }
           }]
         },
-        raw: { returnedWorkspace: "file", afterDirectResponseGuard: true }
+        raw: { returnedWorkspace: "dev", afterDirectResponseGuard: true }
       };
     }
     assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
@@ -147,11 +147,11 @@ class MainToFileExitToMainLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "inspect file evidence" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "inspect file evidence" })
             }
           }]
         },
-        raw: { plannedWorkspace: "file" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     if (this.calls === 2) {
@@ -177,7 +177,7 @@ class MainToFileExitToMainLLMClient implements LLMClient {
             }
           }]
         },
-        raw: { returnedWorkspace: "file" }
+        raw: { returnedWorkspace: "dev" }
       };
     }
     assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
@@ -208,11 +208,11 @@ class MainToFileExitWithExtraToolLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "inspect file evidence with a batched exit" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "inspect file evidence with a batched exit" })
             }
           }]
         },
-        raw: { plannedWorkspace: "file" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     if (this.calls === 2) {
@@ -248,7 +248,7 @@ class MainToFileExitWithExtraToolLLMClient implements LLMClient {
             }
           ]
         },
-        raw: { returnedWorkspace: "file", sameBatchToolAfterExit: true }
+        raw: { returnedWorkspace: "dev", sameBatchToolAfterExit: true }
       };
     }
     return {
@@ -276,11 +276,11 @@ class MainToFileDoubleExitLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "inspect file evidence with duplicate exits" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "inspect file evidence with duplicate exits" })
             }
           }]
         },
-        raw: { plannedWorkspace: "file" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     if (this.calls === 2) {
@@ -349,7 +349,7 @@ class MainToFileMalformedExitLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "inspect file evidence" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "inspect file evidence" })
             }
           }]
         },
@@ -407,7 +407,7 @@ class TwoFileSessionsLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "first file session" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "first file session" })
             }
           }]
         },
@@ -448,7 +448,7 @@ class TwoFileSessionsLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "second file session" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "second file session" })
             }
           }]
         },
@@ -505,11 +505,11 @@ class MainToCliLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "cli", objective: "run command or test task" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "run command or test task" })
             }
           }]
         },
-        raw: { plannedWorkspace: "cli" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     assert.equal(input.tools.some((tool) => tool.name === "runCommand"), true);
@@ -544,11 +544,11 @@ class MainToCliToolRequestLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "cli", objective: "run CLI tool" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "run CLI tool" })
             }
           }]
         },
-        raw: { plannedWorkspace: "cli" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     if (this.calls === 2) {
@@ -684,11 +684,11 @@ class MainToCliRunCommandExitLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "cli", objective: "run reusable command workflow" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "run reusable command workflow" })
             }
           }]
         },
-        raw: { plannedWorkspace: "cli" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     if (this.calls === 2) {
@@ -761,11 +761,11 @@ class ChildMainOnlyToolAttemptLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "file", objective: "verify child orchestration boundary" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "verify child orchestration boundary" })
             }
           }]
         },
-        raw: { plannedWorkspace: "file" }
+        raw: { plannedWorkspace: "dev" }
       };
     }
     if (this.calls === 2) {
@@ -783,7 +783,7 @@ class ChildMainOnlyToolAttemptLLMClient implements LLMClient {
             type: "function",
             function: {
               name: "enterWorkspace",
-              arguments: JSON.stringify({ workspaceId: "cli", objective: "child should not jump to sibling" })
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "child should not jump to sibling" })
             }
           }]
         },
@@ -977,7 +977,7 @@ class StreamingWorkspaceVisibilityLLMClient implements LLMClient {
       yield {
         type: "tool_call_delta",
         index: 0,
-        arguments: JSON.stringify({ workspaceId: "file", objective: "inspect streamed workspace visibility" })
+        arguments: JSON.stringify({ workspaceId: "dev", objective: "inspect streamed workspace visibility" })
       };
       return;
     }
@@ -1273,7 +1273,7 @@ async function testDatabaseAndMemory() {
   const oldEvent = repos.createMemory({
     memoryType: "event",
     userId: "user-a",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "rel-test",
     version: 1,
     title: "Old file search",
@@ -1284,7 +1284,7 @@ async function testDatabaseAndMemory() {
   const latestEvent = repos.createMemory({
     memoryType: "event",
     userId: "user-a",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "rel-test",
     version: 2,
     title: "Latest file search",
@@ -1294,7 +1294,7 @@ async function testDatabaseAndMemory() {
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     title: "Search first",
     summary: "Use ripgrep before editing",
     detail: "Skill detail"
@@ -1302,14 +1302,14 @@ async function testDatabaseAndMemory() {
   for (let index = 0; index < 12; index += 1) {
     repos.createMemory({
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: `Noisy search skill ${index}`,
       summary: `Noisy ripgrep search skill ${index}`,
       detail: "These newer skills should not starve event recall."
     }, "creator", "creator");
   }
 
-  const recalled = repos.recallMemories({ userId: "user-a", workspaceId: "file", query: "ripgrep search" });
+  const recalled = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
   assert.equal(recalled.some((item) => item.title === "Latest file search"), true);
   assert.equal(recalled.some((item) => item.title === "Old file search"), false);
   assert.equal(recalled.some((item) => item.memoryType === "skill"), true);
@@ -1319,7 +1319,7 @@ async function testDatabaseAndMemory() {
   const collisionLatest = repos.createMemory({
     memoryType: "event",
     userId: "user-a",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "rel-collision",
     version: 2,
     title: "Scoped collision latest",
@@ -1330,7 +1330,7 @@ async function testDatabaseAndMemory() {
   const otherUserCollision = repos.createMemory({
     memoryType: "event",
     userId: "user-b",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "rel-collision",
     version: 99,
     title: "Other user same relation",
@@ -1341,7 +1341,7 @@ async function testDatabaseAndMemory() {
   const otherWorkspaceCollision = repos.createMemory({
     memoryType: "event",
     userId: "user-a",
-    workspaceId: "cli",
+    workspaceId: "other-workspace",
     relationId: "rel-collision",
     version: 100,
     title: "Other workspace same relation",
@@ -1351,29 +1351,29 @@ async function testDatabaseAndMemory() {
   }, "creator", "creator");
   const otherTypeCollision = repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "rel-collision",
     version: 101,
     title: "Other type same relation",
     summary: "Other memory type ripgrep search should not hide event relation.",
     detail: "Cross-type relation collision fixture."
   }, "creator", "creator");
-  const collidedRecall = repos.recallMemories({ userId: "user-a", workspaceId: "file", query: "ripgrep search" });
+  const collidedRecall = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
   assert.equal(collidedRecall.some((item) => item.id === collisionLatest.id), true);
   assert.equal(collidedRecall.some((item) => item.title === "Other user same relation"), false);
   assert.equal(collidedRecall.some((item) => item.title === "Other workspace same relation"), false);
   assert.equal(collidedRecall.some((item) => item.title === "Other type same relation"), true);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "file" })?.id, collisionLatest.id);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-b", workspaceId: "file" })?.id, otherUserCollision.id);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "cli" })?.id, otherWorkspaceCollision.id);
-  assert.equal(repos.getMemoryByRelation("skill", "rel-collision", { workspaceId: "file" })?.id, otherTypeCollision.id);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "missing-user", workspaceId: "file" }), undefined);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "dev" })?.id, collisionLatest.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-b", workspaceId: "dev" })?.id, otherUserCollision.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "other-workspace" })?.id, otherWorkspaceCollision.id);
+  assert.equal(repos.getMemoryByRelation("skill", "rel-collision", { workspaceId: "dev" })?.id, otherTypeCollision.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "missing-user", workspaceId: "dev" }), undefined);
 
   repos.deleteMemory(latestEvent.id, "creator", "creator", "superseded event cleanup");
-  const afterSoftDelete = repos.recallMemories({ userId: "user-a", workspaceId: "file", query: "ripgrep search" });
+  const afterSoftDelete = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
   assert.equal(afterSoftDelete.some((item) => item.id === latestEvent.id), false);
   assert.equal(afterSoftDelete.some((item) => item.id === oldEvent.id), true);
-  assert.equal(repos.listMemories({ memoryType: "event", userId: "user-a", workspaceId: "file" }).some((item) => item.id === latestEvent.id), false);
+  assert.equal(repos.listMemories({ memoryType: "event", userId: "user-a", workspaceId: "dev" }).some((item) => item.id === latestEvent.id), false);
   assert.throws(() => repos.getMemory(latestEvent.id));
   const deletedLatest = repos.getMemoryIncludingDeleted(latestEvent.id);
   assert.equal(Boolean(deletedLatest.deletedAt), true);
@@ -1393,7 +1393,7 @@ async function testDatabaseAndMemory() {
   }
   const fixedImpressions = repos.recallMemories({
     userId: "user-a",
-    workspaceId: "file",
+    workspaceId: "dev",
     query: "phrase that matches no impression",
     impressionLimit: 20,
     eventLimit: 0,
@@ -1499,7 +1499,7 @@ async function testTraceAndToolLogsAreUserScoped() {
   assert.throws(() => repos.createApprovalRequest({
     userId: "trace-intruder",
     conversationId: "conv-trace-owner",
-    workspaceId: "cli",
+    workspaceId: "dev",
     toolName: "runCommand",
     argumentsJson: JSON.stringify({ command: "npm test" }),
     reason: "mismatched approval request"
@@ -1572,7 +1572,7 @@ async function testApprovalListIsUserScoped() {
   const ownerA = repos.createApprovalRequest({
     userId: "approval-owner-a",
     conversationId: "conv-approval-owner-a",
-    workspaceId: "cli",
+    workspaceId: "dev",
     toolName: "runCommand",
     argumentsJson: JSON.stringify({ command: "npm test" }),
     reason: "owner a approval"
@@ -1580,7 +1580,7 @@ async function testApprovalListIsUserScoped() {
   const ownerB = repos.createApprovalRequest({
     userId: "approval-owner-b",
     conversationId: "conv-approval-owner-b",
-    workspaceId: "file",
+    workspaceId: "dev",
     toolName: "writeFile",
     argumentsJson: JSON.stringify({ path: "private.txt" }),
     reason: "owner b approval"
@@ -1627,7 +1627,7 @@ async function testRuntimeContextAndTools() {
   repos.createMemory({
     memoryType: "event",
     userId: "user",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "event:user:file:runtime-search",
     title: "Runtime file search event",
     summary: "Runtime search used file workspace",
@@ -1636,7 +1636,7 @@ async function testRuntimeContextAndTools() {
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "skill:file:runtime-search",
     title: "Runtime search skill",
     summary: "Search runtime files before editing",
@@ -1717,16 +1717,17 @@ async function testRuntimeContextAndTools() {
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "final_messages"), true);
   const firstWorkspaceToolMessage = firstInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
   assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"main\""), true);
-  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"file\""), true);
-  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), true);
+  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
+  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"file\""), false);
+  assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), false);
   const childWorkspaceToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
-  assert.equal(childWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), true);
+  assert.equal(childWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
   assert.equal(childInput?.tools.some((tool) => tool.name === "enterWorkspace"), false);
   const lastWorkspaceToolMessage = lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
-  assert.equal(lastWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), true);
+  assert.equal(lastWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
   assert.equal(childWorkspaceToolMessage?.content?.includes("memoryPolicy"), true);
   assert.equal(childWorkspaceToolMessage?.content?.includes("maxEventMemories"), true);
-  assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.local_conversation" && (message.content ?? "").includes("\"workspaceId\": \"file\"")), true);
+  assert.equal(childInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.local_conversation" && (message.content ?? "").includes("\"workspaceId\": \"dev\"")), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "history" && segment.content.includes("\"suggestedNextSteps\"")), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Search style")), true);
@@ -1747,11 +1748,11 @@ async function testRuntimeContextAndTools() {
   assert.equal(memoryPayload.currentWorkspaceRelevantProcessEvents.length, 0);
   assert.equal(memoryPayload.currentWorkspaceSkillMemory.length, 1);
   assert.equal(output.workspaceTrace.length, 2);
-  assert.equal(repos.getWorkspace("cli").manifest.requiresApproval, true);
-  assert.equal(repos.getWorkspace("file").manifest.capabilities.length > 0, true);
-  assert.equal(repos.getWorkspace("file").memoryPolicy.eventRecallEnabled, true);
-  assert.equal(output.workspaceTrace[1].task.workspaceId, "file");
-  assert.equal(output.workspaceTrace[1].result.workspaceId, "file");
+  assert.equal(repos.getWorkspace("dev").manifest.requiresApproval, false);
+  assert.equal(repos.getWorkspace("dev").manifest.capabilities.length > 0, true);
+  assert.equal(repos.getWorkspace("dev").memoryPolicy.eventRecallEnabled, true);
+  assert.equal(output.workspaceTrace[1].task.workspaceId, "dev");
+  assert.equal(output.workspaceTrace[1].result.workspaceId, "dev");
   assert.equal(output.workspaceTrace[1].result.suggestedNextSteps.length > 0, true);
   assert.equal(output.workspaceTrace[1].localContext.recalledEventMemories.some((memory) => memory.title === "Runtime file search event"), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
@@ -1763,12 +1764,12 @@ async function testRuntimeContextAndTools() {
   assert.equal(trace.auditLogs.some((log) => log.action === "main_workspace_direct_response_committed"), true);
   assert.equal(trace.llmCalls.length >= 4, true);
   assert.equal(trace.llmCalls.every((call) => call.status === "completed"), true);
-  assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"plannedWorkspace\":\"file\"")), true);
+  assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"plannedWorkspace\":\"dev\"")), true);
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"ok\":true")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tool_result" && segment.content.includes("enterWorkspace")), true);
-  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"file\"") && segment.content.includes("\"name\": \"searchFiles\"")), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"dev\"") && segment.content.includes("\"name\": \"searchFiles\"")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"main\"") && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
-  const fileSession = trace.sessions.find((session) => session.workspaceId === "file");
+  const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.task.objective, "search files for runtime");
   assert.equal(fileSession?.result.status, "completed");
   assert.equal(typeof fileSession?.completedAt, "string");
@@ -1788,7 +1789,7 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   repos.createMemory({
     memoryType: "event",
     userId: "session-recall-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "event:session-recall-user:file:objective-only",
     title: "Objective-only file event",
     summary: "inspect file evidence with objective-only recall",
@@ -1797,7 +1798,7 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "skill:file:objective-only",
     title: "Objective-only file skill",
     summary: "inspect file evidence before returning a workspace result",
@@ -1820,7 +1821,7 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
     }
   });
 
-  const fileSession = output.workspaceTrace.find((session) => session.workspaceId === "file");
+  const fileSession = output.workspaceTrace.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.localContext.recalledEventMemories.some((memory) => memory.title === "Objective-only file event"), true);
   assert.equal(fileSession?.localContext.recalledSkillMemories.some((memory) => memory.title === "Objective-only file skill"), true);
   const childInput = fake.inputs[1];
@@ -1832,7 +1833,7 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   assert.equal(JSON.stringify(childMemoryPayload.currentWorkspaceSkillMemory).includes("summary_only"), true);
   const trace = repos.getTrace("conv-session-context-recall", "creator", "creator");
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "memory" && segment.content.includes("Objective-only file event")), true);
-  const fileRecallLog = trace.auditLogs.find((log) => log.action === "memory_recall_requested" && log.workspaceId === "file");
+  const fileRecallLog = trace.auditLogs.find((log) => log.action === "memory_recall_requested" && log.workspaceId === "dev");
   assert.ok(fileRecallLog);
   const fileRecallMetadata = JSON.parse(fileRecallLog.metadataJson) as {
     algorithm: string;
@@ -2013,7 +2014,7 @@ async function testWorkspaceExitReturnsToMain() {
   const staleToolCall = repos.saveToolCall({
     conversationId: "conv-workspace-exit",
     userId: "workspace-exit-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     workspaceSessionId: "old-file-session",
     taskId: "old-file-task",
     toolName: "searchFiles",
@@ -2023,7 +2024,7 @@ async function testWorkspaceExitReturnsToMain() {
   });
   const recalledSkill = repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "skill:file:workspace-exit-usage",
     title: "Evidence inspection skill",
     summary: "When a file task asks to inspect evidence, search available files before returning a result.",
@@ -2074,10 +2075,10 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(output.assistantMessage, "main integrated file result");
   assert.equal(output.activeWorkspaceId, "main");
   assert.equal(output.workspaceTrace.length, 2);
-  assert.equal(output.memoryWrites.filter((memory) => memory.memoryType === "event" && memory.workspaceId === "file").length, 2);
-  const autoSkill = output.memoryWrites.find((memory) => memory.memoryType === "skill" && memory.workspaceId === "file");
+  assert.equal(output.memoryWrites.filter((memory) => memory.memoryType === "event" && memory.workspaceId === "dev").length, 2);
+  const autoSkill = output.memoryWrites.find((memory) => memory.memoryType === "skill" && memory.workspaceId === "dev");
   assert.equal(Boolean(autoSkill), false);
-  const fileSession = output.workspaceTrace.find((session) => session.workspaceId === "file");
+  const fileSession = output.workspaceTrace.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.result.summary, "File workspace inspected available evidence.");
   assert.equal(fileSession?.result.observations.includes("File workspace had searchFiles available."), true);
 
@@ -2087,14 +2088,14 @@ async function testWorkspaceExitReturnsToMain() {
   const exitToolCall = trace.toolCalls.find((call) => call.toolName === "exitWorkspace");
   assert.equal(exitToolCall?.workspaceSessionId, fileSession?.id);
   assert.equal(exitToolCall?.taskId, fileSession?.taskId);
-  assert.equal(trace.auditLogs.some((log) => log.action === "hook.beforeWorkspaceExit" && log.workspaceId === "file"), true);
-  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterWorkspaceExit" && log.workspaceId === "file"), true);
+  assert.equal(trace.auditLogs.some((log) => log.action === "hook.beforeWorkspaceExit" && log.workspaceId === "dev"), true);
+  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterWorkspaceExit" && log.workspaceId === "dev"), true);
   assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterToolCall" && log.resourceId === exitToolCall?.id && log.metadataJson.includes(fileSession!.taskId)), true);
-  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterWorkspaceExitEventExtraction" && log.workspaceId === "file"), true);
-  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterEventExtracted" && log.workspaceId === "file"), true);
-  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterSkillExtracted" && log.workspaceId === "file"), false);
+  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterWorkspaceExitEventExtraction" && log.workspaceId === "dev"), true);
+  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterEventExtracted" && log.workspaceId === "dev"), true);
+  assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterSkillExtracted" && log.workspaceId === "dev"), false);
   assert.equal(trace.auditLogs.some((log) => log.action === "workspace_returned_to_main"), true);
-  const exitEvents = repos.listMemories({ memoryType: "event", userId: "workspace-exit-user", workspaceId: "file" });
+  const exitEvents = repos.listMemories({ memoryType: "event", userId: "workspace-exit-user", workspaceId: "dev" });
   assert.equal(exitEvents.length, 2);
   assert.equal(exitEvents.every((memory) => metadataOf(memory).source === "afterWorkspaceExit"), true);
   assert.equal(exitEvents.some((memory) => metadataOf(memory).eventKind === "process"), true);
@@ -2110,7 +2111,7 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(processEvent!.detail.includes("resultJson"), false);
   assert.equal(processEvent!.detail.includes("召回的事件记忆"), false);
   assert.equal(processEvent!.detail.includes("关键过程信号"), true);
-  const persistedFileSession = trace.sessions.find((session) => session.workspaceId === "file");
+  const persistedFileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(Boolean(persistedFileSession?.completedAt), true);
   assert.equal(persistedFileSession?.summary, "File workspace inspected available evidence.");
   const finalCall = trace.llmCalls[0];
@@ -2130,7 +2131,7 @@ async function testWorkspaceExitHookRunsOncePerSuccessfulExitToolCall() {
   const repos = createRepos();
   const recalledSkill = repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "skill:file:single-exit-hook",
     title: "Single exit hook skill",
     summary: "When exiting a file workspace, record skill usage only once for the completed workspace session.",
@@ -2170,14 +2171,14 @@ async function testWorkspaceExitHookRunsOncePerSuccessfulExitToolCall() {
   assert.equal(fake.calls, 3);
   assert.equal(output.assistantMessage, "main integrated batched file result");
   const trace = repos.getTrace("conv-single-exit-hook", "creator", "creator");
-  const fileSession = trace.sessions.find((session) => session.workspaceId === "file");
+  const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.status, "completed");
   assert.equal(trace.toolCalls.some((call) => call.toolName === "searchFiles" && call.status === "failed"), true);
   const postExitSearch = trace.toolCalls.find((call) => call.toolName === "searchFiles");
   assert.equal(postExitSearch?.resultJson.includes("already exited"), true);
   assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles"), false);
-  assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExit" && log.workspaceId === "file").length, 1);
-  assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExitEventExtraction" && log.workspaceId === "file").length, 2);
+  assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExit" && log.workspaceId === "dev").length, 1);
+  assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExitEventExtraction" && log.workspaceId === "dev").length, 2);
   assert.equal(trace.auditLogs.filter((log) => log.action === "skill_usage_recorded" && log.resourceId === recalledSkill.id).length, 1);
   const skillUsageMetadata = metadataOf(repos.getMemory(recalledSkill.id));
   assert.equal(skillUsageMetadata.usageCount, 1);
@@ -2204,7 +2205,7 @@ async function testDuplicateWorkspaceExitCannotOverwriteCommittedSession() {
   assert.equal(fake.calls, 3);
   assert.equal(output.assistantMessage, "main integrated first file result");
   const trace = repos.getTrace("conv-duplicate-exit", "creator", "creator");
-  const fileSession = trace.sessions.find((session) => session.workspaceId === "file");
+  const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.status, "completed");
   assert.equal(fileSession?.result.summary, "First valid file result.");
   assert.equal(fileSession?.result.errors.length, 0);
@@ -2214,7 +2215,7 @@ async function testDuplicateWorkspaceExitCannotOverwriteCommittedSession() {
   assert.equal(exitCalls.filter((call) => call.status === "failed").length, 1);
   assert.equal(exitCalls.some((call) => call.resultJson.includes("already exited")), true);
   assert.equal(fileSession?.localContext.recentToolCalls.filter((call) => call.toolName === "exitWorkspace").length, 1);
-  assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExit" && log.workspaceId === "file").length, 1);
+  assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExit" && log.workspaceId === "dev").length, 1);
 }
 
 async function testMalformedWorkspaceExitDoesNotCommitSession() {
@@ -2235,13 +2236,13 @@ async function testMalformedWorkspaceExitDoesNotCommitSession() {
   });
 
   assert.equal(fake.calls > 5, true);
-  assert.equal(output.activeWorkspaceId, "file");
+  assert.equal(output.activeWorkspaceId, "dev");
   assert.equal(output.assistantMessage.length > 0, true);
   const trace = repos.getTrace("conv-workspace-bad-exit", "creator", "creator");
   const exitCall = trace.toolCalls.find((call) => call.toolName === "exitWorkspace");
   assert.equal(exitCall?.status, "failed");
   assert.equal(exitCall?.resultJson.includes("WorkspaceResult.status"), true);
-  const fileSession = trace.sessions.find((session) => session.workspaceId === "file");
+  const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.completedAt, undefined);
   assert.equal(fileSession?.status, "running");
   assert.equal(fileSession?.result.status, "running");
@@ -2249,7 +2250,7 @@ async function testMalformedWorkspaceExitDoesNotCommitSession() {
   assert.equal(trace.auditLogs.some((log) => log.action === "hook.afterWorkspaceExit"), false);
   assert.equal(trace.auditLogs.some((log) => log.action === "workspace_exit_required"), true);
   assert.equal(trace.auditLogs.some((log) => log.action === "workspace_exit_missing"), true);
-  assert.equal(repos.listMemories({ memoryType: "event", userId: "workspace-bad-exit-user", workspaceId: "file" }).length, 0);
+  assert.equal(repos.listMemories({ memoryType: "event", userId: "workspace-bad-exit-user", workspaceId: "dev" }).length, 0);
 }
 
 async function testWorkspaceSessionLocalToolCallsAreSessionScoped() {
@@ -2270,9 +2271,9 @@ async function testWorkspaceSessionLocalToolCallsAreSessionScoped() {
   });
 
   assert.equal(fake.calls, 5);
-  assert.equal(output.workspaceTrace.filter((session) => session.workspaceId === "file").length, 2);
-  const firstFileSession = output.workspaceTrace.filter((session) => session.workspaceId === "file")[0];
-  const secondFileSession = output.workspaceTrace.filter((session) => session.workspaceId === "file")[1];
+  assert.equal(output.workspaceTrace.filter((session) => session.workspaceId === "dev").length, 2);
+  const firstFileSession = output.workspaceTrace.filter((session) => session.workspaceId === "dev")[0];
+  const secondFileSession = output.workspaceTrace.filter((session) => session.workspaceId === "dev")[1];
   assert.equal(firstFileSession.localContext.recentToolCalls.some((call) => call.toolName === "exitWorkspace"), true);
   assert.equal(secondFileSession.localContext.recentToolCalls.some((call) => call.toolName === "exitWorkspace"), true);
 
@@ -2303,7 +2304,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
   repos.createMemory({
     memoryType: "event",
     userId: "policy-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "event:policy-user:file:policy:1",
     title: "Policy event one",
     summary: "policy recall event one",
@@ -2313,7 +2314,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
   repos.createMemory({
     memoryType: "event",
     userId: "policy-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "event:policy-user:file:policy:2",
     title: "Policy event two",
     summary: "policy recall event two",
@@ -2322,7 +2323,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "skill:file:policy:1",
     title: "Policy skill one",
     summary: "policy recall skill one",
@@ -2330,14 +2331,14 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
   }, "creator", "creator");
   repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     relationId: "skill:file:policy:2",
     title: "Policy skill two",
     summary: "policy recall skill two",
     detail: "Second skill memory for memory policy recall."
   }, "creator", "creator");
 
-  updateWorkspaceMemoryPolicy(repos, "file", {
+  updateWorkspaceMemoryPolicy(repos, "dev", {
     eventRecallEnabled: true,
     skillRecallEnabled: true,
     maxEventMemories: 1,
@@ -2367,7 +2368,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
   assert.equal(cappedMemoryPayload.currentWorkspaceSkillMemory.length, 1);
   assert.equal((cappedMemoryMessage?.content ?? "").includes("metadataJson"), false);
 
-  updateWorkspaceMemoryPolicy(repos, "file", {
+  updateWorkspaceMemoryPolicy(repos, "dev", {
     eventRecallEnabled: false,
     skillRecallEnabled: false
   });
@@ -2400,7 +2401,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     repos.createMemory({
       memoryType: "event",
       userId: "policy-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       relationId: `event:policy-user:file:policy:bulk:${index}`,
       title: `Policy bulk event ${index}`,
       summary: `search files policy recall bulk event ${index}`,
@@ -2409,7 +2410,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
     }, "creator", "creator");
     repos.createMemory({
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       relationId: `skill:file:policy:bulk:${index}`,
       title: `Policy bulk skill ${index}`,
       summary: `search files policy recall bulk skill ${index}`,
@@ -2429,7 +2430,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
       })
     }, "creator", "creator");
   }
-  updateWorkspaceMemoryPolicy(repos, "file", {
+  updateWorkspaceMemoryPolicy(repos, "dev", {
     eventRecallEnabled: true,
     skillRecallEnabled: true,
     maxEventMemories: 9,
@@ -2450,7 +2451,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
       apiKey: "test-key"
     }
   });
-  const raisedLimitFileSession = raisedLimitOutput.workspaceTrace.find((session) => session.workspaceId === "file");
+  const raisedLimitFileSession = raisedLimitOutput.workspaceTrace.find((session) => session.workspaceId === "dev");
   assert.equal(raisedLimitFileSession?.localContext.recalledEventMemories.filter((memory) => metadataOf(memory).eventKind === "result").length, 50);
   const raisedProcessEvents = raisedLimitFileSession?.localContext.recalledEventMemories.filter((memory) => metadataOf(memory).eventKind === "process") ?? [];
   assert.equal(raisedProcessEvents.length >= 1, true);
@@ -2460,7 +2461,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
 
 async function testWorkspaceMemoryPolicyControlsWrites() {
   const repos = createRepos();
-  updateWorkspaceMemoryPolicy(repos, "file", {
+  updateWorkspaceMemoryPolicy(repos, "dev", {
     eventWriteEnabled: false,
     skillWriteEnabled: false
   });
@@ -2485,7 +2486,7 @@ async function testWorkspaceMemoryPolicyControlsWrites() {
   assert.equal(toolListTrace.llmCalls.some((call) => call.toolsJson.includes("\"updateMemory\"")), false);
   assert.equal(toolListTrace.llmCalls.some((call) => call.toolsJson.includes("\"deleteMemory\"")), false);
 
-  const skillWriter = new MainToWorkspaceToolRequestLLMClient("file", "writeSkillMemory", {
+  const skillWriter = new MainToWorkspaceToolRequestLLMClient("dev", "writeSkillMemory", {
     title: "Blocked file skill",
     summary: "Skill writes should be disabled",
     detail: "The runtime should reject this skill memory because file workspace disabled skill writes."
@@ -2503,13 +2504,13 @@ async function testWorkspaceMemoryPolicyControlsWrites() {
       apiKey: "test-key"
     }
   });
-  assert.equal(skillWriter.lastToolResult.includes("Skill memory writes are disabled for workspace: file"), true);
-  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "file" }).length, 0);
+  assert.equal(skillWriter.lastToolResult.includes("Skill memory writes are disabled for workspace: dev"), true);
+  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "dev" }).length, 0);
   const skillTrace = repos.getTrace("conv-memory-write-policy-skill", "creator", "creator");
   assert.equal(skillTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "failed"), true);
   assert.equal(skillTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.resultJson.includes("Skill memory writes are disabled")), true);
 
-  updateWorkspaceMemoryPolicy(repos, "file", {
+  updateWorkspaceMemoryPolicy(repos, "dev", {
     eventWriteEnabled: true,
     skillWriteEnabled: false
   });
@@ -2527,7 +2528,7 @@ async function testWorkspaceMemoryPolicyControlsWrites() {
       apiKey: "test-key"
     }
   });
-  assert.equal(autoSkillOutput.memoryWrites.some((memory) => memory.memoryType === "skill" && memory.workspaceId === "file"), false);
+  assert.equal(autoSkillOutput.memoryWrites.some((memory) => memory.memoryType === "skill" && memory.workspaceId === "dev"), false);
   const autoSkillTrace = repos.getTrace("conv-memory-write-policy-auto-skill", "creator", "creator");
   assert.equal(autoSkillTrace.auditLogs.some((log) => log.action === "hook.afterSkillExtracted"), false);
 }
@@ -2591,14 +2592,14 @@ async function testSkillMemoryToolQualityGate() {
   const event = repos.createMemory({
     memoryType: "event",
     userId: "skill-quality-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     title: "Generalized file search event",
     summary: "A file workspace task succeeded after searching call sites first.",
     detail: "The task used file search before editing.",
     metadataJson: JSON.stringify({ source: "test", conversationId: "conv-skill-quality-valid", eventKind: "manual" })
   }, "creator", "creator");
 
-  const validSkillWriter = new MainToWorkspaceToolRequestLLMClient("file", "writeSkillMemory", {
+  const validSkillWriter = new MainToWorkspaceToolRequestLLMClient("dev", "writeSkillMemory", {
     title: "Search before editing",
     summary: "Search related call sites before changing code.",
     detail: "For code changes, inspect related call sites and tests before modifying files.",
@@ -2629,8 +2630,8 @@ async function testSkillMemoryToolQualityGate() {
   assert.equal(metadata.qualityGate.userPrivateDetailRemoved, true);
   assert.equal(metadata.evidenceEventIds[0], event.id);
   assert.equal(Array.isArray(metadata.procedure), true);
-  const validFileSession = validOutput.workspaceTrace.find((session) => session.workspaceId === "file");
-  assert.equal(metadata.activeWorkspaceId, "file");
+  const validFileSession = validOutput.workspaceTrace.find((session) => session.workspaceId === "dev");
+  assert.equal(metadata.activeWorkspaceId, "dev");
   assert.equal(metadata.workspaceSessionId, validFileSession?.id);
   assert.equal(metadata.taskId, validFileSession?.taskId);
   assert.equal(metadata.workspaceSessionIds.includes(validFileSession?.id), true);
@@ -2638,7 +2639,7 @@ async function testSkillMemoryToolQualityGate() {
   const validTrace = repos.getTrace("conv-skill-quality-valid", "creator", "creator");
   assert.equal(validTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "completed"), true);
 
-  const privateSkillWriter = new MainToWorkspaceToolRequestLLMClient("file", "writeSkillMemory", {
+  const privateSkillWriter = new MainToWorkspaceToolRequestLLMClient("dev", "writeSkillMemory", {
     title: "Private path skill",
     summary: "Use G:\\Jomy\\Documents\\PrivateProject before edits.",
     detail: "This leaks a concrete private local path into shared skill memory.",
@@ -2662,7 +2663,7 @@ async function testSkillMemoryToolQualityGate() {
     }
   });
   assert.equal(privateSkillWriter.lastToolResult.includes("private user/project details"), true);
-  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "file" }).some((memory) => memory.title === "Private path skill"), false);
+  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "dev" }).some((memory) => memory.title === "Private path skill"), false);
   const privateTrace = repos.getTrace("conv-skill-quality-private", "creator", "creator");
   assert.equal(privateTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "failed"), true);
   assert.equal(privateTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.resultJson.includes("private user/project details")), true);
@@ -2809,7 +2810,7 @@ async function testMemoryLifecycleHooks() {
   assert.equal(skillMemory!.summary.includes("lockfile"), true);
   assert.equal(metadataOf(skillMemory!).procedure.some((step: string) => step.includes("lockfile")), true);
   assert.equal(metadataOf(skillMemory!).appliesWhen.some((item: string) => item.includes("main workspace")), true);
-  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "cli" }).some((memory) => memory.summary.includes("lockfile")), false);
+  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "dev" }).some((memory) => memory.summary.includes("lockfile")), false);
   const skillTrace = repos.getTrace("conv-memory-skill", "creator", "creator");
   assert.equal(skillTrace.auditLogs.some((log) => log.action === "hook.afterSkillExtracted"), true);
 
@@ -2934,7 +2935,7 @@ async function testSkillEvidenceFromWorkspaceEvents() {
   const metadata = metadataOf(skill!);
   assert.equal(metadata.qualityGate.evidenceCount > 0, true);
   assert.equal(metadata.evidenceEventIds.length > 0, true);
-  const eventIds = new Set(repos.listMemories({ memoryType: "event", userId: "skill-evidence-user", workspaceId: "cli" }).map((memory) => memory.id));
+  const eventIds = new Set(repos.listMemories({ memoryType: "event", userId: "skill-evidence-user", workspaceId: "dev" }).map((memory) => memory.id));
   assert.equal(metadata.evidenceEventIds.every((id: string) => eventIds.has(id)), true);
 }
 
@@ -2953,7 +2954,7 @@ async function testEventHookSkillExtractionIsDesensitizedAndDeduplicated() {
       apiKey: "test-key"
     }
   });
-  const firstSkill = firstOutput.memoryWrites.find((memory) => memory.memoryType === "skill" && memory.workspaceId === "cli");
+  const firstSkill = firstOutput.memoryWrites.find((memory) => memory.memoryType === "skill" && memory.workspaceId === "dev");
   assert.equal(Boolean(firstSkill), true);
   assert.equal(metadataOf(firstSkill!).source, "eventSkillCandidate");
   assert.equal(metadataOf(firstSkill!).evidenceEventIds.length, 2);
@@ -2976,7 +2977,7 @@ async function testEventHookSkillExtractionIsDesensitizedAndDeduplicated() {
       apiKey: "test-key"
     }
   });
-  const skills = repos.listMemories({ memoryType: "skill", workspaceId: "cli" });
+  const skills = repos.listMemories({ memoryType: "skill", workspaceId: "dev" });
   assert.equal(skills.length, 1);
 }
 
@@ -3204,7 +3205,7 @@ async function testStreamingChildWorkspaceEventsAreVisible() {
   }
 
   const workspaceEvents = events.filter((event) => event.type === "workspace");
-  assert.equal(workspaceEvents.some((event) => event.eventKind === "entered" && event.workspaceId === "file"), true);
+  assert.equal(workspaceEvents.some((event) => event.eventKind === "entered" && event.workspaceId === "dev"), true);
   assert.equal(workspaceEvents.some((event) => event.eventKind === "assistant" && event.text.includes("file workspace explains")), true);
   assert.equal(workspaceEvents.some((event) => event.eventKind === "tool_call" && event.toolNames?.includes("exitWorkspace")), true);
   assert.equal(workspaceEvents.some((event) => event.eventKind === "exit" && event.status === "completed"), true);
@@ -3214,7 +3215,7 @@ async function testStreamingChildWorkspaceEventsAreVisible() {
   const done = events.at(-1);
   assert.equal(done?.type, "done");
   if (done?.type === "done") {
-    assert.equal(done.output.workspaceTrace.some((session) => session.workspaceId === "file"), true);
+    assert.equal(done.output.workspaceTrace.some((session) => session.workspaceId === "dev"), true);
   }
 }
 
@@ -3292,7 +3293,8 @@ async function testStreamingToolLoopStopsAtLimit() {
 
 async function testWorkspaceEntryApprovalGate() {
   const repos = createRepos();
-  const enterArgs = { workspaceId: "cli", objective: "run tests in terminal" };
+  updateWorkspaceGate(repos, "dev", { requiresApproval: 1, riskLevel: "high" });
+  const enterArgs = { workspaceId: "dev", objective: "run tests in terminal" };
   const firstFake = new SingleToolRequestLLMClient("enterWorkspace", enterArgs);
   const firstRuntime = new AgentRuntime(repos, firstFake);
   const firstOutput = await firstRuntime.run({
@@ -3311,12 +3313,12 @@ async function testWorkspaceEntryApprovalGate() {
   assert.equal(firstFake.lastToolResult.includes("requiresApproval"), true);
   assert.equal(firstFake.lastToolResult.includes("approvalRequestId"), true);
   const blockedTrace = repos.getTrace("conv-workspace-entry-approval", "creator", "creator");
-  assert.equal(blockedTrace.sessions.some((session) => session.workspaceId === "cli"), false);
+  assert.equal(blockedTrace.sessions.some((session) => session.workspaceId === "dev"), false);
   assert.equal(blockedTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "blocked"), true);
   assert.equal(blockedTrace.approvalRequests.length, 1);
-  assert.equal(blockedTrace.approvalRequests[0].workspaceId, "cli");
+  assert.equal(blockedTrace.approvalRequests[0].workspaceId, "dev");
   assert.equal(blockedTrace.approvalRequests[0].toolName, "enterWorkspace");
-  assert.equal(blockedTrace.auditLogs.some((log) => log.action === "workspace_enter_rejected" && log.workspaceId === "cli"), true);
+  assert.equal(blockedTrace.auditLogs.some((log) => log.action === "workspace_enter_rejected" && log.workspaceId === "dev"), true);
 
   assert.throws(() => repos.resolveApprovalRequest(blockedTrace.approvalRequests[0].id, {
     status: "approved",
@@ -3345,12 +3347,12 @@ async function testWorkspaceEntryApprovalGate() {
       apiKey: "test-key"
     }
   });
-  assert.equal(retryOutput.activeWorkspaceId, "cli");
+  assert.equal(retryOutput.activeWorkspaceId, "dev");
   assert.equal(retryFake.lastToolResult.includes("workspaceResult"), true);
   const approvedTrace = repos.getTrace("conv-workspace-entry-approval", "creator", "creator");
-  assert.equal(approvedTrace.sessions.some((session) => session.workspaceId === "cli"), true);
+  assert.equal(approvedTrace.sessions.some((session) => session.workspaceId === "dev"), true);
   assert.equal(approvedTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
-  assert.equal(approvedTrace.approvalRequests.some((request) => request.workspaceId === "cli" && request.status === "approved"), true);
+  assert.equal(approvedTrace.approvalRequests.some((request) => request.workspaceId === "dev" && request.status === "approved"), true);
 }
 
 async function testToolPolicyGates() {
@@ -3379,7 +3381,7 @@ async function testToolPolicyGates() {
   assert.equal(wrongWorkspaceTrace.auditLogs.some((log) => log.action === "hook.afterToolCall"), true);
 
   const highRisk = new MainToCliToolRequestLLMClient("runCommand", { command: "npm test" });
-  updateWorkspaceGate(repos, "cli", { requiresApproval: 0, riskLevel: "medium" });
+  updateWorkspaceGate(repos, "dev", { requiresApproval: 0, riskLevel: "medium" });
   const highRiskRuntime = new AgentRuntime(repos, highRisk);
   await highRiskRuntime.run({
     agentId: "default-agent",
@@ -3462,7 +3464,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "creator",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Private direct skill",
       summary: "Use G:\\Jomy\\Documents\\PrivateProject before editing.",
       detail: "This direct API write should be rejected.",
@@ -3475,7 +3477,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "creator",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Direct API skill",
       summary: "Inspect relevant files before focused edits.",
       detail: "Use evidence from file inspection to keep edits narrow.",
@@ -3510,7 +3512,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "ordinary-api-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Own direct event",
       summary: "The current user inspected files.",
       detail: "This record should be visible to the same user.",
@@ -3523,7 +3525,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "ordinary-api-user",
-      workspaceId: "file",
+      workspaceId: "main",
       title: "Forged trace event",
       summary: "This event tries to attach to another user's conversation trace.",
       detail: "The write should be rejected before audit pollution.",
@@ -3550,7 +3552,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "other-api-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Cross user direct event",
       summary: "Ordinary users must not write events for another user.",
       detail: "This direct API write should be rejected by runtime policy.",
@@ -3563,7 +3565,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "other-api-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Other direct event",
       summary: "Another user inspected files.",
       detail: "This record must not be visible to ordinary-api-user.",
@@ -3655,7 +3657,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "user",
     memoryId: ownImpression.id,
     patch: {
-      workspaceId: "file"
+      workspaceId: "dev"
     }
   }), /cross-workspace/);
   assert.equal(repos.getMemory(ownImpression.id).userId, "ordinary-api-user");
@@ -3678,7 +3680,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "ordinary-api-user",
-      workspaceId: "cli",
+      workspaceId: "main",
       title: "Own CLI event",
       summary: "The current user ran a CLI check.",
       detail: "This event belongs to a different workspace than the file skill.",
@@ -3705,7 +3707,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "user",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Evidence-backed direct skill",
       summary: "Use same-workspace event evidence before sharing a file workflow.",
       detail: "This reusable method is backed by current-user file workspace evidence.",
@@ -3717,7 +3719,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "creator",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Evidence-backed direct skill",
       summary: "Use same-workspace event evidence before sharing a file workflow.",
       detail: "This reusable method is backed by current-user file workspace evidence.",
@@ -3730,7 +3732,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "creator",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Cross workspace evidence skill",
       summary: "Use CLI evidence for a file workspace skill.",
       detail: "This should be rejected because evidence must belong to the same workspace.",
@@ -3742,7 +3744,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "creator",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Non event evidence skill",
       summary: "Use an impression record as skill evidence.",
       detail: "This should be rejected because evidence ids must point to event memory.",
@@ -3754,7 +3756,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "creator",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Missing evidence skill",
       summary: "Use a missing memory id as skill evidence.",
       detail: "This should be rejected because the evidence record does not exist.",
@@ -3766,7 +3768,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     actorRole: "creator",
     memory: {
       memoryType: "skill",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Cross conversation evidence skill",
       summary: "Use an event from a different conversation as skill evidence.",
       detail: "This should be rejected because conversation evidence must match when declared.",
@@ -3779,7 +3781,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "ordinary-api-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Event without conversation",
       summary: "Event memory must include conversation evidence.",
       detail: "This should be rejected because event metadata needs a conversation id.",
@@ -3792,7 +3794,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "ordinary-api-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Event with bad kind",
       summary: "Event memory must include a recognized kind.",
       detail: "This should be rejected because eventKind is not part of the event contract.",
@@ -3805,7 +3807,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "event",
       userId: "ordinary-api-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Event with invalid metadata",
       summary: "Memory metadata must remain parseable.",
       detail: "This should be rejected because metadataJson is invalid.",
@@ -3862,7 +3864,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
     memory: {
       memoryType: "impression",
       userId: "ordinary-api-user",
-      workspaceId: "file",
+      workspaceId: "dev",
       title: "Workspace scoped impression",
       summary: "Impressions are cross-workspace.",
       detail: "This should be rejected because impression memory must not set workspaceId."
@@ -3905,7 +3907,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   const ownEvent = repos.createMemory({
     memoryType: "event",
     userId: "search-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     title: "Search own event",
     summary: "Policy search alpha event",
     detail: "Visible to the owning user."
@@ -3913,14 +3915,14 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   const otherEvent = repos.createMemory({
     memoryType: "event",
     userId: "other-search-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     title: "Search other event",
     summary: "Policy search alpha event",
     detail: "Hidden from non-creator search."
   }, "creator", "creator");
   const sharedSkill = repos.createMemory({
     memoryType: "skill",
-    workspaceId: "file",
+    workspaceId: "dev",
     title: "Search shared skill",
     summary: "Policy search alpha skill",
     detail: "Shared workspace skill visible to users.",
@@ -3934,7 +3936,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   }, "creator", "creator");
   const siblingSkill = repos.createMemory({
     memoryType: "skill",
-    workspaceId: "cli",
+    workspaceId: "main",
     title: "Hidden sibling skill",
     summary: "Policy search alpha cli skill",
     detail: "This CLI skill must not be readable from file workspace.",
@@ -3963,7 +3965,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
       conversationId: "conv-search-memory-user",
       message: "search memory"
     },
-    activeWorkspaceId: "file",
+    activeWorkspaceId: "dev",
     toolName: "searchMemory",
     argumentsJson: JSON.stringify({ query: "alpha" })
   });
@@ -3982,7 +3984,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
       conversationId: "conv-search-memory-user",
       message: "read skill"
     },
-    activeWorkspaceId: "file",
+    activeWorkspaceId: "dev",
     toolName: "readSkill",
     argumentsJson: JSON.stringify({ skillId: sharedSkill.id })
   });
@@ -3998,7 +4000,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
       conversationId: "conv-search-memory-user",
       message: "read sibling skill"
     },
-    activeWorkspaceId: "file",
+    activeWorkspaceId: "dev",
     toolName: "readSkill",
     argumentsJson: JSON.stringify({ skillId: siblingSkill.id })
   });
@@ -4013,9 +4015,9 @@ async function testSearchMemoryToolUsesPolicyLayer() {
       conversationId: "conv-search-memory-user",
       message: "read skill with bad scope"
     },
-    activeWorkspaceId: "file",
+    activeWorkspaceId: "dev",
     toolName: "readSkill",
-    argumentsJson: JSON.stringify({ skillId: sharedSkill.id, workspaceId: "cli" })
+    argumentsJson: JSON.stringify({ skillId: sharedSkill.id, workspaceId: "dev" })
   });
   assert.equal(scopedRead.ok, false);
   assert.equal(JSON.stringify(scopedRead.result).includes("code-bound"), true);
@@ -4028,7 +4030,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
       conversationId: "conv-search-memory-user-target",
       message: "search memory"
     },
-    activeWorkspaceId: "file",
+    activeWorkspaceId: "dev",
     toolName: "searchMemory",
     argumentsJson: JSON.stringify({ query: "alpha", memoryType: "event", userId: "other-search-user" })
   });
@@ -4043,7 +4045,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
       conversationId: "conv-search-memory-creator",
       message: "search memory"
     },
-    activeWorkspaceId: "file",
+    activeWorkspaceId: "dev",
     toolName: "searchMemory",
     argumentsJson: JSON.stringify({ query: "alpha" })
   });
@@ -4061,7 +4063,7 @@ async function testSearchMemoryToolUsesPolicyLayer() {
       conversationId: "conv-search-memory-creator-self",
       message: "search memory"
     },
-    activeWorkspaceId: "file",
+    activeWorkspaceId: "dev",
     toolName: "searchMemory",
     argumentsJson: JSON.stringify({ query: "alpha", memoryType: "impression" })
   });
@@ -4100,8 +4102,8 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(repos.listTools().some((tool) => tool.name === "deleteMemory"), false);
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "memory"), false);
   assert.equal(repos.listToolsForWorkspace("main").some((tool) => tool.name === "writeEventMemory"), false);
-  assert.equal(repos.listToolsForWorkspace("file").some((tool) => tool.name === "updateMemory"), false);
-  assert.equal(repos.listToolsForWorkspace("cli").some((tool) => tool.name === "deleteMemory"), false);
+  assert.equal(repos.listToolsForWorkspace("dev").some((tool) => tool.name === "updateMemory"), false);
+  assert.equal(repos.listToolsForWorkspace("dev").some((tool) => tool.name === "deleteMemory"), false);
   const exitWorkspaceSchema = JSON.parse(exitWorkspace?.parametersJson ?? "{}") as { required?: string[] };
   for (const field of ["status", "summary", "artifacts", "observations", "errors", "suggestedNextSteps"]) {
     assert.equal(exitWorkspaceSchema.required?.includes(field), true);
@@ -4119,7 +4121,7 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(Boolean(writeSkillMemorySchema.properties?.workspaceId), false);
   assert.equal(writeSkillMemorySchema.required?.includes("workspaceId"), false);
 
-  const builtinFileTool = new MainToWorkspaceToolRequestLLMClient("file", "searchFiles", { query: "runtime" });
+  const builtinFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "searchFiles", { query: "runtime" });
   const runtime = new AgentRuntime(repos, builtinFileTool);
   await runtime.run({
     agentId: "default-agent",
@@ -4137,11 +4139,11 @@ async function testToolBindingsAndMcpReadiness() {
   const fileTrace = repos.getTrace("conv-tool-binding-file-runtime", "creator", "creator");
   assert.equal(fileTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
   assert.equal(fileTrace.toolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
-  const fileSession = fileTrace.sessions.find((session) => session.workspaceId === "file");
+  const fileSession = fileTrace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
   assert.equal(fileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status completed")), true);
 
-  const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("cli", "runCommand", { command: "node -e \"console.log('zleap-cli-ok')\"" });
+  const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("dev", "runCommand", { command: "node -e \"console.log('zleap-cli-ok')\"" });
   const cliRuntime = new AgentRuntime(repos, builtinCliTool);
   await cliRuntime.run({
     agentId: "default-agent",
@@ -4162,7 +4164,7 @@ async function testToolBindingsAndMcpReadiness() {
   const echoServerPath = path.resolve("src/tests/fixtures/mcp-echo-server.mjs");
   const echoServer = repos.upsertMcpServer({
     id: "mcp-file-echo",
-    workspaceId: "file",
+    workspaceId: "dev",
     name: "Test Echo MCP",
     transport: "stdio",
     command: process.execPath,
@@ -4176,7 +4178,7 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(echoServer.transport, "stdio");
   assert.equal(JSON.parse(mcpServerToBindingJson(echoServer)).command, process.execPath);
   assert.throws(() => repos.upsertMcpServer({
-    workspaceId: "file",
+    workspaceId: "dev",
     name: "User server",
     transport: "stdio",
     command: process.execPath,
@@ -4189,7 +4191,7 @@ async function testToolBindingsAndMcpReadiness() {
   const discoveredEchoTools = await new McpToolExecutor().discoverTools(mcpServerToBindingJson(echoServer));
   assert.equal(discoveredEchoTools.some((tool) => tool.name === "echo"), true);
   const importedEchoTools = repos.importMcpServerTools({
-    workspaceId: "file",
+    workspaceId: "dev",
     serverId: echoServer.id,
     tools: discoveredEchoTools,
     actorId: "creator",
@@ -4199,7 +4201,7 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(importedEcho?.bindingType, "mcp");
   assert.equal(importedEcho?.mcpServerId, echoServer.id);
   assert.equal(importedEcho?.mcpToolName, "echo");
-  const echoClient = new MainToWorkspaceToolRequestLLMClient("file", "echo", { text: "hello" });
+  const echoClient = new MainToWorkspaceToolRequestLLMClient("dev", "echo", { text: "hello" });
   const echoRuntime = new AgentRuntime(repos, echoClient);
   await echoRuntime.run({
     agentId: "default-agent",
@@ -4217,7 +4219,7 @@ async function testToolBindingsAndMcpReadiness() {
   const echoTrace = repos.getTrace("conv-tool-binding-mcp-echo", "creator", "creator");
   assert.equal(echoTrace.toolCalls.some((call) => call.toolName === "echo" && call.status === "completed"), true);
 
-  const enterWorkspace = new SingleToolRequestLLMClient("enterWorkspace", { workspaceId: "file", objective: "search runtime files" });
+  const enterWorkspace = new SingleToolRequestLLMClient("enterWorkspace", { workspaceId: "dev", objective: "search runtime files" });
   const enterRuntime = new AgentRuntime(repos, enterWorkspace);
   await enterRuntime.run({
     agentId: "default-agent",
@@ -4234,7 +4236,7 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(enterWorkspace.lastToolResult.includes("workspaceResult"), true);
   const runtimeTrace = repos.getTrace("conv-tool-binding-runtime", "creator", "creator");
   assert.equal(runtimeTrace.toolCalls[0].status, "completed");
-  assert.equal(runtimeTrace.sessions.some((session) => session.workspaceId === "file"), true);
+  assert.equal(runtimeTrace.sessions.some((session) => session.workspaceId === "dev"), true);
   const runtimeMainSession = runtimeTrace.sessions.find((session) => session.workspaceId === "main");
   assert.equal(runtimeMainSession?.localContext.recentToolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
 }
@@ -4368,7 +4370,7 @@ async function testConversationDeletionLifecycle() {
   repos.createApprovalRequest({
     userId: "delete-user",
     conversationId: "conv-delete",
-    workspaceId: "cli",
+    workspaceId: "dev",
     toolName: "runCommand",
     argumentsJson: "{}",
     reason: "test approval cleanup"
@@ -4499,7 +4501,7 @@ async function testWorkspaceDeletionLifecycle() {
   const unrelatedMemory = repos.createMemory({
     memoryType: "event",
     userId: "workspace-delete-user",
-    workspaceId: "file",
+    workspaceId: "dev",
     title: "File event",
     summary: "File event summary",
     detail: "File event detail"
@@ -4628,22 +4630,21 @@ async function testWorkspaceUpsertValidatesRegisteredToolsAtomically() {
 async function testWorkspaceBoundary() {
   const repos = createRepos();
   const mainTools = repos.listToolsForWorkspace("main").map((tool) => tool.name);
-  const fileTools = repos.listToolsForWorkspace("file").map((tool) => tool.name);
-  const cliTools = repos.listToolsForWorkspace("cli").map((tool) => tool.name);
+  const devTools = repos.listToolsForWorkspace("dev").map((tool) => tool.name);
   const memoryTools = ["searchMemory", "readSkill", "writeUserImpression", "writeAgentSelfImpression", "writeSkillMemory"];
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "memory"), false);
+  assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "file" || workspace.id === "cli"), false);
   assert.equal(["askUser", "enterWorkspace", "finishTask"].every((tool) => mainTools.includes(tool)), true);
   assert.equal(memoryTools.every((tool) => mainTools.includes(tool)), true);
-  assert.equal(memoryTools.every((tool) => fileTools.includes(tool)), true);
-  assert.equal(memoryTools.every((tool) => cliTools.includes(tool)), true);
-  assert.equal(["writeEventMemory", "updateMemory", "deleteMemory"].some((tool) => mainTools.includes(tool) || fileTools.includes(tool) || cliTools.includes(tool)), false);
-  assert.equal(fileTools.includes("runCommand"), false);
-  assert.equal(cliTools.includes("searchFiles"), false);
+  assert.equal(memoryTools.every((tool) => devTools.includes(tool)), true);
+  assert.equal(["writeEventMemory", "updateMemory", "deleteMemory"].some((tool) => mainTools.includes(tool) || devTools.includes(tool)), false);
+  assert.equal(devTools.includes("searchFiles"), true);
+  assert.equal(devTools.includes("runCommand"), true);
 }
 
 async function testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound() {
   const repos = createRepos();
-  const file = repos.getWorkspace("file");
+  const file = repos.getWorkspace("dev");
   repos.upsertWorkspace({
     id: file.id,
     name: file.name,
@@ -4686,14 +4687,14 @@ async function testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound() {
   assert.equal(fake.childToolNames.includes("finishTask"), false);
   assert.equal(fake.childEnterWorkspaceResult.includes("active workspace"), true);
   const trace = repos.getTrace("conv-child-main-only-tools", "creator", "creator");
-  const fileSession = trace.sessions.find((session) => session.workspaceId === "file");
+  const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   const localToolNames = fileSession?.localContext.availableTools.map((tool) => tool.name) ?? [];
   assert.equal(localToolNames.includes("enterWorkspace"), false);
   assert.equal(localToolNames.includes("askUser"), false);
   assert.equal(localToolNames.includes("finishTask"), false);
   assert.equal(localToolNames.includes("exitWorkspace"), true);
-  assert.equal(trace.sessions.some((session) => session.workspaceId === "cli"), false);
-  assert.equal(trace.toolCalls.some((call) => call.workspaceId === "file" && call.toolName === "enterWorkspace" && call.status === "blocked"), true);
+  assert.equal(trace.sessions.filter((session) => session.workspaceId === "dev").length, 1);
+  assert.equal(trace.toolCalls.some((call) => call.workspaceId === "dev" && call.toolName === "enterWorkspace" && call.status === "blocked"), true);
 }
 
 async function testMainOrchestrationTools() {

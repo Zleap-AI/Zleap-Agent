@@ -378,7 +378,7 @@ const SYSTEM_TOOL_NAMES = new Set([
   "writeSkillMemory"
 ]);
 
-const BUILT_IN_WORKSPACE_IDS = new Set(["main", "file", "cli"]);
+const BUILT_IN_WORKSPACE_IDS = new Set(["main", "dev"]);
 const DEFAULT_WORKSPACE_INPUT_KINDS = ["user_request", "workspace_task"];
 const DEFAULT_WORKSPACE_OUTPUT_KINDS = ["workspace_result"];
 
@@ -769,9 +769,8 @@ function ConceptIntroTab() {
           </div>
           <div className="map-branches">
             {[
-              ["File", "知道 CLI/MCP 存在，但只用文件工具", "searchFiles"],
-              ["CLI", "知道 File/MCP 存在，但只用命令工具", "runCommand"],
-              ["MCP", "知道其他 workspace，可建议 main handoff", "stdio / Streamable HTTP"]
+              ["Dev", "统一处理文件搜索、代码检查和命令执行", "searchFiles / runCommand"],
+              ["MCP", "外部或用户提供能力，可建议 main handoff", "stdio / Streamable HTTP"]
             ].map(([name, desc, tools]) => (
               <div className="map-workspace" key={name}>
                 <strong>{name} Workspace</strong>

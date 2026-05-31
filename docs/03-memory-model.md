@@ -449,7 +449,7 @@ Zleap 的 memory 系统要解决的不是“无限记住”，而是“在正确
 
 记忆不再作为独立 `Memory Workspace` 存在。模型可见的 memory 工具只包括 `searchMemory`、`readSkill`、`writeUserImpression`、`writeAgentSelfImpression` 和 `writeSkillMemory`，并挂载在每个 workspace 中。`writeEventMemory`、`updateMemory` 和 `deleteMemory` 不是模型可调用工具。
 
-运行时模型调用这些工具时，event/skill 记忆必须被当前 active workspace 约束：在 `file` workspace 中不能搜索、写入、更新或删除 CLI 的 event/skill 记忆。user impression 和 agent self impression 仍然是跨 workspace 的身份层记忆，但写入和管理继续受 userId/creator policy 限制。
+运行时模型调用这些工具时，event/skill 记忆必须被当前 active workspace 约束：在默认 `dev` workspace 中只能搜索、写入或读取 `dev` 的 event/skill 记忆，不能越权操作其他 MCP workspace 的 event/skill。user impression 和 agent self impression 仍然是跨 workspace 的身份层记忆，但写入和管理继续受 userId/creator policy 限制。
 
 runtime memory tool 的归属由代码绑定，不由 AI 自己传参决定。function-call schema 不应暴露 `userId`、`agentId`、`workspaceId` 这类 scope 字段；`readSkill` 和 `writeSkillMemory` 的 `workspaceId` 必须来自当前 active workspace，`writeUserImpression` 的 `userId` 必须来自当前 run，`writeAgentSelfImpression` 的 `agentId` 必须来自当前 agent。模型如果幻觉传入这些 scope 字段，runtime 必须拒绝该 tool call。
 

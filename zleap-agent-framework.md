@@ -88,8 +88,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 
 | Workspace | 第一版用途 | 工具来源 |
 | --- | --- | --- |
-| **File Workspace** | 文件搜索和检查 | 内置 runtime 工具 `searchFiles`，未来可扩展 MCP |
-| **CLI Workspace** | 命令行任务 | 内置 runtime 工具 `runCommand`，高风险动作需要审批 |
+| **Dev Workspace** | 文件搜索、代码检查、命令行任务 | 内置 runtime 工具 `searchFiles` + `runCommand`；高风险命令仍需审批 |
 | **MCP Workspaces** | 外部或用户提供能力 | 绑定本地 stdio / 远程 Streamable HTTP MCP Server 后发现并挂载工具 |
 | **Browser Workspace** | 浏览器验证与页面检查 | 未来方向，不属于第一版内置范围 |
 
@@ -549,7 +548,7 @@ src/
 - SQLite Raw SQL 持久化。
 - Memory service 的 impression/event/skill MVP。
 - SQLite FTS 召回，Vector 暂不启用。
-- MCP 作为外部能力扩展机制，不用于内置 file/cli 基础能力。
+- MCP 作为外部能力扩展机制，不用于内置 dev 基础能力；文件搜索和命令行执行默认合并在同一个开发工作空间里。
 - Web UI 支持：聊天、工作空间、工作空间工具/MCP、记忆、日志、上下文堆栈、概念介绍。
 
 ---

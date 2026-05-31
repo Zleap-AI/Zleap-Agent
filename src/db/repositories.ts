@@ -486,7 +486,7 @@ export class Repositories {
 
   deleteWorkspace(id: string, actorId: string, actorRole: UserRole, deleteReason = "manual workspace delete"): void {
     if (actorRole !== "creator") throw new Error("Workspace deletion requires creator role.");
-    if (["main", "file", "cli"].includes(id)) throw new Error(`Built-in workspace cannot be deleted: ${id}`);
+    if (["main", "dev"].includes(id)) throw new Error(`Built-in workspace cannot be deleted: ${id}`);
     const workspace = this.getWorkspace(id);
     const relatedMemories = this.db.prepare(`
       SELECT * FROM memories

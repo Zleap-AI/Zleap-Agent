@@ -8,7 +8,7 @@ Zleap Agent Framework 的最终目标是：
 2. runtime 支持 workspace 编排和切换。
 3. runtime 支持 impression、event、skill 三类 memory。
 4. runtime 原生支持 userid 多租户隔离。
-5. 提供一组基础 workspace，例如 main、cli、file；memory 不是独立 workspace，而是挂载到每个 workspace 的工具能力。
+5. 提供一组基础 workspace：main 和统一 dev；memory 不是独立 workspace，而是挂载到每个 workspace 的工具能力。
 6. 提供一个基于该框架的 Web UI，可以实际体验 agent。
 
 ## 技术方向
@@ -38,8 +38,7 @@ packages/
 
   workspaces/
     main workspace
-    cli workspace
-    file workspace
+    dev workspace
     memory tools mounted in every workspace
 
   web/
@@ -252,8 +251,8 @@ type WorkspaceMemoryPolicy = {
 
 1. 单进程 TypeScript runtime。
 2. main workspace。
-3. file workspace。
-4. cli workspace。
+3. dev workspace。
+4. 内置 searchFiles + runCommand 挂载在 dev workspace。
 5. memory service 的接口和 SQLite 实现。
 6. event memory 支持 SQL 存储。
 7. recall 第一版使用 SQLite FTS + relation/version，不引入 mock vector 或真实 vector store。

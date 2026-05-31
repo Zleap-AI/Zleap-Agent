@@ -237,8 +237,7 @@ export class WorkspaceRuntime {
   selectWorkspace(message: string): string {
     const lower = message.toLowerCase();
     if (/(memory|remember|impression|skill|event|记忆|记住|回忆|经验|总结经验|偏好|以后)/i.test(lower)) return "main";
-    if (/(command|terminal|shell|npm|node|test|命令|终端)/i.test(lower)) return "cli";
-    if (/(file|code|search|read|write|文件|代码|搜索)/i.test(lower)) return "file";
+    if (/(command|terminal|shell|npm|node|test|file|code|search|read|write|命令|终端|文件|代码|搜索)/i.test(lower)) return "dev";
     return "main";
   }
 }

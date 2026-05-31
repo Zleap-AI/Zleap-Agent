@@ -166,8 +166,8 @@ runtime policy contract 是当前运行环境的规则。
 
 ```text
 Current userId: user_123
-Current workspace: cli
-You may only call tools registered to cli workspace.
+Current workspace: dev
+You may only call tools registered to dev workspace.
 You may request memory writes, but runtime may reject them.
 ```
 
@@ -208,13 +208,13 @@ active workspace contract 是当前 workspace 的说明。
 - 工具调用说明。
 - workspace-specific constraints。
 
-例如 CLI workspace：
+例如 dev workspace：
 
 ```text
-Active workspace: cli
-Purpose: execute shell commands and inspect terminal output.
-You should use CLI tools only for command-line tasks.
-Do not edit files directly in this workspace unless a tool explicitly supports it.
+Active workspace: dev
+Purpose: inspect project files, read code context, and run minimal necessary commands.
+You may use searchFiles for evidence and runCommand for command-line tasks.
+High-risk command execution may require creator approval.
 ```
 
 主 workspace 的 contract 则应该强调编排：

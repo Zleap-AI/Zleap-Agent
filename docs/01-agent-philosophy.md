@@ -136,11 +136,8 @@ Agent
 Main Workspace
   - 只负责理解任务、选择 workspace、编排流程
 
-CLI Workspace
-  - 只负责命令行相关工具和经验
-
-File Workspace
-  - 只负责文件读写、解析、转换相关工具和经验
+Dev Workspace
+  - 统一负责项目文件搜索、代码检查、命令执行和相关经验
 
 Browser Workspace
   - 只负责浏览器操作、页面检查、截图、交互相关工具和经验
@@ -151,7 +148,7 @@ Memory Tools
   - 跨 workspace 的记忆调试和维护属于 Web UI/API 的策略层能力，不属于模型普通 tool use
 ```
 
-首版实现只包含 `main`、`file`、`cli`。Browser workspace 保留为未来可以通过 workspace manifest/MCP 工具绑定扩展的例子，不属于当前默认工作空间集合。
+首版实现只包含 `main` 和统一的 `dev`。Browser workspace 保留为未来可以通过 workspace manifest/MCP 工具绑定扩展的例子，不属于当前默认工作空间集合。
 
 每次只让模型进入它当前真正需要的能力空间。
 

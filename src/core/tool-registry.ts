@@ -150,15 +150,15 @@ export class ToolRegistry {
 
   private async executeRuntimeTool(run: AgentRunInput, activeWorkspaceId: string, activeWorkspaceSession: WorkspaceSession | undefined, toolName: string, argumentsJson: string): Promise<ToolExecutionResult> {
     if (toolName === "searchFiles") {
-      if (activeWorkspaceId !== "file") {
-        return { ok: false, status: "failed", result: { error: "searchFiles can only be called from file workspace." } };
+      if (activeWorkspaceId !== "dev") {
+        return { ok: false, status: "failed", result: { error: "searchFiles can only be called from dev workspace." } };
       }
       return executeSearchFiles(argumentsJson);
     }
 
     if (toolName === "runCommand") {
-      if (activeWorkspaceId !== "cli") {
-        return { ok: false, status: "failed", result: { error: "runCommand can only be called from cli workspace." } };
+      if (activeWorkspaceId !== "dev") {
+        return { ok: false, status: "failed", result: { error: "runCommand can only be called from dev workspace." } };
       }
       return executeRunCommand(argumentsJson);
     }
