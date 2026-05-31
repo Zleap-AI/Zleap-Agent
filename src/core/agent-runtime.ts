@@ -598,6 +598,7 @@ export class AgentRuntime {
     if (!apiKey) throw new Error("Missing LLM API key. Set ZLEAP_LLM_API_KEY or provide apiKey for this server session.");
 
     this.repos.ensureConversation(input.conversationId, input.agentId, input.userId);
+    const resumableSession = this.findResumableWorkspaceSession(input);
     this.hookManager.record({
       hook: "beforeAgentTurn",
       actorId: input.userId,
@@ -606,10 +607,51 @@ export class AgentRuntime {
         conversationId: input.conversationId,
         agentId: input.agentId,
         model,
-        hasApiKey: Boolean(apiKey)
+        hasApiKey: Boolean(apiKey),
+        resumedWorkspaceId: resumableSession?.workspaceId,
+        resumedWorkspaceSessionId: resumableSession?.id
       }
     });
     this.repos.addMessage(input.conversationId, "user", input.message);
+
+    if (resumableSession) {
+      const activeSession = this.resumeWorkspaceSession(input, resumableSession);
+      const priorSessions = this.repos
+        .listWorkspaceSessions(input.conversationId, input.userId)
+        .map((session) => session.id === activeSession.id ? activeSession : session);
+      const workspaceTrace = priorSessions.some((session) => session.id === activeSession.id)
+        ? priorSessions
+        : [...priorSessions, activeSession];
+      const llmCallId = createId("llm");
+      const context = this.buildLlmContext({
+        input,
+        agent,
+        llmCallId,
+        llmBaseUrl: baseUrl,
+        llmModel: model,
+        workspaceId: activeSession.workspaceId,
+        activeSession,
+        workspaceTrace
+      });
+      this.repos.saveLlmCall(context.snapshot, context.contextSegments);
+
+      return {
+        conversationId: input.conversationId,
+        activeWorkspaceId: activeSession.workspaceId,
+        workspaceTrace,
+        contextSegments: context.contextSegments,
+        finalMessages: context.messages,
+        memoryWrites: [],
+        llmCallId,
+        callableTools: context.callableTools,
+        llm: {
+          baseUrl,
+          apiKey,
+          model,
+          temperature: input.llm?.temperature
+        }
+      };
+    }
 
     const mainSession = this.workspaceRuntime.run({ run: input, workspaceId: "main", objective: "Plan the user request and choose a workspace." });
     const workspaceTrace = [mainSession];
@@ -642,6 +684,57 @@ export class AgentRuntime {
         temperature: input.llm?.temperature
       }
     };
+  }
+
+  private findResumableWorkspaceSession(input: AgentRunInput): WorkspaceSession | undefined {
+    return [...this.repos.listWorkspaceSessions(input.conversationId, input.userId)]
+      .reverse()
+      .find((session) => session.workspaceId !== "main" && this.isResumableWorkspaceStatus(session.status));
+  }
+
+  private isResumableWorkspaceStatus(status: WorkspaceSession["status"]): boolean {
+    return status === "running"
+      || status === "failed"
+      || status === "blocked"
+      || status === "needs_user_input"
+      || status === "needs_approval";
+  }
+
+  private resumeWorkspaceSession(input: AgentRunInput, session: WorkspaceSession): WorkspaceSession {
+    const next: WorkspaceSession = {
+      ...session,
+      status: "running",
+      completedAt: undefined,
+      summary: session.summary || `继续 ${session.workspaceId} 工作空间任务。`,
+      result: {
+        ...session.result,
+        status: "running",
+        summary: session.result.summary || session.summary || `继续 ${session.workspaceId} 工作空间任务。`
+      },
+      task: {
+        ...session.task,
+        relevantUserRequest: input.message
+      },
+      localContext: {
+        ...session.localContext,
+        parentContextSummary: `用户在 ${session.workspaceId} 工作空间中断或失败后继续输入：${truncateHandoffContent(input.message, 500)}`
+      }
+    };
+    const observation = `用户继续了 ${session.workspaceId} 工作空间中的未完成任务。`;
+    if (!next.observations.includes(observation)) next.observations = [...next.observations, observation];
+    if (!next.result.observations.includes(observation)) next.result = {
+      ...next.result,
+      observations: [...next.result.observations, observation]
+    };
+    this.repos.updateWorkspaceSessionLocalContext(next);
+    this.repos.audit(input.userId, "system", "workspace_session_resumed", "workspace_session", session.id, {
+      conversationId: input.conversationId,
+      workspaceId: session.workspaceId,
+      taskId: session.taskId,
+      previousStatus: session.status,
+      userMessage: input.message
+    });
+    return next;
   }
 
   private buildLlmContext(input: {

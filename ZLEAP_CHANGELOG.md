@@ -2,6 +2,28 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-05-31 22:39 +08:00
+
+目的：
+- 支持子工作空间中断续跑：当任务在子工作空间失败、等待、被用户手动停止或需要补充信息后，下一条用户输入应自动回到原子工作空间继续，而不是丢回 main 重新调度。
+
+变更：
+- `AgentRuntime.prepare` 在新增用户消息前后检查同一会话中最后一个可续跑的非 `main` 工作空间 session，并优先恢复该 session。
+- 可续跑状态包括 `running`、`failed`、`blocked`、`needs_user_input` 和 `needs_approval`。
+- 恢复时把当前用户输入写入该子工作空间的 `WorkspaceTask.relevantUserRequest` 和 `WorkspaceLocalContext.parentContextSummary`，重建该子工作空间的 context stack 和可调用工具边界。
+- 只有子工作空间通过 `exitWorkspace` 提交结构化 `WorkspaceResult` 后，runtime 才回到 `main`。
+- `updateWorkspaceSessionLocalContext` 同步持久化 `taskJson`，避免二次中断续跑时读回旧任务文本。
+- 更新 `ZLEAP_MASTER_PLAN.md`、`docs/02-workspace-runtime.md` 和 `docs/07-context-and-prompt-contracts.md`，把“新任务进 main、未完成子空间优先续跑”的规则融合进正式契约。
+- 增加回归测试，覆盖失败的 `dev` session 被下一条用户消息直接恢复，并验证首次恢复调用暴露 `dev` 工具而不暴露 `enterWorkspace`。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+
+Git：
+- 本轮待提交。
+
 ## 2026-05-31 22:26 +08:00
 
 目的：

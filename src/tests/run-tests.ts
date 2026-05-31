@@ -194,6 +194,59 @@ class MainToFileExitToMainLLMClient implements LLMClient {
   }
 }
 
+class ResumeChildWorkspaceLLMClient implements LLMClient {
+  calls = 0;
+  inputs: ChatCompletionInput[] = [];
+
+  async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
+    this.calls += 1;
+    this.inputs.push(input);
+    if (this.calls === 1) {
+      assert.equal(input.tools.some((tool) => tool.name === "writeFile"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "runCommand"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "exitWorkspace"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), false);
+      const workspaceMessage = input.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
+      const workspaceContent = workspaceMessage?.content ?? "";
+      assert.equal(workspaceContent.includes("\"id\":\"dev\"") || workspaceContent.includes("\"id\": \"dev\""), true);
+      const localMessage = input.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
+      assert.equal((localMessage?.content ?? "").includes("继续修复刚才的写入任务"), true);
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-exit-resumed-dev",
+            type: "function",
+            function: {
+              name: "exitWorkspace",
+              arguments: JSON.stringify({
+                status: "completed",
+                summary: "恢复后的 dev 工作空间已经完成写入任务。",
+                artifacts: [{ kind: "file", ref: "notes/resumed.md", description: "恢复后写入的文件" }],
+                observations: ["用户的新输入直接接续到 dev 工作空间。"],
+                errors: [],
+                suggestedNextSteps: ["main 根据恢复后的结果回复用户。"]
+              })
+            }
+          }]
+        },
+        raw: { resumedWorkspace: "dev" }
+      };
+    }
+    assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
+    assert.equal(input.tools.some((tool) => tool.name === "writeFile"), false);
+    assert.equal(input.messages.some((message) => message.role === "tool" && message.name === "exitWorkspace"), true);
+    return {
+      message: {
+        role: "assistant",
+        content: "已经接着刚才的 dev 工作空间完成了。"
+      },
+      raw: { final: true }
+    };
+  }
+}
+
 class MainToFileExitWithExtraToolLLMClient implements LLMClient {
   calls = 0;
 
@@ -2135,6 +2188,74 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(trace.auditLogs.some((log) => log.action === "skill_usage_recorded" && log.resourceId === recalledSkill.id), true);
 }
 
+async function testInterruptedChildWorkspaceResumesBeforeMain() {
+  const repos = createRepos();
+  const conversationId = "conv-resume-child-workspace";
+  const userId = "resume-child-user";
+  const baseRun = {
+    agentId: "default-agent",
+    userId,
+    userRole: "creator" as const,
+    conversationId,
+    message: "把当前任务写入文件",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  };
+  repos.ensureConversation(conversationId, "default-agent", userId);
+  repos.addMessage(conversationId, "user", "把当前任务写入文件");
+  const workspaceRuntime = new WorkspaceRuntime(repos);
+  const mainSession = workspaceRuntime.run({
+    run: baseRun,
+    workspaceId: "main",
+    objective: "选择合适的工作空间"
+  });
+  const interruptedSession = workspaceRuntime.run({
+    run: baseRun,
+    workspaceId: "dev",
+    objective: "写入文件但中途停止"
+  });
+  interruptedSession.status = "failed";
+  interruptedSession.summary = "dev 工作空间在写入文件前被中断。";
+  interruptedSession.result = {
+    ...interruptedSession.result,
+    status: "failed",
+    summary: "dev 工作空间在写入文件前被中断。",
+    errors: ["用户手动停止或运行失败，尚未返回 main。"]
+  };
+  interruptedSession.errors = ["用户手动停止或运行失败，尚未返回 main。"];
+  interruptedSession.completedAt = new Date().toISOString();
+  repos.updateWorkspaceSessionLocalContext(interruptedSession);
+
+  const fake = new ResumeChildWorkspaceLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  const output = await runtime.run({
+    ...baseRun,
+    message: "继续修复刚才的写入任务"
+  });
+
+  assert.equal(fake.calls, 2);
+  assert.equal(output.assistantMessage, "已经接着刚才的 dev 工作空间完成了。");
+  assert.equal(output.activeWorkspaceId, "main");
+  assert.equal(output.workspaceTrace.some((session) => session.id === mainSession.id), true);
+  assert.equal(output.workspaceTrace.some((session) => session.id === interruptedSession.id), true);
+  const trace = repos.getTrace(conversationId, "creator", "creator");
+  assert.equal(trace.auditLogs.some((log) => log.action === "workspace_session_resumed" && log.resourceId === interruptedSession.id), true);
+  const persistedChild = trace.sessions.find((session) => session.id === interruptedSession.id);
+  assert.equal(persistedChild?.status, "completed");
+  assert.equal(persistedChild?.summary, "恢复后的 dev 工作空间已经完成写入任务。");
+  assert.equal(persistedChild?.task.relevantUserRequest, "继续修复刚才的写入任务");
+  const firstRunWorkspaceSegment = trace.contextSegments
+    .filter((segment) => segment.segmentType === "workspace")
+    .find((segment) => segment.content.includes("\"id\":\"dev\"") || segment.content.includes("\"id\": \"dev\""));
+  assert.equal(Boolean(firstRunWorkspaceSegment), true);
+  const firstRunToolsSegment = trace.contextSegments.find((segment) => segment.llmCallId === firstRunWorkspaceSegment?.llmCallId && segment.segmentType === "tools");
+  assert.equal(firstRunToolsSegment?.content.includes("writeFile"), true);
+  assert.equal(firstRunToolsSegment?.content.includes("enterWorkspace"), false);
+}
+
 async function testWorkspaceExitHookRunsOncePerSuccessfulExitToolCall() {
   const repos = createRepos();
   const recalledSkill = repos.createMemory({
@@ -2934,7 +3055,7 @@ async function testStreamingConversationWindowMemoryIncludesAssistantMessage() {
 async function testSkillEvidenceFromWorkspaceEvents() {
   const repos = createRepos();
   for (let index = 1; index <= 10; index += 1) {
-    const runtime = new AgentRuntime(repos, new MainToCliLLMClient());
+    const runtime = new AgentRuntime(repos, new MainToCliRunCommandExitLLMClient(`node -e "console.log('skill evidence ${index}')" `));
     await runtime.run({
       agentId: "default-agent",
       userId: "skill-evidence-user",
@@ -2949,7 +3070,7 @@ async function testSkillEvidenceFromWorkspaceEvents() {
     });
   }
 
-  const runtime = new AgentRuntime(repos, new MainToCliLLMClient());
+  const runtime = new AgentRuntime(repos, new MainToCliRunCommandExitLLMClient("node -e \"console.log('skill evidence trigger')\""));
   const output = await runtime.run({
     agentId: "default-agent",
     userId: "skill-evidence-user",
@@ -2962,12 +3083,17 @@ async function testSkillEvidenceFromWorkspaceEvents() {
       apiKey: "test-key"
     }
   });
-  const skill = output.memoryWrites.find((memory) => memory.memoryType === "skill");
+  const eventIds = new Set(repos.listMemories({ memoryType: "event", userId: "skill-evidence-user", workspaceId: "dev" }).map((memory) => memory.id));
+  const skill = repos.listMemories({ memoryType: "skill", workspaceId: "dev" }).find((memory) => metadataOf(memory).source === "eventSkillCandidate")
+    ?? output.memoryWrites.find((memory) => {
+      if (memory.memoryType !== "skill") return false;
+      const metadata = metadataOf(memory);
+      return Array.isArray(metadata.evidenceEventIds) && metadata.evidenceEventIds.every((id: string) => eventIds.has(id));
+    });
   assert.equal(Boolean(skill), true);
   const metadata = metadataOf(skill!);
   assert.equal(metadata.qualityGate.evidenceCount > 0, true);
   assert.equal(metadata.evidenceEventIds.length > 0, true);
-  const eventIds = new Set(repos.listMemories({ memoryType: "event", userId: "skill-evidence-user", workspaceId: "dev" }).map((memory) => memory.id));
   assert.equal(metadata.evidenceEventIds.every((id: string) => eventIds.has(id)), true);
 }
 
@@ -4949,6 +5075,7 @@ async function main() {
   await testAttentionBudgetTrimsHistoryButKeepsJson();
   await testAgentSelfImpressionRecallIsAgentScoped();
   await testWorkspaceExitReturnsToMain();
+  await testInterruptedChildWorkspaceResumesBeforeMain();
   await testWorkspaceExitHookRunsOncePerSuccessfulExitToolCall();
   await testDuplicateWorkspaceExitCannotOverwriteCommittedSession();
   await testMalformedWorkspaceExitDoesNotCommitSession();

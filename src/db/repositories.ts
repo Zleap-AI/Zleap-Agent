@@ -869,11 +869,13 @@ export class Repositories {
   updateWorkspaceSessionLocalContext(session: WorkspaceSession): void {
     this.db.prepare(`
       UPDATE workspace_sessions
-      SET status = ?, summary = ?, localContextJson = ?, resultJson = ?, observationsJson = ?, errorsJson = ?, completedAt = ?
+      SET status = ?, objective = ?, summary = ?, taskJson = ?, localContextJson = ?, resultJson = ?, observationsJson = ?, errorsJson = ?, completedAt = ?
       WHERE id = ?
     `).run(
       session.status,
+      session.objective,
       session.summary,
+      JSON.stringify(session.task),
       JSON.stringify(session.localContext),
       JSON.stringify(session.result),
       JSON.stringify(session.observations),

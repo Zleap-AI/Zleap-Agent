@@ -10,6 +10,8 @@
 
 代码强制决定的是：当前 active workspace、可见工具集、记忆 scope、租户归属、审批、MCP executor 是否已连接，以及所有持久化和审计行为。
 
+用户继续输入时，runtime 还要强制判断是否存在可续跑的子工作空间会话。如果同一 conversation 中最后一个非 `main` session 仍处于 `running`、`failed`、`blocked`、`needs_user_input` 或 `needs_approval`，下一条用户消息会直接恢复这个工作空间，而不是重新创建 main 编排 session。这样手动停止、工具失败、审批等待或用户补充信息之后，都能接着原来的能力边界、局部上下文和工具证据继续推进。只有子工作空间通过 `exitWorkspace` 返回结构化结果后，控制权才回到 main。
+
 用户在 Web UI 中看到的工作空间管理是能力安装/配置界面。实际创建、编辑、删除工作空间属于 creator/operator 级操作；普通模型 tool call 不能注册新工作空间，也不能自行绑定工具或修改记忆策略。
 
 ## 工作空间上下文类别

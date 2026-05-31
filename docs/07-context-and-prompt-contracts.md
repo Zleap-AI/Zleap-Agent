@@ -46,6 +46,8 @@ main workspace 可以看到的返回内容包括完整 `WorkspaceResult`：`stat
 
 完整 workspace registry 是跨 workspace 共享的能力地图。main 和子 workspace 都可以知道有哪些 sibling workspace 存在；区别是只有 main 拥有 `enterWorkspace` 调度权。子 workspace 如果判断需要其他 workspace，应该把这个判断写进 `suggestedNextSteps`，由 main workspace 决定下一次切换。
 
+对话入口需要区分“新任务”和“续跑任务”。默认情况下，新的用户请求先进入 main workspace，由 main 决定是否切换能力工作空间；但如果同一 conversation 里最后还有未完成、失败、阻塞、待用户输入或待审批的子 workspace session，下一条用户消息应直接恢复这个子 workspace。这样用户可以在任意工作空间暂停、停止、失败后继续输入，或者中途纠正任务方向，而不会因为 UI 中断或用户说“继续”就丢失子 workspace 的本地上下文。恢复后的上下文仍然使用当前子 workspace 的 `WorkspaceTask`、manifest、memory、local history、tool evidence 和可调用工具；main 只有在子 workspace 调用 `exitWorkspace` 交付结构化结果后才重新接管。
+
 `running` 只能表示一个 `WorkspaceSession` 仍在执行中。它不能作为 `exitWorkspace` 的交付状态；runtime 必须拒绝这种退出请求，并把失败作为 tool result 记录在当前子 workspace 里。
 
 `exitWorkspace` 还必须绑定当前 active child session 的运行状态：只有仍处于 `running` 的 session 可以被提交。重复退出已经 completed/failed/blocked/needs_user_input/needs_approval 的 child session 时，runtime 只能返回 failed tool result，不能覆盖第一次提交的 `WorkspaceResult`。
