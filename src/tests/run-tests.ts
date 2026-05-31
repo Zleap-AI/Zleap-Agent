@@ -1765,6 +1765,8 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("不要凭摘要脑补"), true);
   assert.equal(systemMessage.includes("详细说说"), true);
   assert.equal(systemMessage.includes("必须先读详情"), true);
+  assert.equal(systemMessage.includes("你的下一条输出应该是 readMemory 的 function call"), true);
+  assert.equal(systemMessage.includes("这是记忆幻觉"), true);
   assert.equal(systemMessage.includes("渐进式披露"), true);
   assert.equal(systemMessage.includes("生命周期 hook"), true);
   assert.equal(systemMessage.includes("writeEventMemory"), false);
@@ -1827,7 +1829,7 @@ async function testRuntimeContextAndTools() {
   assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
   const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as {
-    memoryDisclosureProtocol: { defaultDisclosure: string; detailInjectedByDefault: boolean; ordinaryMemoryReadTool: string; rules: string[] };
+    memoryDisclosureProtocol: { defaultDisclosure: string; detailInjectedByDefault: boolean; ordinaryMemoryReadTool: string; activeReadTriggers?: string[]; rules: string[] };
     crossWorkspaceImpressionMemory: Array<Record<string, unknown>>;
     currentWorkspaceResultEvents: unknown[];
     currentWorkspaceRelevantProcessEvents: unknown[];
@@ -1837,6 +1839,8 @@ async function testRuntimeContextAndTools() {
   assert.equal(memoryPayload.memoryDisclosureProtocol.detailInjectedByDefault, false);
   assert.equal(memoryPayload.memoryDisclosureProtocol.ordinaryMemoryReadTool, "readMemory");
   assert.equal(memoryPayload.memoryDisclosureProtocol.rules.some((rule) => rule.includes("必须先调用 readMemory")), true);
+  assert.equal(memoryPayload.memoryDisclosureProtocol.rules.some((rule) => rule.includes("正例")), true);
+  assert.equal(memoryPayload.memoryDisclosureProtocol.activeReadTriggers?.some((trigger) => trigger.includes("详细说说")), true);
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory.length, 1);
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory[0].disclosure, "summary_only");
   assert.equal(memoryPayload.crossWorkspaceImpressionMemory[0].detailInjected, false);
@@ -4419,12 +4423,14 @@ async function testToolBindingsAndMcpReadiness() {
   for (const field of ["status", "summary", "artifacts", "observations", "errors", "suggestedNextSteps"]) {
     assert.equal(exitWorkspaceSchema.required?.includes(field), true);
   }
-  const searchMemorySchema = JSON.parse(searchMemory?.parametersJson ?? "{}") as { properties?: Record<string, unknown> };
+  const searchMemorySchema = JSON.parse(searchMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  assert.equal(searchMemorySchema.required?.includes("reason"), true);
   assert.equal(Boolean(searchMemorySchema.properties?.memoryType), true);
   assert.equal(Boolean(searchMemorySchema.properties?.userId), false);
   assert.equal(Boolean(searchMemorySchema.properties?.agentId), false);
   assert.equal(Boolean(searchMemorySchema.properties?.workspaceId), false);
   const readMemorySchema = JSON.parse(readMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  assert.equal(readMemorySchema.required?.includes("reason"), true);
   assert.equal(readMemorySchema.required?.includes("memoryId"), true);
   assert.equal(Boolean(readMemorySchema.properties?.workspaceId), false);
   assert.equal(Boolean(readMemorySchema.properties?.userId), false);

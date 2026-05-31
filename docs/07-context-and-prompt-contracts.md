@@ -275,6 +275,8 @@ workspace memory 包含三类：
 
 `runtime_context.memory` 必须是投影视图，而不是原始 `MemoryRow[]` dump。不要注入完整 `detail`、`detailSnippet`、完整 `metadataJson`、原始 evidence arrays 或 source transcript windows；这些内容留在 SQLite、workspace sessions、tool calls 和 audit/debug views 中，需要时由模型通过 `readMemory(memoryId)` 渐进读取。
 
+提示词必须让 `readMemory` 成为主动动作，而不是摆设。用户追问记忆细节、要求展开旧事实、要求解释“你为什么知道”，或当前 summary 不足以支持可靠回答时，下一步应该是 `readMemory` function call。上下文中的 `memoryDisclosureProtocol` 要给出正反例：简短身份确认可以基于 summary，详情追问必须读取 detail；没有读取 detail 时不能把 summary 扩写成详细事实。
+
 ## 7. 当前任务上下文
 
 当前任务上下文是当前任务包。

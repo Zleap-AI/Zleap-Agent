@@ -104,11 +104,11 @@ const toolSchemas = {
   searchMemory: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么自动召回不足以回答当前问题。" },
-      query: { type: "string" },
+      reason: { type: "string", description: "为什么自动召回不足以回答当前问题；不要把它当普通搜索或每轮默认动作。" },
+      query: { type: "string", description: "具体要查的旧记忆问题，避免泛泛写“记忆”“用户信息”。" },
       memoryType: { type: "string", enum: ["impression", "event", "skill"] }
     },
-    required: ["query"],
+    required: ["reason", "query"],
     additionalProperties: false
   },
   readSkill: {
@@ -123,10 +123,10 @@ const toolSchemas = {
   readMemory: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么需要读取这条记忆的完整详情，而不是只看摘要；例如用户追问详细说说、要求展开或需要核对细节。" },
+      reason: { type: "string", description: "为什么必须读取完整详情，而不是只看摘要；用户追问“详细说说/展开/具体一点/还有哪些细节”时必须调用。" },
       memoryId: { type: "string", description: "要读取的 memory id，来自自动召回或 searchMemory 结果。" }
     },
-    required: ["memoryId"],
+    required: ["reason", "memoryId"],
     additionalProperties: false
   },
   writeUserImpression: {
@@ -178,7 +178,9 @@ const DEFAULT_SYSTEM_PROMPT = [
   "回复语言必须跟随用户当前消息的主要语言：用户用中文就用中文，用户用英文就用英文；除非用户明确要求翻译或指定另一种语言，不要中英混杂或随意切换语言。",
   "searchMemory 是低频补查工具；每轮上下文已经自动召回主要记忆，只有自动上下文不足、用户明确追问旧记忆，或任务依赖旧事件/偏好/经验证据时才调用。",
   "Memory 采用渐进式披露：上下文和搜索结果只适合先看 id、标题、摘要或片段，默认不注入完整 detail；当用户主动要求回忆、摘要不足以回答、或需要核对某条 impression/event 的详情时，调用 readMemory(memoryId) 读取完整 detail，不要凭摘要脑补。",
-  "如果用户在你基于自动召回摘要回答后继续追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”等，且上下文里已有相关 memory id，这是 readMemory 的典型触发场景；必须先读详情，再展开回答。",
+  "强制规则：如果用户在你基于自动召回摘要回答后继续追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”等，且上下文里已有相关 memory id，下一步必须先调用 readMemory。不要直接输出扩写后的自然语言回答。",
+  "操作示例：用户问“你认识我吗”时，可以用自动召回的 impression summary 简短回答；如果用户接着说“详细说说”，你的下一条输出应该是 readMemory 的 function call，参数使用该 impression 的 memoryId，而不是直接编写更长的自然语言说明。",
+  "操作反例：只根据 title/summary 把用户背景、经历、项目、时间线扩写成详细叙述，这是记忆幻觉；必须先 readMemory 获取 detail。",
   "Skill 记忆采用渐进式披露：上下文只给名称和简介；当某条 Skill 明显相关并能减少失败时，先调用 readSkill 读取完整步骤再应用。",
   "当用户表达长期偏好、长期背景、自我认知更新或已脱敏的可复用经验时，可以通过对应记忆写入工具请求 runtime 写入；事件记忆由 runtime 生命周期 hook 自动提取。",
   "除非用户明确要求查看系统内部状态，否则像真人助手一样直接回答用户。"

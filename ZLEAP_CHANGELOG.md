@@ -2,6 +2,27 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 06:54 +08:00
+
+目的：
+- 让 agent 更主动地触发 `readMemory`，解决用户追问记忆详情时只根据摘要扩写、不读取完整记忆的问题。
+
+变更：
+- 强化系统运行策略和默认系统提示词，把“详细说说 / 展开讲讲 / 具体一点 / 还有哪些细节”等追问写成 `readMemory` 的明确触发场景。
+- 在 `runtime_context.memory.memoryDisclosureProtocol` 中增加主动读取触发条件、正例和反例，明确“先简答、追问详情则读 memory detail”的渐进披露流程。
+- 强化 `searchMemory` 与 `readMemory` 的工具 schema：要求填写 `reason`，并在参数说明里约束 `searchMemory` 不能作为普通搜索或默认动作。
+- 更新主计划、框架概念文档和 memory/context docs，明确该策略依赖 agent 主动判断和提示词/tool schema，不通过 runtime 强制 `tool_choice`。
+- 增加测试断言，覆盖主动读取提示词、正反例、`activeReadTriggers` 以及 memory 工具 reason 参数要求。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 06:44 +08:00
 
 目的：

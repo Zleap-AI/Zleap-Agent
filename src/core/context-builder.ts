@@ -109,9 +109,17 @@ function memoryDisclosureProtocol(userMessage: string): Record<string, unknown> 
     ordinaryMemoryReadTool: "readMemory",
     skillReadTool: "readSkill",
     currentUserMessageLooksLikeDetailRequest: detailIntent,
+    activeReadTriggers: [
+      "用户追问详细说说、展开讲讲、具体一点、还有哪些细节。",
+      "用户的问题直接要求回忆过去、解释你为什么知道、或核对旧记忆依据。",
+      "自动召回/searchMemory 只给了 summary，但回答需要完整 detail 才可靠。"
+    ],
     rules: [
       "自动召回的 impression/event 只提供 id、标题、摘要和读取入口；过程事件也不注入 detailSnippet，不包含完整 detail。",
       "如果用户追问某条已召回记忆的详情、要求展开说明，或回答需要依赖完整事实，必须先调用 readMemory(memoryId)。",
+      "如果 currentUserMessageLooksLikeDetailRequest=true，优先从已召回 impression/event 中选择最相关 memoryId 调用 readMemory；不要先自然语言扩写。",
+      "正例：用户先问“你认识我吗”，你可基于 impression summary 简答；用户随后说“详细说说”，下一步必须 readMemory，而不是继续自然语言回答。",
+      "反例：把 summary 里的三四个词扩写成项目经历、履历或时间线，这是错误的；没有 readMemory 返回 detail，就不能制造细节。",
       "不要把 summary/snippet 扩写成看似详细的事实；没有 readMemory 返回的 detail，就只能明确基于摘要简述。"
     ]
   };
@@ -159,7 +167,11 @@ function runtimeSystemContract(input: {
     "- searchMemory 是低频补查工具，不是每轮默认动作。runtime 每轮已经自动召回印象、当前工作空间结果事件、相关过程事件和 Skill 简介；只有自动上下文明显不足、用户明确问“你还记得/之前说过/以前做过什么”、需要核对不在当前上下文里的旧事件/偏好/经验，或当前任务明确依赖旧记忆证据时，才调用 searchMemory。",
     "- 不要为了确认当前上下文里已经出现的信息而调用 searchMemory；不要把 searchMemory 当作普通搜索、workspace 发现、工具发现或每轮安全检查；不要连续用多个泛泛 query 试探记忆库。调用时必须使用具体 query，并优先用 memoryType 限定 impression/event/skill。",
     "- Memory 也采用渐进式披露：上下文和 searchMemory 结果通常只适合先看 id/title/summary/snippet，默认不注入完整 detail。若用户主动要求回忆、你需要依据某条 impression/event 的具体内容回答、或摘要不足以确认事实，应调用 readMemory(memoryId) 读取该条记忆的完整 detail；不要凭摘要脑补。",
-    "- 特别注意：如果用户在你基于自动召回摘要回答后继续追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”等，且上下文里已有相关 memory id，这就是 readMemory 的典型触发场景。必须先读详情，再给用户展开说明；不要直接把 summary 改写成更长的回答。",
+    "- 主动读取规则：当用户追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”“你为什么知道”“你还记得什么”等，或者用户要求解释某个已召回 impression/event 的依据时，要先从当前 memory 分区或 searchMemory 结果中选出最相关的 memoryId 调用 readMemory，再回答。",
+    "- 特别注意：如果用户在你基于自动召回摘要回答后继续追问详情，且上下文里已有相关 memory id，这就是 readMemory 的典型触发场景。必须先读详情，再给用户展开说明；不要直接把 summary 改写成更长的回答。",
+    "- 如果上下文里没有足够相关的 memory id，但用户明确在问旧记忆或过往细节，先用具体 query 调用 searchMemory；找到候选后，再用 readMemory 读取最相关的一条，而不是直接回答“没有更多细节”。",
+    "- 操作示例：用户问“你认识我吗”时，可以用自动召回的 impression summary 简短回答；如果用户接着说“详细说说”，你的下一条输出应该是 readMemory 的 function call，参数使用该 impression 的 memoryId，而不是直接编写更长的自然语言说明。",
+    "- 操作反例：只根据 title/summary 把用户背景、经历、项目、时间线扩写成详细叙述，这是记忆幻觉；必须先 readMemory 获取 detail。",
     "- Skill 采用渐进式披露：上下文里只会看到当前工作空间最近的 skill 名称和简介。如果某条 skill 简介与当前任务高度相关、能减少失败或能指导工具使用，先调用 readSkill 读取完整 procedure/appliesWhen/avoidWhen/detail，再应用该经验。",
     "- 当用户或 agent 明确要求沉淀可复用经验，或你发现了已经脱敏、可复用且能减少未来失败的方法时，可以调用 writeSkillMemory；skill 必须属于当前工作空间，并包含 procedure、appliesWhen、avoidWhen、desensitized=true 和 confidence。",
     "- Skill 不是普通总结。只有可迁移的方法、失败后找到的稳定规避方式、经过验证的工具流程、或能降低同类任务失败率的经验才值得写入。不要写“认真检查”“合理使用工具”“保持上下文”这类空泛内容。",

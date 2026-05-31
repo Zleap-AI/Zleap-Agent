@@ -403,6 +403,8 @@ event/skill 的召回开关由当前 active workspace 的 `memoryPolicyJson` 控
 
 Impression recall 不做 query 选择性筛选，固定载入当前 user / agent scope 下最新有效的前 20 条投影视图。Impression 表达对人和 agent 自我的稳定认知，预期数量有自然上限，不像 event log 一样无限增长。
 
+`readMemory` 的触发不能只写成“必要时可调用”。系统提示词和工具 schema 要把它描述成明确操作规程：当用户追问“详细说说”“展开讲讲”“具体一点”“还有哪些细节”，或者要求解释某条已召回 impression/event 的依据时，模型应先从当前 memory projection 或 `searchMemory` 结果中选择最相关的 memoryId，调用 `readMemory`，再回答。只根据 title/summary 扩写成详细履历、时间线、项目背景或旧事件过程，属于记忆幻觉。这个策略依赖 agent 主动判断，不通过 runtime 强制 `tool_choice`。
+
 `final_messages` 不属于 memory，也不属于 prompt context 的一层。它只是原始 LLM 请求日志，用于在 Web UI 中核对最终 provider payload；memory 召回逻辑不能从这个日志反向再注入上下文。
 
 ## 记忆写入权限
