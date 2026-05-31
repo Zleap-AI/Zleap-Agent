@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 06:38 +08:00
+
+目的：
+- 按用户要求把 `memory` 的展开分区直接放回上下文窗口堆栈内部，避免堆栈下方再出现一个分离的 memory 板块。
+
+变更：
+- 将 `概念介绍` 页面中独立的 `memory 分区展开` 面板移入第 4 层 `记忆投影` 堆栈卡片内部。
+- 保留四个 memory 二级分区说明和渐进披露标签：`crossWorkspaceImpressionMemory`、`currentWorkspaceResultEvents`、`currentWorkspaceRelevantProcessEvents`、`currentWorkspaceSkillMemory`、`readMemory(memoryId)`、`readSkill(skillId)`。
+- 更新主计划和 `zleap-agent-framework.md`，明确 memory 子层应直接嵌入上下文堆栈的 `memory` 层。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm test` 通过。
+- `npm run build` 通过。
+- `git diff --check` 通过，仅有 Windows 换行提示。
+- 浏览器验证通过：刷新 `http://localhost:4173/` 并打开 `概念介绍`，`memory 分区展开` 已位于第 4 层 `记忆投影` 卡片内部，页面不存在独立的 `context-memory-detail` 面板，四个 memory 子分区无横向溢出。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 06:20 +08:00
 
 目的：

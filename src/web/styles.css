@@ -2023,12 +2023,12 @@ td button {
   border-left: 4px solid #c2410c;
 }
 
-.context-memory-detail {
+.memory-detail-in-stack {
   margin-top: 14px;
   padding: 14px;
   border: 1px solid #d7dee7;
   border-radius: 8px;
-  background: #f8fafb;
+  background: #ffffff;
 }
 
 .memory-detail-heading {
@@ -2050,7 +2050,7 @@ td button {
 
 .memory-detail-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2058,6 +2058,7 @@ td button {
   display: grid;
   gap: 8px;
   min-width: 0;
+  overflow: hidden;
   padding: 12px;
   border: 1px solid #dce2e8;
   border-radius: 8px;
@@ -2081,7 +2082,10 @@ td button {
 
 .memory-detail-grid code {
   display: block;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
   color: #4a5662;
   font-size: 11px;
 }

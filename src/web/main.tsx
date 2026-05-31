@@ -960,7 +960,13 @@ function ConceptIntroTab() {
               code: "memory",
               title: "记忆投影",
               summary: "runtime_context.memory 的分区投影视图，默认只注入 compact projection，不回灌原始 detail。",
-              items: ["跨工作空间印象记忆", "当前工作空间结果事件", "当前工作空间相关过程事件", "当前工作空间经验记忆"]
+              items: ["跨工作空间印象记忆", "当前工作空间结果事件", "当前工作空间相关过程事件", "当前工作空间经验记忆"],
+              memoryDetails: [
+                ["crossWorkspaceImpressionMemory", "跨工作空间印象记忆", "最新有效 20 条投影", "用户印象与 Agent 自我印象；默认不做 query 筛选，详情未注入，必要时用 readMemory。"],
+                ["currentWorkspaceResultEvents", "当前工作空间结果事件", "约 50 条旧结果时间线", "记录过去完成了什么、失败了什么、产出在哪里；不复制原始对话。"],
+                ["currentWorkspaceRelevantProcessEvents", "当前工作空间相关过程事件", "少量 FTS 相关过程索引", "只给 id/title/summary/readMemory 提示；过程 detail 不直接进入上下文。"],
+                ["currentWorkspaceSkillMemory", "当前工作空间经验记忆", "近 N 条名称和简介", "先看简介判断相关性；高度相关时调用 readSkill 读取 procedure/appliesWhen/avoidWhen。"]
+              ]
             },
             {
               key: "local_conversation",
@@ -991,39 +997,36 @@ function ConceptIntroTab() {
                 <ul>
                   {layer.items.map((item) => <li key={item}>{item}</li>)}
                 </ul>
+                {"memoryDetails" in layer && Array.isArray(layer.memoryDetails) && (
+                  <div className="memory-detail-in-stack">
+                    <div className="memory-detail-heading">
+                      <strong>memory 分区展开</strong>
+                      <span>自动注入的是索引和摘要；详情靠 readMemory / readSkill 渐进读取</span>
+                    </div>
+                    <div className="memory-detail-grid">
+                      {layer.memoryDetails.map(([code, title, badge, desc]) => (
+                        <article key={code}>
+                          <div>
+                            <strong>{title}</strong>
+                            <small>{badge}</small>
+                          </div>
+                          <code>{code}</code>
+                          <p>{desc}</p>
+                        </article>
+                      ))}
+                    </div>
+                    <div className="progressive-disclosure">
+                      <span>summary_only</span>
+                      <span>detailInjected=false</span>
+                      <span>detailAvailable=true</span>
+                      <span>readMemory(memoryId)</span>
+                      <span>readSkill(skillId)</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </article>
           ))}
-        </div>
-        <div className="context-memory-detail">
-          <div className="memory-detail-heading">
-            <strong>memory 分区展开</strong>
-            <span>自动注入的是索引和摘要；详情靠 readMemory / readSkill 渐进读取</span>
-          </div>
-          <div className="memory-detail-grid">
-            {[
-              ["crossWorkspaceImpressionMemory", "跨工作空间印象记忆", "最新有效 20 条投影", "用户印象与 Agent 自我印象；默认不做 query 筛选，详情未注入，必要时用 readMemory。"],
-              ["currentWorkspaceResultEvents", "当前工作空间结果事件", "约 50 条旧结果时间线", "记录过去完成了什么、失败了什么、产出在哪里；不复制原始对话。"],
-              ["currentWorkspaceRelevantProcessEvents", "当前工作空间相关过程事件", "少量 FTS 相关过程索引", "只给 id/title/summary/readMemory 提示；过程 detail 不直接进入上下文。"],
-              ["currentWorkspaceSkillMemory", "当前工作空间经验记忆", "近 N 条名称和简介", "先看简介判断相关性；高度相关时调用 readSkill 读取 procedure/appliesWhen/avoidWhen。"]
-            ].map(([code, title, badge, desc]) => (
-              <article key={code}>
-                <div>
-                  <strong>{title}</strong>
-                  <small>{badge}</small>
-                </div>
-                <code>{code}</code>
-                <p>{desc}</p>
-              </article>
-            ))}
-          </div>
-          <div className="progressive-disclosure">
-            <span>summary_only</span>
-            <span>detailInjected=false</span>
-            <span>detailAvailable=true</span>
-            <span>readMemory(memoryId)</span>
-            <span>readSkill(skillId)</span>
-          </div>
         </div>
         <div className="prompt-assembly-lane">
           <div>
