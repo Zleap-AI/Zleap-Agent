@@ -220,7 +220,7 @@ Verification:
 - `npm run build` passed.
 
 Git:
-- Recorded in commit `6f67690 fix: show skill disclosure in context`.
+- Recorded in commit `2153447 fix: show skill disclosure in context`.
 
 ## 2026-05-31 07:25 +08:00
 
