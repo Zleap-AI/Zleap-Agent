@@ -474,7 +474,7 @@ textarea {
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   gap: 10px;
   padding: 12px;
   border-top: 1px solid #dce2e8;
@@ -500,6 +500,16 @@ textarea {
   flex: 0 0 auto;
   border-color: #f5b5b0;
   color: #9b1c1c;
+}
+
+.danger {
+  border-color: #d9a5a0;
+  background: #fff5f4;
+  color: #9b1c1c;
+}
+
+.danger:hover:not(:disabled) {
+  background: #fde8e7;
 }
 
 .empty {

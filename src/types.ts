@@ -44,6 +44,7 @@ export type AgentRunInput = {
   userRole: UserRole;
   conversationId: string;
   message: string;
+  abortSignal?: AbortSignal;
   llm?: {
     baseUrl?: string;
     model?: string;

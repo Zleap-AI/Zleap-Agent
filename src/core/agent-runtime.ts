@@ -144,7 +144,8 @@ export class AgentRuntime {
         model: prepared.llm.model,
         messages: prepared.finalMessages,
         tools: prepared.callableTools,
-        temperature: prepared.llm.temperature
+        temperature: prepared.llm.temperature,
+        signal: input.abortSignal
       });
       this.repos.markLlmCallCompleted(prepared.llmCallId, llmResponseSnapshot(completion));
     } catch (error) {
@@ -227,7 +228,8 @@ export class AgentRuntime {
             model: prepared.llm.model,
             messages,
             tools: prepared.callableTools,
-            temperature: prepared.llm.temperature
+            temperature: prepared.llm.temperature,
+            signal: input.abortSignal
           })) {
             if (event.type === "content") roundText += event.text;
             if (event.type === "tool_call_delta") this.mergeToolCallDelta(toolCallDeltas, event);
@@ -526,7 +528,8 @@ export class AgentRuntime {
           model: prepared.llm.model,
           messages: prepared.finalMessages,
           tools: prepared.callableTools,
-          temperature: prepared.llm.temperature
+          temperature: prepared.llm.temperature,
+          signal: input.abortSignal
         })) {
           assistantMessage += chunk;
           yield { type: "delta", text: chunk };
@@ -1320,7 +1323,8 @@ export class AgentRuntime {
               model: prepared.llm.model,
               messages,
               tools: prepared.callableTools,
-              temperature: prepared.llm.temperature
+              temperature: prepared.llm.temperature,
+              signal: input.abortSignal
             });
             this.repos.markLlmCallCompleted(exitRequest.llmCallId, llmResponseSnapshot(completion, {
               toolLoopRound: round,
@@ -1367,7 +1371,8 @@ export class AgentRuntime {
           model: prepared.llm.model,
           messages,
           tools: prepared.callableTools,
-          temperature: prepared.llm.temperature
+          temperature: prepared.llm.temperature,
+          signal: input.abortSignal
         });
         this.repos.markLlmCallCompleted(llmCallId, llmResponseSnapshot(completion, {
           toolLoopRound: round

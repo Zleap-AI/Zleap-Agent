@@ -2,6 +2,27 @@
 
 This file records meaningful project changes with local timestamps so future work can be traced alongside Git history.
 
+## 2026-05-31 19:56 +08:00
+
+Purpose:
+- Add a Stop control to the chat composer so users can interrupt a running streamed agent turn.
+
+Changed:
+- Added a visible `停止` button while the Chat turn is generating.
+- The Web UI now aborts the active stream fetch and marks streaming messages as stopped rather than failed/retryable.
+- The streaming API now propagates client disconnect cancellation into `AgentRuntime` and provider fetch/stream reads through `AbortSignal`.
+- Updated the master plan with the stop-running behavior.
+
+Verification:
+- `npm run typecheck` passed.
+- `npm test` passed.
+- `npm run build` passed.
+- Restarted the local Web server on `http://localhost:4173/`; `/api/health` returned `{"ok":true}`.
+- Browser verification passed: during a running streamed request the `停止` button appears, clicking it stops the visible stream and shows `已停止运行。`.
+
+Git:
+- Pending.
+
 ## 2026-05-31 19:48 +08:00
 
 Purpose:

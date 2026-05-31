@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, LLMCallSnapshot, McpServerDefinition, MemoryRow, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
 import "./styles.css";
@@ -976,6 +976,7 @@ function ChatTab() {
   const [selectedLlmCallId, setSelectedLlmCallId] = useState(cached.selectedLlmCallId ?? "");
   const [showRawContextLogs, setShowRawContextLogs] = useState(false);
   const [loading, setLoading] = useState(false);
+  const currentRunControllerRef = useRef<AbortController | null>(null);
   const selectedUserMessage = selectedTurnId ? messages.find((item) => item.id === selectedTurnId && item.role === "用户") : undefined;
   const visibleOutput = selectedUserMessage ? selectedUserMessage.turnOutput ?? null : output;
   const workspaceView = describeWorkspaceView(visibleOutput);
@@ -1051,9 +1052,11 @@ function ChatTab() {
 
   async function sendMessage(retryText?: string) {
     const cleanMessage = typeof retryText === "string" ? retryText : message;
-    if (!cleanMessage.trim() || !agent) return;
+    if (loading || !cleanMessage.trim() || !agent) return;
     const userMessageId = createLocalId("user-msg");
     const assistantMessageId = createLocalId("assistant-msg");
+    const controller = new AbortController();
+    currentRunControllerRef.current = controller;
     setLoading(true);
     setError("");
     setRetryMessage("");
@@ -1088,6 +1091,7 @@ function ChatTab() {
         llmCallId?: string;
         items?: WorkspaceProcessItem[];
       }) => {
+        if (controller.signal.aborted) throw new Error("运行已停止。");
         const workspaceMessageId = createLocalId(`workspace-${payload.workspaceId}`);
         const baseContent = payload.text.trim()
           ? `**${payload.title}**\n\n${payload.text}`
@@ -1118,6 +1122,7 @@ function ChatTab() {
         }));
         let streamed = "";
         for (const char of Array.from(baseContent)) {
+          if (controller.signal.aborted) throw new Error("运行已停止。");
           streamed += char;
           setMessages((items) => items.map((item) => item.id === workspaceMessageId ? { ...item, content: streamed, streaming: true } : item));
           await sleep(8);
@@ -1135,7 +1140,8 @@ function ChatTab() {
           conversationId,
           message: cleanMessage,
           llm: { baseUrl: effectiveBaseUrl, model, apiKey: apiKey || undefined }
-        })
+        }),
+        signal: controller.signal
       });
       if (!response.ok || !response.body) throw new Error(`流式请求失败：${response.status}`);
 
@@ -1146,6 +1152,7 @@ function ChatTab() {
 
       while (true) {
         const { done, value } = await reader.read();
+        if (controller.signal.aborted) throw new Error("运行已停止。");
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const events = buffer.split("\n\n");
@@ -1168,6 +1175,7 @@ function ChatTab() {
           }
           if (payload.type === "delta") {
             for (const char of Array.from(payload.text)) {
+              if (controller.signal.aborted) throw new Error("运行已停止。");
               assistantText += char;
               setMessages((items) => {
                 return items.map((item) => item.id === assistantMessageId ? { ...item, content: assistantText, streaming: true } : item);
@@ -1200,6 +1208,17 @@ function ChatTab() {
         }
       }
     } catch (err) {
+      if (controller.signal.aborted) {
+        setError("");
+        setRetryMessage("");
+        setMessages((items) => items.map((item) => item.id === assistantMessageId
+          ? { ...item, content: item.content || "已停止运行。", streaming: false, failed: false, requestText: undefined }
+          : item.streaming
+            ? { ...item, streaming: false }
+            : item));
+        void loadConversationTrace(conversationId);
+        return;
+      }
       const messageText = err instanceof Error ? err.message : String(err);
       setError(messageText);
       setRetryMessage(cleanMessage);
@@ -1209,8 +1228,13 @@ function ChatTab() {
           : item);
       });
     } finally {
+      if (currentRunControllerRef.current === controller) currentRunControllerRef.current = null;
       setLoading(false);
     }
+  }
+
+  function stopCurrentRun() {
+    currentRunControllerRef.current?.abort();
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -1364,6 +1388,7 @@ function ChatTab() {
             onKeyDown={handleComposerKeyDown}
             placeholder="输入干净的用户消息..."
           />
+          {loading && <button className="danger" onClick={stopCurrentRun}>停止</button>}
           <button className="primary" disabled={loading} onClick={() => sendMessage()}>{loading ? "生成中" : "发送"}</button>
         </div>
       </section>

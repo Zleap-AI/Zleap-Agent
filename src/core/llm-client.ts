@@ -8,6 +8,7 @@ export type ChatCompletionInput = {
   messages: LLMMessage[];
   tools: ToolDefinition[];
   temperature?: number;
+  signal?: AbortSignal;
 };
 
 export type ChatCompletionOutput = {
@@ -76,8 +77,30 @@ function retryDelayMs(attempt: number): number {
   return Math.min(1600, 200 * 2 ** Math.max(0, attempt - 1));
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function runStoppedError(): Error {
+  return new Error("运行已被用户停止。");
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw runStoppedError();
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(runStoppedError());
+      return;
+    }
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(runStoppedError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function positiveEnvInt(name: string, fallback: number): number {
@@ -95,18 +118,30 @@ function streamIdleTimeoutMs(): number {
 
 async function readStreamChunkWithIdleTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeout = setTimeout(() => {
       reject(new Error(`LLM 流式响应超时：${Math.round(timeoutMs / 1000)} 秒没有收到新数据。`));
     }, timeoutMs);
   });
+  const abortPromise = new Promise<never>((_, reject) => {
+    if (!signal) return;
+    if (signal.aborted) {
+      reject(runStoppedError());
+      return;
+    }
+    onAbort = () => reject(runStoppedError());
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
   try {
-    return await Promise.race([reader.read(), timeoutPromise]);
+    return await Promise.race([reader.read(), timeoutPromise, abortPromise]);
   } finally {
     if (timeout) clearTimeout(timeout);
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -161,11 +196,15 @@ async function fetchWithProviderRetry(input: {
   endpoint: string;
   apiKey: string;
   body: unknown;
+  signal?: AbortSignal;
 }): Promise<Response> {
   let lastNetworkError: unknown;
   for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt += 1) {
+    throwIfAborted(input.signal);
     let response: Response;
     const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    input.signal?.addEventListener("abort", onAbort, { once: true });
     const timeout = setTimeout(() => controller.abort(), providerFetchTimeoutMs());
     try {
       response = await fetch(input.endpoint, {
@@ -178,14 +217,16 @@ async function fetchWithProviderRetry(input: {
         signal: controller.signal
       });
     } catch (error) {
+      if (input.signal?.aborted) throw runStoppedError();
       lastNetworkError = error;
       if (attempt < MAX_PROVIDER_ATTEMPTS) {
-        await delay(retryDelayMs(attempt));
+        await delay(retryDelayMs(attempt), input.signal);
         continue;
       }
       throw formatFetchError(error, input.endpoint);
     } finally {
       clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", onAbort);
     }
 
     if (response.ok || !isRetryableStatus(response.status) || attempt === MAX_PROVIDER_ATTEMPTS) {
@@ -193,7 +234,7 @@ async function fetchWithProviderRetry(input: {
     }
 
     await response.arrayBuffer().catch(() => undefined);
-    await delay(retryDelayMs(attempt));
+    await delay(retryDelayMs(attempt), input.signal);
   }
 
   throw formatFetchError(lastNetworkError ?? new Error("Provider retry attempts exhausted."), input.endpoint);
@@ -223,7 +264,8 @@ export class OpenAICompatibleClient implements LLMClient {
             parameters: JSON.parse(tool.parametersJson)
           }
         }))
-      }
+      },
+      signal: input.signal
     });
 
     if (!response.ok) {
@@ -261,7 +303,8 @@ export class OpenAICompatibleClient implements LLMClient {
             parameters: JSON.parse(tool.parametersJson)
           }
         }))
-      }
+      },
+      signal: input.signal
     });
 
     if (!response.ok) {
@@ -277,7 +320,7 @@ export class OpenAICompatibleClient implements LLMClient {
 
     try {
       while (true) {
-        const { done, value } = await readStreamChunkWithIdleTimeout(reader, idleTimeoutMs);
+        const { done, value } = await readStreamChunkWithIdleTimeout(reader, idleTimeoutMs, input.signal);
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const events = buffer.split("\n\n");

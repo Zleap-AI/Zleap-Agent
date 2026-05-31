@@ -86,6 +86,12 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/agent/run/stream") {
       const body = await readJson<AgentRunInput>(request);
       if (body.llm?.baseUrl) body.llm.baseUrl = normalizeProviderBaseUrl(body.llm.baseUrl);
+      const abortController = new AbortController();
+      const stopRun = () => {
+        if (!response.writableEnded && !abortController.signal.aborted) abortController.abort();
+      };
+      request.on("aborted", stopRun);
+      response.on("close", stopRun);
       response.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
@@ -93,14 +99,19 @@ const server = http.createServer(async (request, response) => {
         "Access-Control-Allow-Origin": "*"
       });
       try {
-        for await (const event of runtime.runStream(body)) {
+        for await (const event of runtime.runStream({ ...body, abortSignal: abortController.signal })) {
+          if (abortController.signal.aborted || response.writableEnded) break;
           response.write(`data: ${JSON.stringify(event)}\n\n`);
         }
-        response.end();
+        if (!response.writableEnded) response.end();
       } catch (error) {
+        if (abortController.signal.aborted) return;
         const message = error instanceof Error ? error.message : String(error);
         response.write(`data: ${JSON.stringify({ type: "error", error: message })}\n\n`);
         response.end();
+      } finally {
+        request.off("aborted", stopRun);
+        response.off("close", stopRun);
       }
       return;
     }
