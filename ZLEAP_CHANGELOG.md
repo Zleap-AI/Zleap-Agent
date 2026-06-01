@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 10:54 +08:00
+
+目的：
+- 修复用户身份记忆误把“我是谁吗”这类疑问句写成长期 impression 的问题。
+
+变更：
+- 更新 `src/core/memory-service.ts`：新增疑问/占位型 impression 质量检查，自动 hook 和模型主动 `writeUserImpression` 都不能把“谁吗”“什么”“不知道”“需要你提供”等未确认内容写成稳定身份记忆。
+- 更新 `src/tests/run-tests.ts`：新增回归测试，覆盖模型主动写入坏身份记忆被拒绝，以及 hook 遇到“我是谁吗/不知道你是谁”时不自动写入。
+- 已通过 Memory API 软删除本地 SQLite 里两条已存在的错误 impression 记录。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:59 +08:00
 
 目的：

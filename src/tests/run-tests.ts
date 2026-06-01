@@ -3774,6 +3774,58 @@ async function testImpressionMemoryToolScopeIsCodeBound() {
   assert.equal(agentTrace.toolCalls.some((call) => call.toolName === "writeAgentSelfImpression" && call.status === "failed"), true);
 }
 
+async function testQuestionLikeImpressionWritesAreRejected() {
+  const repos = createRepos();
+  const badToolWrite = new SingleToolRequestLLMClient("writeUserImpression", {
+    title: "用户身份背景",
+    summary: "用户的稳定身份/背景是：谁吗",
+    detail: "模型不应把用户提问中的疑问词写成长期身份记忆。"
+  });
+  const runtime = new AgentRuntime(repos, badToolWrite);
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "question-memory-user",
+    userRole: "creator",
+    conversationId: "conv-question-memory-tool",
+    message: "你知道我是谁吗",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(badToolWrite.lastToolResult.includes("not a question or placeholder"), true);
+  assert.equal(repos.listMemories({ memoryType: "impression", userId: "question-memory-user" }).length, 0);
+
+  const hookRuntime = new AgentRuntime(repos, {
+    async complete(): Promise<ChatCompletionOutput> {
+      return {
+        message: {
+          role: "assistant",
+          content: "我还不知道你是谁，需要你提供或授权我查询后才能确认。"
+        },
+        raw: { noStableIdentity: true }
+      };
+    },
+    async *stream(): AsyncGenerator<string> {
+      yield "我还不知道你是谁，需要你提供或授权我查询后才能确认。";
+    }
+  });
+  await hookRuntime.run({
+    agentId: "default-agent",
+    userId: "question-memory-user",
+    userRole: "creator",
+    conversationId: "conv-question-memory-hook",
+    message: "我是谁吗",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(repos.listMemories({ memoryType: "impression", userId: "question-memory-user" }).length, 0);
+}
+
 async function testMultiStepToolLoop() {
   const repos = createRepos();
   const fake = new MultiStepToolLoopLLMClient();
@@ -5918,6 +5970,7 @@ async function main() {
   await testEventHookSkillExtractionIsDesensitizedAndDeduplicated();
   await testMemoryToolCallLoop();
   await testImpressionMemoryToolScopeIsCodeBound();
+  await testQuestionLikeImpressionWritesAreRejected();
   await testMultiStepToolLoop();
   await testToolLoopStopsAtLimit();
   await testStreamingMemoryToolCallLoop();

@@ -33,6 +33,31 @@ function cleanImpressionValue(value: string): string {
     .trim();
 }
 
+function isQuestionLikeImpressionValue(value: string): boolean {
+  const compact = value.replace(/\s+/g, "");
+  if (!compact) return true;
+  if (/[?？]/.test(compact)) return true;
+  if (/^(谁|谁吗|什么|哪位|哪个|哪里|是否|是不是|吗|呢|未知|不知道|不清楚)$/.test(compact)) return true;
+  if (/^(谁|什么|哪位|哪个)/.test(compact)) return true;
+  return /(不知道|不清楚|无法确认|不能确认|需要你提供|需要用户提供|授权.*查询)/.test(compact);
+}
+
+function extractedImpressionValues(text: string): string[] {
+  const values: string[] = [];
+  const prefixed = text.matchAll(/(?:用户希望被称为|用户的稳定身份\/背景是|当前用户的稳定身份\/背景是|用户偏好|用户长期要求|用户长期项目\/工作背景)[：:]\s*([^\n。；;!?？]{1,40})/g);
+  for (const match of prefixed) values.push(cleanImpressionValue(match[1]));
+  if (values.length === 0 && text.length <= 24) values.push(cleanImpressionValue(text));
+  return values;
+}
+
+function containsQuestionLikeImpression(memory: Pick<MemoryWriteInput, "title" | "summary" | "detail">): boolean {
+  const values = [
+    ...extractedImpressionValues(memory.summary),
+    ...extractedImpressionValues(memory.title)
+  ];
+  return values.some(isQuestionLikeImpressionValue);
+}
+
 function isLikelyEphemeralUserFact(text: string): boolean {
   return /(这次|本次|这一轮|临时|短期|一次性|当前任务|这个任务|不用记|不要记|别记|不是长期|不是记忆)/i.test(text);
 }
@@ -47,7 +72,7 @@ function candidateFromMatch(input: {
 }): UserImpressionCandidate | undefined {
   const value = cleanImpressionValue(String(input.match?.[1] ?? ""));
   if (!value || value.length < 2 || value.length > 80) return undefined;
-  if (/[?？]/.test(value)) return undefined;
+  if (isQuestionLikeImpressionValue(value)) return undefined;
   const summary = `${input.prefix}${value}`;
   return {
     title: input.title,
@@ -1344,6 +1369,11 @@ export class MemoryService {
     const conversationDecision = this.canUseMetadataConversation(memory, actorId, actorRole);
     if (!conversationDecision.allowed) return conversationDecision;
 
+    if (memory.memoryType === "impression") {
+      const impressionQualityDecision = this.canWriteImpressionQuality(memory);
+      if (!impressionQualityDecision.allowed) return impressionQualityDecision;
+    }
+
     if (memory.memoryType !== "event" && memory.memoryType !== "skill") return baseDecision;
     if (!memory.workspaceId) return { allowed: false, reason: `${memory.memoryType} memory requires a target workspace.` };
 
@@ -1371,6 +1401,13 @@ export class MemoryService {
       if (!skillEvidenceDecision.allowed) return skillEvidenceDecision;
     }
     return baseDecision;
+  }
+
+  private canWriteImpressionQuality(memory: MemoryWriteInput): PolicyDecision {
+    if (containsQuestionLikeImpression(memory)) {
+      return { allowed: false, reason: "Impression memory must contain confirmed stable user information, not a question or placeholder." };
+    }
+    return { allowed: true };
   }
 
   private canUseMetadataConversation(memory: MemoryWriteInput, actorId: string, actorRole: UserRole): PolicyDecision {
