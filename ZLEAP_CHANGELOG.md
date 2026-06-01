@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:37 +08:00
+
+目的：
+- 补强 `docs/04-multi-tenant-isolation.md` 对敏感/调试/管理 HTTP 端点显式 actor 的验证，避免只测试 helper 而漏掉路由层。
+
+变更：
+- 将 `src/server/index.ts` 拆出 `createZleapServer` factory，生产入口仍直接启动原 server，测试可注入内存 repository、runtime、memory service 和 MCP executor。
+- 新增 `testSensitiveHttpEndpointsRequireExplicitActor`，用临时 HTTP server 逐端点验证缺失 `actorId` 和非法 `actorRole=system` 都被拒绝。
+- 覆盖端点包括 LLM logs、approval list/resolve、agent update、workspace create/update/delete、direct memory list/create/update/delete、conversation trace 和 conversation deletion。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 C2 HTTP actor 显式要求标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:34 +08:00
 
 目的：

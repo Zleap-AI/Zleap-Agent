@@ -2,6 +2,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import type { AddressInfo } from "node:net";
 import Database from "better-sqlite3";
 import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
@@ -11,6 +12,7 @@ import { MemoryService } from "../core/memory-service";
 import { WorkspaceRuntime } from "../core/workspace-runtime";
 import { McpToolExecutor } from "../core/mcp-executor";
 import { parseActor, parseActorFromSearchParams } from "../server/actor";
+import { createZleapServer } from "../server/index";
 import type { ChatCompletionInput, ChatCompletionOutput, LLMClient, LLMStreamEvent } from "../core/llm-client";
 import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "../core/llm-client";
 import type { ContextSegment, MemoryRow } from "../types";
@@ -1254,6 +1256,39 @@ function createRepos(): Repositories {
   return new Repositories(db);
 }
 
+async function withTestHttpServer<T>(repos: Repositories, callback: (baseUrl: string) => Promise<T>): Promise<T> {
+  const server = createZleapServer({
+    repos,
+    runtime: new AgentRuntime(repos, new FakeLLMClient()),
+    memoryService: new MemoryService(repos),
+    mcpToolExecutor: new McpToolExecutor(),
+    serveStatic: async () => false
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  try {
+    return await callback(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+  }
+}
+
+async function httpJson(baseUrl: string, pathName: string, init: RequestInit = {}): Promise<{ status: number; body: any }> {
+  const response = await fetch(`${baseUrl}${pathName}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {})
+    }
+  });
+  return {
+    status: response.status,
+    body: await response.json()
+  };
+}
+
 function metadataOf(memory: { metadataJson: string }): Record<string, any> {
   return JSON.parse(memory.metadataJson) as Record<string, any>;
 }
@@ -1536,6 +1571,123 @@ async function testHttpActorParsingRequiresExplicitIdentity() {
     actorId: "creator",
     actorRole: "creator"
   });
+}
+
+async function testSensitiveHttpEndpointsRequireExplicitActor() {
+  const repos = createRepos();
+  repos.ensureConversation("conv-http-actor", "default-agent", "http-owner");
+  const approval = repos.createApprovalRequest({
+    userId: "http-owner",
+    conversationId: "conv-http-actor",
+    workspaceId: "dev",
+    toolName: "runCommand",
+    argumentsJson: "{}",
+    reason: "HTTP actor boundary fixture"
+  });
+  const memory = repos.createMemory({
+    memoryType: "impression",
+    userId: "http-owner",
+    title: "HTTP actor memory",
+    summary: "HTTP actor boundary fixture.",
+    detail: "This memory must not be mutated without an explicit actor.",
+    metadataJson: JSON.stringify({ source: "httpActorTest", impressionKind: "userImpression" })
+  }, "creator", "creator");
+  const originalAgentName = repos.getAgent("default-agent").name;
+
+  const workspaceBody = {
+    id: "http-actor-workspace",
+    name: "HTTP Actor Workspace",
+    description: "Should never be created without explicit actor.",
+    capabilitiesJson: "[]",
+    inputKindsJson: "[]",
+    outputKindsJson: "[]",
+    requiresApproval: 0,
+    instructions: "HTTP actor boundary.",
+    toolInstructions: "HTTP actor boundary.",
+    memoryPolicyJson: JSON.stringify({
+      eventRecallEnabled: true,
+      skillRecallEnabled: true,
+      eventWriteEnabled: true,
+      skillWriteEnabled: true,
+      maxEventMemories: 4,
+      maxSkillMemories: 4
+    }),
+    riskLevel: "low",
+    createdBy: "creator",
+    manifest: {
+      id: "http-actor-workspace",
+      name: "HTTP Actor Workspace",
+      description: "Should never be created without explicit actor.",
+      capabilities: [],
+      inputKinds: [],
+      outputKinds: [],
+      riskLevel: "low",
+      requiresApproval: false
+    },
+    memoryPolicy: {
+      eventRecallEnabled: true,
+      skillRecallEnabled: true,
+      eventWriteEnabled: true,
+      skillWriteEnabled: true,
+      maxEventMemories: 4,
+      maxSkillMemories: 4
+    },
+    toolIds: []
+  };
+
+  const requestWithBody = (method: string, body: Record<string, unknown>): RequestInit => ({
+    method,
+    body: JSON.stringify(body)
+  });
+  const sensitiveEndpoints: Array<{
+    label: string;
+    path: string;
+    init: RequestInit;
+    invalidRolePath?: string;
+    invalidRoleBody?: Record<string, unknown>;
+  }> = [
+    { label: "llm logs", path: "/api/llm-calls", init: { method: "GET" } },
+    { label: "approval list", path: "/api/approvals", init: { method: "GET" } },
+    { label: "approval resolve", path: `/api/approvals/${approval.id}/resolve`, init: requestWithBody("POST", { status: "approved" }), invalidRoleBody: { status: "approved" } },
+    { label: "agent update", path: "/api/agents/default-agent", init: requestWithBody("PUT", { name: "Missing actor agent" }), invalidRoleBody: { name: "Invalid actor agent" } },
+    { label: "workspace create", path: "/api/workspaces", init: requestWithBody("POST", workspaceBody), invalidRoleBody: workspaceBody },
+    { label: "workspace update", path: "/api/workspaces/dev", init: requestWithBody("PUT", { name: "Missing actor workspace" }), invalidRoleBody: { name: "Invalid actor workspace" } },
+    { label: "workspace delete", path: "/api/workspaces/dev", init: requestWithBody("DELETE", { deleteReason: "missing actor" }), invalidRoleBody: { deleteReason: "invalid actor" } },
+    { label: "memory list", path: "/api/memories", init: { method: "GET" } },
+    { label: "memory create", path: "/api/memories", init: requestWithBody("POST", { memoryType: "impression", userId: "http-owner", title: "Missing actor create", summary: "No actor.", detail: "No actor." }), invalidRoleBody: { memoryType: "impression", userId: "http-owner", title: "Invalid actor create", summary: "Bad actor.", detail: "Bad actor." } },
+    { label: "memory update", path: `/api/memories/${memory.id}`, init: requestWithBody("PUT", { summary: "Missing actor mutation" }), invalidRoleBody: { summary: "Invalid actor mutation" } },
+    { label: "memory delete", path: `/api/memories/${memory.id}`, init: requestWithBody("DELETE", { deleteReason: "missing actor" }), invalidRoleBody: { deleteReason: "invalid actor" } },
+    { label: "conversation trace", path: "/api/conversations/conv-http-actor/trace", init: { method: "GET" } },
+    { label: "conversation delete", path: "/api/conversations/conv-http-actor", init: requestWithBody("DELETE", { deleteReason: "missing actor" }), invalidRoleBody: { deleteReason: "invalid actor" } }
+  ];
+
+  await withTestHttpServer(repos, async (baseUrl) => {
+    for (const endpoint of sensitiveEndpoints) {
+      const missing = await httpJson(baseUrl, endpoint.path, endpoint.init);
+      assert.notEqual(missing.status, 200, endpoint.label);
+      assert.match(String(missing.body.error), /actorId/, endpoint.label);
+
+      const invalidRolePath = endpoint.init.method === "GET"
+        ? `${endpoint.path}${endpoint.path.includes("?") ? "&" : "?"}actorId=http-owner&actorRole=system`
+        : endpoint.path;
+      const invalidRoleInit = endpoint.init.method === "GET"
+        ? endpoint.init
+        : requestWithBody(String(endpoint.init.method), {
+          ...(endpoint.invalidRoleBody ?? {}),
+          actorId: "http-owner",
+          actorRole: "system"
+        });
+      const invalid = await httpJson(baseUrl, endpoint.invalidRolePath ?? invalidRolePath, invalidRoleInit);
+      assert.notEqual(invalid.status, 200, endpoint.label);
+      assert.match(String(invalid.body.error), /actorRole/, endpoint.label);
+    }
+  });
+
+  assert.equal(repos.getAgent("default-agent").name, originalAgentName);
+  assert.throws(() => repos.getWorkspace("http-actor-workspace"), /Workspace not found/);
+  assert.equal(repos.getMemory(memory.id).summary, "HTTP actor boundary fixture.");
+  assert.equal(repos.getApprovalRequest(approval.id).status, "pending");
+  assert.equal(Boolean(repos.getConversation("conv-http-actor")), true);
 }
 
 async function testTraceAndToolLogsAreUserScoped() {
@@ -5353,6 +5505,7 @@ async function main() {
   await testOpenAIClientRetriesAndDecodesErrors();
   await testAgentUpdateRequiresCreatorRole();
   await testHttpActorParsingRequiresExplicitIdentity();
+  await testSensitiveHttpEndpointsRequireExplicitActor();
   await testTraceAndToolLogsAreUserScoped();
   await testLlmLogsAreUserScoped();
   await testApprovalListIsUserScoped();
