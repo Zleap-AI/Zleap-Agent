@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-02 00:55 +08:00
+
+目的：
+- 将 sidebar 顶部的折叠箭头改为固定状态按钮，让用户能看出当前 sidebar 是固定还是临时浮层状态。
+
+变更：
+- 更新 `src/web/main.tsx`：新增 `toggleSidebarPinned`，按钮在固定状态显示“固”，在未固定/浮层状态显示“浮”；点击“固”会取消固定并收起，点击“浮”会固定回左侧。
+- 更新 `src/web/styles.css`：新增 `.sidebar-pin-button` 的固定/未固定状态样式。
+- 更新 `src/tests/run-tests.ts`：增加前端和样式契约断言，覆盖固定状态按钮文案、切换函数和样式类。
+- 更新 `docs/08-user-ui-guide.md`：明确 sidebar 顶部按钮必须表达固定状态，不能只显示方向箭头。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：固定状态按钮显示“固”，`aria-label` 为“侧边栏已固定，点击取消固定”；点击后收起 sidebar，再打开临时浮层时按钮显示“浮”，`aria-label` 为“侧边栏未固定，点击固定”；点击“浮”后 sidebar 重新固定。
+
+Git：
+- 本次提交：将 sidebar 折叠按钮改为固定状态按钮。
+
 ## 2026-06-02 00:43 +08:00
 
 目的：

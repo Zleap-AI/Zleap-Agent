@@ -2155,6 +2155,17 @@ function UserChatApp() {
   const latestMessageProcessItems = latestProcessMessageId ? processItemsByMessageId[latestProcessMessageId] ?? [] : [];
   const pendingAskUser = latestAskUserPrompt(latestMessageProcessItems.length ? latestMessageProcessItems : allProcessItems, messages, loading);
   const pendingAskQuestionVisible = askQuestionAlreadyVisible(messages, pendingAskUser);
+  const sidebarPinLabel = sidebarCollapsed ? "侧边栏未固定，点击固定" : "侧边栏已固定，点击取消固定";
+
+  function toggleSidebarPinned() {
+    if (sidebarCollapsed) {
+      setSidebarCollapsed(false);
+      setMobileSidebarOpen(false);
+      return;
+    }
+    setSidebarCollapsed(true);
+    setMobileSidebarOpen(false);
+  }
 
   function renderProcessPanel(messageId: string, processItems: UserRunProcess[]) {
     if (processItems.length === 0) return null;
@@ -2229,7 +2240,15 @@ function UserChatApp() {
       <aside className={`user-sidebar ${mobileSidebarOpen ? "open" : ""}`}>
         <div className="sidebar-head">
           <button className="new-chat-button" type="button" onClick={createConversation}>+ 新对话</button>
-          <button className="icon-button" type="button" aria-label="折叠侧边栏" onClick={() => setSidebarCollapsed((value) => !value)}>‹</button>
+          <button
+            className={`icon-button sidebar-pin-button ${sidebarCollapsed ? "unpinned" : "pinned"}`}
+            type="button"
+            aria-label={sidebarPinLabel}
+            title={sidebarPinLabel}
+            onClick={toggleSidebarPinned}
+          >
+            {sidebarCollapsed ? "浮" : "固"}
+          </button>
         </div>
         <label className="conversation-search">
           <input value={conversationFilter} onChange={(event) => setConversationFilter(event.target.value)} placeholder="搜索会话" />

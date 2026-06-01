@@ -284,6 +284,23 @@ button:disabled {
   background: transparent;
 }
 
+.sidebar-pin-button {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sidebar-pin-button.pinned {
+  border-color: rgba(16, 163, 127, 0.28);
+  background: rgba(16, 163, 127, 0.10);
+  color: #0c735d;
+}
+
+.sidebar-pin-button.unpinned {
+  border-color: var(--border-subtle);
+  background: var(--bg-surface);
+}
+
 .conversation-search {
   position: relative;
   margin: 0;
