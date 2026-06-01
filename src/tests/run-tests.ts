@@ -2118,6 +2118,11 @@ async function testRuntimeContextAndTools() {
   assert.equal(trace.llmCalls.every((call) => call.status === "completed"), true);
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"plannedWorkspace\":\"dev\"")), true);
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"ok\":true")), true);
+  assert.equal(JSON.stringify({
+    llmCalls: trace.llmCalls,
+    contextSegments: trace.contextSegments,
+    auditLogs: trace.auditLogs
+  }).includes("test-key"), false);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tool_result" && segment.content.includes("enterWorkspace")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"dev\"") && segment.content.includes("\"name\": \"searchFiles\"")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"main\"") && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
@@ -5584,13 +5589,33 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
     apiKey: "test-key",
     model: "gpt-5-mini",
     messages: [{ role: "user", content: "hello" }],
-    tools: []
+    tools: [{
+      id: "tool-test-openai",
+      name: "testTool",
+      description: "Test OpenAI-compatible tool schema.",
+      parametersJson: JSON.stringify({
+        type: "object",
+        properties: {
+          reason: { type: "string" }
+        },
+        required: ["reason"]
+      }),
+      bindingType: "runtime",
+      bindingJson: "{}",
+      riskLevel: "low",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }]
   };
 
   try {
     let completeAttempts = 0;
-    globalThis.fetch = (async () => {
+    let completeRequestBody: any;
+    let completeAuthorization = "";
+    globalThis.fetch = (async (_url: any, init?: any) => {
       completeAttempts += 1;
+      completeRequestBody = JSON.parse(String(init?.body ?? "{}"));
+      completeAuthorization = String(init?.headers?.Authorization ?? "");
       if (completeAttempts < 5) {
         return new Response(JSON.stringify({ error: { message: "temporary overload" } }), { status: 500 });
       }
@@ -5601,10 +5626,18 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
     const completeOutput = await client.complete(input);
     assert.equal(completeAttempts, 5);
     assert.equal(completeOutput.message.content, "retried ok");
+    assert.equal(completeAuthorization, "Bearer test-key");
+    assert.equal(completeRequestBody.apiKey, undefined);
+    assert.equal(completeRequestBody.stream, undefined);
+    assert.equal(completeRequestBody.tools[0].type, "function");
+    assert.equal(completeRequestBody.tools[0].function.name, "testTool");
+    assert.equal(completeRequestBody.tools[0].function.parameters.required[0], "reason");
 
     let streamAttempts = 0;
-    globalThis.fetch = (async () => {
+    let streamRequestBody: any;
+    globalThis.fetch = (async (_url: any, init?: any) => {
       streamAttempts += 1;
+      streamRequestBody = JSON.parse(String(init?.body ?? "{}"));
       if (streamAttempts === 1) {
         return new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 });
       }
@@ -5619,6 +5652,9 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
     }
     assert.equal(streamAttempts, 2);
     assert.equal(streamed, "ok");
+    assert.equal(streamRequestBody.stream, true);
+    assert.equal(streamRequestBody.apiKey, undefined);
+    assert.equal(streamRequestBody.tools[0].function.name, "testTool");
 
     globalThis.fetch = (async () => {
       const body = gzipSync(Buffer.from(JSON.stringify({ error: { message: "bad request detail" } }), "utf8"));

@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:59 +08:00
+
+目的：
+- 完成 LLM 协议和 tool loop 上下文契约验证。
+
+变更：
+- 补强 OpenAI-compatible client 测试，确认 non-streaming/streaming 请求体使用顶层 `tools` array，streaming 请求设置 `stream=true`。
+- 验证 API key 只进入 Authorization header，不出现在 provider request body，也不出现在 `llm_calls`、`context_segments`、`audit_logs` trace 数据里。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 D1/D2 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:56 +08:00
 
 目的：
