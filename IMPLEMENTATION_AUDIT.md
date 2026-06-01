@@ -133,7 +133,7 @@
 - [x] 完整阅读并拆分 `zleap-agent-framework.md` 的概念介绍要求。
 - [x] 针对 A2/A3/A4/A6 增加或确认测试覆盖。
 - [x] 针对 B3/B4 增加或确认测试覆盖。
-- [ ] 每轮修改后运行 `PATH=/opt/homebrew/bin:$PATH npm test` 和必要的 `npm run build`。
+- [x] 每轮修改后运行 `PATH=/opt/homebrew/bin:$PATH npm test` 和必要的 `npm run build`。
 
 ## 外层/历史改动记录
 

@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:59 +08:00
+
+目的：
+- 清理设计文档中残留的旧 File/CLI workspace 示例，避免与首版统一 `dev` workspace 决策冲突。
+
+变更：
+- 更新 `docs/01-agent-philosophy.md`：将子 workspace 示例改为 Dev workspace、MCP workspace 和未来 Browser workspace。
+- 更新 `docs/03-memory-model.md`：将 event/skill 隔离示例从 File/CLI workspace 改为 Dev workspace 和未来 Browser workspace。
+- 更新 `docs/04-multi-tenant-isolation.md`：将危险命令示例改为 Dev workspace 的高风险命令工具。
+- 更新 `IMPLEMENTATION_AUDIT.md`：确认本轮审计修改均已运行测试和构建验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:57 +08:00
 
 目的：
