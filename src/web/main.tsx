@@ -47,6 +47,7 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 type CachedState = {
+  agentId?: string;
   userId?: string;
   userRole?: "user" | "creator";
   conversationId?: string;
@@ -286,6 +287,57 @@ function processItemsForMessage(
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     .slice(0, expectedCount)
     .map((log) => processItemFromToolLog(log, item.eventKind));
+}
+
+function toolProcessMessagesForTurn(input: {
+  runId: string;
+  firstLlmCallId: string;
+  llmCalls: LLMCallSnapshot[];
+  toolCalls: ToolCallLog[];
+}): ChatMessage[] {
+  const turnCalls = llmCallsForTurn(input.firstLlmCallId, input.llmCalls);
+  if (turnCalls.length === 0) return [];
+  const firstCreatedAt = turnCalls[0]?.createdAt ?? "";
+  const lastCompletedAt = turnCalls.at(-1)?.completedAt || turnCalls.at(-1)?.createdAt || "";
+  const toolLogs = input.toolCalls
+    .filter((log) => log.workspaceId === "main")
+    .filter((log) => !firstCreatedAt || log.createdAt >= firstCreatedAt)
+    .filter((log) => !lastCompletedAt || log.createdAt <= lastCompletedAt)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  if (toolLogs.length === 0) return [];
+
+  const callItems = turnCalls
+    .flatMap((call) => processItemsFromLlmCall(call));
+  const resultItems = toolLogs.map((log) => processItemFromToolLog(log, "tool_result"));
+  const firstToolCallLlmCallId = turnCalls.find((call) => processItemsFromLlmCall(call).length > 0)?.id ?? input.firstLlmCallId;
+  const followUpLlmCallId = turnCalls.at(-1)?.id ?? firstToolCallLlmCallId;
+  const toolNames = [...new Set(toolLogs.map((log) => log.toolName))];
+  return [
+    {
+      id: createLocalId("main-tool-call"),
+      runId: input.runId,
+      role: "运行过程",
+      workspaceId: "main",
+      eventKind: "tool_call",
+      title: "main 函数调用",
+      toolNames,
+      processItems: callItems.length ? callItems : toolLogs.map((log) => processItemFromToolLog(log, "tool_call")),
+      inspectLlmCallId: firstToolCallLlmCallId,
+      content: "**main 函数调用**"
+    },
+    {
+      id: createLocalId("main-tool-result"),
+      runId: input.runId,
+      role: "运行过程",
+      workspaceId: "main",
+      eventKind: "tool_result",
+      title: "main 工具结果",
+      toolNames,
+      processItems: resultItems,
+      inspectLlmCallId: followUpLlmCallId,
+      content: "**main 工具结果**"
+    }
+  ];
 }
 
 function processMessageSummary(item: ChatMessage, processItems: WorkspaceProcessItem[] = []): string {
@@ -1248,6 +1300,8 @@ function ConceptIntroTab() {
 
 function ChatTab() {
   const cached = loadCache();
+  const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState(cached.agentId ?? "default-agent");
   const [agent, setAgent] = useState<AgentConfig | null>(null);
   const [userId, setUserId] = useState(cached.userId ?? "user");
   const [userRole, setUserRole] = useState<"user" | "creator">(cached.userRole ?? "user");
@@ -1289,6 +1343,26 @@ function ChatTab() {
   const hasRawContextLogs = Boolean(inspectedLlmCall || rawContextLogSegment);
   const visibleMemoryWrites = memoryWritesForVisibleTurn(visibleOutput, trace?.memoryWrites ?? []);
 
+  function resetConversationState() {
+    setConversationId(`conv-${Date.now()}`);
+    setMessage("");
+    setMessages([]);
+    setOutput(null);
+    setTrace(null);
+    setError("");
+    setRetryMessage("");
+    setSelectedTurnId("");
+    setSelectedLlmCallId("");
+  }
+
+  function applySelectedAgent(nextAgent: AgentConfig, resetConversation = true) {
+    setSelectedAgentId(nextAgent.id);
+    setAgent(nextAgent);
+    setBaseUrl(normalizeCachedBaseUrl(nextAgent.defaultBaseUrl) ?? DEFAULT_BASE_URL);
+    setModel(nextAgent.defaultModel);
+    if (resetConversation) resetConversationState();
+  }
+
   async function loadConversationTrace(targetConversationId = conversationId): Promise<ConversationTrace | null> {
     if (!targetConversationId.trim()) return null;
     try {
@@ -1302,10 +1376,17 @@ function ChatTab() {
   }
 
   useEffect(() => {
-    api<AgentConfig>("/api/agents/default-agent")
-      .then((loaded) => {
+    api<{ agents: AgentConfig[] }>("/api/agents")
+      .then(({ agents: loadedAgents }) => {
+        const allAgents = loadedAgents.length > 0 ? loadedAgents : [];
+        setAgents(allAgents);
+        const loaded = allAgents.find((item) => item.id === selectedAgentId)
+          ?? allAgents.find((item) => item.id === "default-agent")
+          ?? allAgents[0];
+        if (!loaded) throw new Error("没有可用智能体。");
         const draft = sanitizeCachedAgentDraft(cached.agentDraft);
         const merged = { ...loaded, ...draft };
+        setSelectedAgentId(merged.id);
         setAgent(merged);
         setBaseUrl(normalizeCachedBaseUrl(cached.baseUrl) ?? normalizeCachedBaseUrl(merged.defaultBaseUrl) ?? DEFAULT_BASE_URL);
         setModel(cached.model ?? merged.defaultModel);
@@ -1319,8 +1400,40 @@ function ChatTab() {
   }, [conversationId, userId, userRole]);
 
   useEffect(() => {
-    saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined });
-  }, [userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agent]);
+    saveCache({ agentId: selectedAgentId, userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined });
+  }, [selectedAgentId, userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agent]);
+
+  function selectAgent(agentId: string) {
+    const nextAgent = agents.find((item) => item.id === agentId);
+    if (!nextAgent) return;
+    applySelectedAgent(nextAgent);
+  }
+
+  async function createAgent() {
+    const sourceAgent = agent ?? agents[0];
+    if (!sourceAgent) return;
+    const effectiveBaseUrl = normalizeCachedBaseUrl(baseUrl) ?? DEFAULT_BASE_URL;
+    try {
+      const created = await api<AgentConfig>("/api/agents", {
+        method: "POST",
+        body: JSON.stringify({
+          id: `agent-${Date.now()}`,
+          name: `新智能体 ${agents.length + 1}`,
+          systemPrompt: sourceAgent.systemPrompt,
+          personalityPrompt: sourceAgent.personalityPrompt,
+          defaultModel: model || sourceAgent.defaultModel,
+          defaultBaseUrl: effectiveBaseUrl,
+          actorId: userId,
+          actorRole: userRole
+        })
+      });
+      setAgents((items) => [...items, created]);
+      applySelectedAgent(created);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function saveAgent() {
     if (!agent) return;
@@ -1330,6 +1443,7 @@ function ChatTab() {
         body: JSON.stringify({ ...agent, actorId: userId, actorRole: userRole })
       });
       setAgent(saved);
+      setAgents((items) => items.map((item) => item.id === saved.id ? saved : item));
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1492,12 +1606,27 @@ function ChatTab() {
             const firstCallId = payload.output.contextSegments[0]?.llmCallId ?? "";
             const turnCalls = llmCallsForTurn(firstCallId, calls);
             const finalCallId = turnCalls.at(-1)?.id ?? firstCallId;
+            const mainToolProcessMessages = toolProcessMessagesForTurn({
+              runId,
+              firstLlmCallId: firstCallId,
+              llmCalls: calls,
+              toolCalls: loadedTrace?.toolCalls ?? []
+            });
             setSelectedLlmCallId(firstCallId);
             setMessages((items) => items.map((item) => item.id === userMessageId ? { ...item, turnOutput: payload.output, inspectLlmCallId: firstCallId } : item));
             setMessages((items) => {
-              return items.map((item) => item.id === assistantMessageId
+              const hasMainToolProcess = items.some((item) => item.runId === runId && item.role === "运行过程" && item.workspaceId === "main" && (item.eventKind === "tool_call" || item.eventKind === "tool_result"));
+              const withAssistant = items.map((item) => item.id === assistantMessageId
                 ? { ...item, content: payload.output.assistantMessage, streaming: false, inspectLlmCallId: finalCallId }
                 : item);
+              if (hasMainToolProcess || mainToolProcessMessages.length === 0) return withAssistant;
+              const assistantIndex = withAssistant.findIndex((item) => item.id === assistantMessageId);
+              if (assistantIndex < 0) return [...withAssistant, ...mainToolProcessMessages];
+              return [
+                ...withAssistant.slice(0, assistantIndex),
+                ...mainToolProcessMessages,
+                ...withAssistant.slice(assistantIndex)
+              ];
             });
           }
           if (payload.type === "error") {
@@ -1583,7 +1712,7 @@ function ChatTab() {
     setSelectedTurnId("");
     setSelectedLlmCallId("");
     setApiKey("");
-    setConversationId(`conv-${Date.now()}`);
+    resetConversationState();
   }
 
   async function clearConversation() {
@@ -1591,22 +1720,21 @@ function ChatTab() {
       method: "DELETE",
       body: JSON.stringify({ actorId: userId, actorRole: userRole, deleteReason: "用户在 Web UI 清空当前会话" })
     }).catch(() => undefined);
-    setConversationId(`conv-${Date.now()}`);
-    setMessage("");
-    setMessages([]);
-    setOutput(null);
-    setTrace(null);
-    setError("");
-    setRetryMessage("");
-    setSelectedTurnId("");
-    setSelectedLlmCallId("");
+    resetConversationState();
   }
 
   return (
     <section className="chat-grid" style={{ "--context-panel-width": `${contextPanelWidth}px` } as React.CSSProperties}>
       <aside className="panel config-panel">
         <h2>智能体配置</h2>
+        <label>
+          当前智能体
+          <select value={selectedAgentId} onChange={(event) => selectAgent(event.target.value)} disabled={loading}>
+            {agents.map((item) => <option value={item.id} key={item.id}>{item.name} · {item.id}</option>)}
+          </select>
+        </label>
         <label>智能体 ID<input value={agent?.id ?? ""} disabled /></label>
+        <label>智能体名称<input value={agent?.name ?? ""} onChange={(event) => agent && setAgent({ ...agent, name: event.target.value })} /></label>
         <label>用户 ID<input value={userId} onChange={(event) => setUserId(event.target.value)} /></label>
         <label>
           角色
@@ -1628,6 +1756,7 @@ function ChatTab() {
         <label>系统提示词<textarea value={agent?.systemPrompt ?? ""} onChange={(event) => agent && setAgent({ ...agent, systemPrompt: event.target.value })} /></label>
         <label>人格提示词<textarea value={agent?.personalityPrompt ?? ""} onChange={(event) => agent && setAgent({ ...agent, personalityPrompt: event.target.value })} /></label>
         <button className="primary" onClick={saveAgent}>保存智能体</button>
+        <button onClick={() => void createAgent()} disabled={loading || !agent}>新建智能体</button>
         <button onClick={clearLocalCache}>清空浏览器缓存</button>
       </aside>
 

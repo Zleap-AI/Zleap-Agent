@@ -159,6 +159,26 @@ export function createZleapServer(deps: ZleapServerDeps): http.Server {
         return;
       }
 
+      if (url.pathname === "/api/agents" && request.method === "GET") {
+        sendJson(response, 200, { agents: repos.listAgents() });
+        return;
+      }
+      if (url.pathname === "/api/agents" && request.method === "POST") {
+        const body = await readJson<any>(request);
+        const actor = parseActor(body, "Agent create API");
+        sendJson(response, 200, repos.createAgent({
+          id: body.id,
+          name: body.name,
+          systemPrompt: body.systemPrompt,
+          personalityPrompt: body.personalityPrompt,
+          defaultModel: body.defaultModel,
+          defaultBaseUrl: body.defaultBaseUrl,
+          actorId: actor.actorId,
+          actorRole: actor.actorRole
+        }));
+        return;
+      }
+
       const agentMatch = url.pathname.match(/^\/api\/agents\/([^/]+)$/);
       if (agentMatch && request.method === "GET") {
         sendJson(response, 200, repos.getAgent(agentMatch[1]));

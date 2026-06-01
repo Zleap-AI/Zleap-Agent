@@ -250,6 +250,30 @@ export class Repositories {
     return row;
   }
 
+  listAgents(): AgentConfig[] {
+    return this.db.prepare("SELECT * FROM agents ORDER BY createdAt ASC").all() as AgentConfig[];
+  }
+
+  createAgent(agent: Omit<AgentConfig, "createdAt" | "updatedAt"> & { actorId?: string; actorRole?: UserRole }): AgentConfig {
+    const actorId = agent.actorId ?? "user";
+    const actorRole = agent.actorRole ?? "user";
+    if (actorRole !== "creator") throw new Error("Agent creation requires creator role.");
+    const id = agent.id.trim();
+    if (!id) throw new Error("Agent id is required.");
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Agent id may only contain letters, numbers, hyphens, and underscores.");
+    const now = nowIso();
+    this.db.prepare(`
+      INSERT INTO agents (id, name, systemPrompt, personalityPrompt, defaultModel, defaultBaseUrl, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, agent.name.trim() || id, agent.systemPrompt, agent.personalityPrompt, agent.defaultModel, agent.defaultBaseUrl, now, now);
+    this.audit(actorId, actorRole, "agent_create", "agent", id, {
+      name: agent.name,
+      defaultModel: agent.defaultModel,
+      defaultBaseUrl: agent.defaultBaseUrl
+    });
+    return this.getAgent(id);
+  }
+
   updateAgent(agent: AgentConfig & { actorId?: string; actorRole?: UserRole }): AgentConfig {
     const actorId = agent.actorId ?? "user";
     const actorRole = agent.actorRole ?? "user";

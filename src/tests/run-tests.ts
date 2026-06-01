@@ -50,7 +50,11 @@ async function testWebUiMasterPlanContracts() {
   }
   expectWeb("aria-hidden={tab !== item}");
   expectWeb("const [apiKey, setApiKey] = useState(cached.apiKey ?? \"\")");
-  expectWeb("saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined })");
+  expectWeb("const [agents, setAgents] = useState<AgentConfig[]>([])");
+  expectWeb("当前智能体");
+  expectWeb("新建智能体");
+  expectWeb("defaultModel: model || sourceAgent.defaultModel");
+  expectWeb("saveCache({ agentId: selectedAgentId, userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined })");
   expectWeb("normalizeCachedMessages(cached.messages)");
   expectWeb("if (item.failed) return false");
   expectWeb("setMessages((items) => items.filter((item) => item.runId !== runId && item.id !== userMessageId && item.id !== assistantMessageId))");
@@ -65,6 +69,8 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("placeholder=\"搜索原始日志关键词\"");
   expectWeb("renderRawLogSearchHighlights");
   expectWeb("rawLogMatchCount");
+  expectWeb("toolProcessMessagesForTurn");
+  expectWeb("main 函数调用");
   expectWeb("MemoryEvidencePanel");
   expectWeb("记忆只保存语义投影");
   expectWeb("relationId");
@@ -1671,6 +1677,32 @@ async function testDatabaseAndMemory() {
 async function testAgentUpdateRequiresCreatorRole() {
   const repos = createRepos();
   const agent = repos.getAgent("default-agent");
+  assert.equal(repos.listAgents().some((item) => item.id === "default-agent"), true);
+
+  assert.throws(() => repos.createAgent({
+    id: "user-agent",
+    name: "User Agent",
+    systemPrompt: agent.systemPrompt,
+    personalityPrompt: agent.personalityPrompt,
+    defaultModel: agent.defaultModel,
+    defaultBaseUrl: agent.defaultBaseUrl,
+    actorId: "ordinary-user",
+    actorRole: "user"
+  }), /creator role/);
+
+  const created = repos.createAgent({
+    id: "creator-agent",
+    name: "Creator Agent",
+    systemPrompt: agent.systemPrompt,
+    personalityPrompt: agent.personalityPrompt,
+    defaultModel: "qwen3.6-35b-a3b",
+    defaultBaseUrl: "https://api.302ai.com",
+    actorId: "creator",
+    actorRole: "creator"
+  });
+  assert.equal(created.id, "creator-agent");
+  assert.equal(created.defaultModel, "qwen3.6-35b-a3b");
+  assert.equal(repos.listAuditLogs({ limit: 20 }).some((log) => log.action === "agent_create" && log.resourceId === "creator-agent"), true);
 
   assert.throws(() => repos.updateAgent({
     ...agent,
@@ -1786,6 +1818,7 @@ async function testSensitiveHttpEndpointsRequireExplicitActor() {
     { label: "llm logs", path: "/api/llm-calls", init: { method: "GET" } },
     { label: "approval list", path: "/api/approvals", init: { method: "GET" } },
     { label: "approval resolve", path: `/api/approvals/${approval.id}/resolve`, init: requestWithBody("POST", { status: "approved" }), invalidRoleBody: { status: "approved" } },
+    { label: "agent create", path: "/api/agents", init: requestWithBody("POST", { id: "missing-actor-agent", name: "Missing actor agent", systemPrompt: "sys", personalityPrompt: "person", defaultModel: "gpt-5-mini", defaultBaseUrl: "https://api.302ai.com" }), invalidRoleBody: { id: "invalid-actor-agent", name: "Invalid actor agent", systemPrompt: "sys", personalityPrompt: "person", defaultModel: "gpt-5-mini", defaultBaseUrl: "https://api.302ai.com" } },
     { label: "agent update", path: "/api/agents/default-agent", init: requestWithBody("PUT", { name: "Missing actor agent" }), invalidRoleBody: { name: "Invalid actor agent" } },
     { label: "workspace create", path: "/api/workspaces", init: requestWithBody("POST", workspaceBody), invalidRoleBody: workspaceBody },
     { label: "workspace update", path: "/api/workspaces/dev", init: requestWithBody("PUT", { name: "Missing actor workspace" }), invalidRoleBody: { name: "Invalid actor workspace" } },

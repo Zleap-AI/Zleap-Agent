@@ -2,6 +2,27 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 11:50 +08:00
+
+目的：
+- 让 Chat 调试台能创建和切换多个智能体，并把 main 空间里的记忆读取等工具调用过程展示出来。
+
+变更：
+- 更新 `src/db/repositories.ts` 和 `src/server/index.ts`：新增智能体列表和创建接口，创建智能体要求 creator 角色并写入审计日志。
+- 更新 `src/web/main.tsx`：配置栏增加“当前智能体”下拉和“新建智能体”按钮；新智能体默认继承当前模型、接入地址和提示词配置；切换智能体时重置当前会话，避免不同智能体混用同一段上下文。
+- 更新 `src/web/main.tsx`：把 main 工作空间内的函数调用和工具结果补进对话流，例如 `readMemory` 这类记忆读取会显示为运行过程。
+- 更新 `src/tests/run-tests.ts`：补充多智能体创建、权限、UI 契约和 main 工具过程展示的回归断言。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+- 已刷新 `http://localhost:4173/`，确认配置区显示“当前智能体”“智能体名称”“新建智能体”，并能加载多个智能体选项。
+
+Git：
+- 本次提交：支持多智能体切换。
+
 ## 2026-06-01 11:17 +08:00
 
 目的：
