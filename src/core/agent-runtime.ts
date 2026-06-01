@@ -652,6 +652,12 @@ export class AgentRuntime {
       }
     });
     const userMessageId = this.repos.addMessage(input.conversationId, "user", input.message);
+    this.repos.audit(input.userId, input.userRole, "user_message_received", "message", userMessageId, {
+      conversationId: input.conversationId,
+      agentId: input.agentId,
+      messageId: userMessageId,
+      contentLength: input.message.length
+    });
 
     if (resumableSession) {
       const activeSession = this.resumeWorkspaceSession(input, resumableSession);

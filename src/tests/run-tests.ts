@@ -2069,6 +2069,13 @@ async function testRuntimeContextAndTools() {
   assert.equal(fileSession?.localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
   assert.equal(fileSession?.result.observations.some((item) => item.includes("direct response")), true);
   const actions = trace.auditLogs.map((log) => log.action);
+  const userMessageAudit = trace.auditLogs.find((log) => log.action === "user_message_received");
+  assert.ok(userMessageAudit);
+  assert.equal(userMessageAudit.actorId, "user");
+  assert.equal(userMessageAudit.resourceKind, "message");
+  assert.equal(userMessageAudit.conversationId, "conv-test");
+  assert.equal(userMessageAudit.metadataJson.includes("search files for runtime"), false);
+  assert.equal(JSON.parse(userMessageAudit.metadataJson).contentLength, "search files for runtime".length);
   assert.equal(actions.includes("hook.beforeAgentTurn"), true);
   assert.equal(actions.includes("hook.afterAgentTurn"), true);
   assert.equal(actions.includes("hook.beforeWorkspaceEnter"), true);

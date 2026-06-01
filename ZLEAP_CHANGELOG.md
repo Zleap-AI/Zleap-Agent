@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:40 +08:00
+
+目的：
+- 对齐 `docs/04-multi-tenant-isolation.md` 中审计日志至少记录用户消息的要求。
+
+变更：
+- `AgentRuntime.prepare` 在写入 user message 后新增 `user_message_received` audit log。
+- audit metadata 只保存 `conversationId`、`agentId`、`messageId` 和 `contentLength`，不复制用户消息正文，避免把 audit 变成另一份原始内容仓库。
+- 补充 `testRuntimeContextAndTools` 断言，确认 trace 中存在用户消息 audit，且 metadata 不包含用户原文。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 C4 审计日志覆盖条目并记录用户消息 audit 偏差修复。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:37 +08:00
 
 目的：
