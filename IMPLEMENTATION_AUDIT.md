@@ -15,15 +15,15 @@
 | 文档 | 行数 | 审计状态 | 备注 |
 | --- | ---: | --- | --- |
 | `ZLEAP_MASTER_PLAN.md` | 440 | 已完成首轮细项拆分 | 总纲要求已拆成 M1-M8，并映射到 A-L 运行时/数据/UI 证据。 |
-| `docs/README.md` | 112 | 进行中 | 文档组织和不变量摘要。 |
-| `docs/01-agent-philosophy.md` | 211 | 待逐条核对 | Agent/workspace/memory 理念。 |
+| `docs/README.md` | 112 | 已完成首轮细项拆分 | 文档组织、设计原则和 Runtime 不变量已拆成 N1-N2。 |
+| `docs/01-agent-philosophy.md` | 211 | 已完成首轮细项拆分 | Agent/workspace/memory 理念已拆成 N1-N2。 |
 | `docs/02-workspace-runtime.md` | 417 | 已完成首轮细项拆分 | workspace runtime、MCP、handoff、工具边界已拆成 I1-I6。 |
 | `docs/03-memory-model.md` | 495 | 已完成首轮细项拆分 | impression/event/skill、FTS、渐进披露和 memory tool 边界已拆成 J1-J7。 |
 | `docs/04-multi-tenant-isolation.md` | 281 | 已完成首轮细项拆分 | userId、actor、trace、workspace、memory、approval、删除边界已拆成 K1-K7。 |
 | `docs/05-hooks-and-lifecycle.md` | 411 | 已完成首轮细项拆分 | lifecycle hook、event/skill 提取、memory tool 面和 trace 绑定已拆成 H1-H8。 |
-| `docs/06-typescript-implementation-roadmap.md` | 424 | 待逐条核对 | 模块/MVP/UI/阶段性要求。 |
+| `docs/06-typescript-implementation-roadmap.md` | 424 | 已完成首轮细项拆分 | 模块/MVP/UI/阶段性要求已拆成 O1-O3，并修正过期 UI 表述。 |
 | `docs/07-context-and-prompt-contracts.md` | 527 | 已完成首轮细项拆分 | context stack、prompt、tool loop、UI inspector、handoff 和不变量已拆成 L1-L8。 |
-| `zleap-agent-framework.md` | 589 | 进行中 | 概念介绍的产品表达，需与主计划一致。 |
+| `zleap-agent-framework.md` | 589 | 已完成首轮细项拆分 | 概念介绍产品表达已拆成 P1-P3，并修正过期 File/CLI workspace 表述。 |
 
 ## 功能域清单
 
@@ -95,6 +95,14 @@
 | M6 | SQLite/tenant/security lifecycle | Raw SQL + SQLite 核心表、conversation owner、显式 actor、approval、trace 写入 userId 校验、删除生命周期、creator-only agent/workspace/config/debug 面。 | 已验证 | C1-C5、G1、K1-K7 已覆盖 schema 表/字段、owner mismatch 拒绝、敏感 HTTP actor、approval list/resolve scope、trace/LLM/tool/session/approval tenant 校验、conversation/workspace/memory 删除和 creator-only 管理。 |
 | M7 | Memory strategy | Impression/Event/Skill 分层；SQLite FTS + relation/version；自动召回投影；event hook 写入；skill 脱敏去重；runtime memory tools 小面；direct API 走同 policy。 | 已验证 | B1-B5、H4-H8、J1-J7 已覆盖 memory scope、summary-only 渐进披露、hook-only event、raw payload 禁止、FTS 安全化、relation/version 分区、skill quality/evidence、memory recall audit、direct API final-row policy。 |
 | M8 | MCP/workspace tools/配置 | MCP server-first、workspace-scoped server/discover/import/execute；placeholder structured failure；runtime config SQLite 可调且 runtime 每次读取。 | 已验证 | E1、I4、I6、L7 和 `testRuntimeConfigControlsRuntimeLimits` 覆盖 stdio/Streamable HTTP binding、discover/import/callTool、placeholder failed result、内置 dev tools reason 约束、`runtime_config` seed/schema/UI/API 与运行时读取。 |
+| N1 | 文档总览和理念一致性 | `docs/README.md`、`docs/01-agent-philosophy.md` 要保持“稳定身份 + 动态 workspace 状态”的核心定义，不把 workspace 写成子 agent。 | 已验证 | A1、A4、A5、I3、L5 覆盖 system/personality 稳定、handoff 隔离、child 不直接终答、manifest 可见但不授权，以及同一 agent 切换 workspace 的边界。 |
+| N2 | 注意力分区和 memory 投影 | README/理念文档要求 context 不回灌全历史，memory 只注入 compact projection，`final_messages` 只是 debug log。 | 已验证 | B2、B4、J6、L1、L6 覆盖 summary-only memory、raw payload 禁止、history/event/skill 投影和 `final_messages` 不进入正常上下文。 |
+| O1 | TypeScript 模块和 MVP 边界 | 路线图要求单包 TypeScript runtime、core/db/server/web/tests 分层，首版 `main` + 统一 `dev`，SQLite FTS，不启用 vector。 | 已验证 | 当前 `src/core`、`src/db`、`src/server`、`src/web`、`src/tests` 分层存在；G1/J4/I6 覆盖 SQLite FTS、main/dev seed 和内置 dev 工具。 |
+| O2 | Tool/MCP/Hook/Memory 阶段要求 | 路线图要求 dev 工具分层、tool reason、policy hook、memory schema/FTS/projection、hook event/skill、conversation window。 | 已验证 | H1-H8、I6、J1-J7、E1 覆盖 tool lifecycle、reason schema、memory recall/projection、event/skill hook、MCP server-first 和 conversation window extraction。 |
+| O3 | Web UI 路线图 | 路线图要求可体验 Web UI；当前应按主计划七页签和独立日志页，而不是旧“三 tab”理解。 | 已补强验证 | 已修正 `docs/06-typescript-implementation-roadmap.md` 的过期 UI 段落；F1、M2、M3 和 `testWebUiMasterPlanContracts` 覆盖七页签、三栏、日志页、数据表、配置、context/raw log、Memory evidence。 |
+| P1 | 概念介绍和产品表达 | `zleap-agent-framework.md` 要与主计划一致，不能展示 `listWorkspaces`、首版 Browser/File/CLI workspace、vector 已启用、`final_messages` 为上下文层等过期概念。 | 已修正文档并验证 | 已修正 `zleap-agent-framework.md` 的 Dev workspace 工具与 MVP 范围；F2、M5、M7 覆盖概念页不展示废弃概念、vector 为未来方向、`final_messages` 只作 raw log。 |
+| P2 | Framework runtime/typing exposition | framework 文档的 AgentRuntime、WorkspaceRuntime、ToolRegistry、MemoryService、Policy、ContextBuilder、SQLite、React/Vite 分层需对应当前实现。 | 已验证 | O1 的源码分层加 A-M 的 runtime/memory/tool/policy/context/schema/UI 证据覆盖这些概念模块；`zleap-agent-framework.md` 末尾明确以主计划为最高优先级。 |
+| P3 | 共享 skill 与多租户表达 | framework 文档要求 skill 跨用户共享但脱敏，普通用户数据隔离，creator 权限清晰。 | 已验证 | C3、H8、J5、K1-K7 覆盖 skill quality/evidence、普通用户不可管理共享 skill、creator-only 管理、tenant trace 和 memory isolation。 |
 
 ## 当前验证记录
 
@@ -114,11 +122,15 @@
 ## 待办队列
 
 - [x] 完整阅读并拆分 `ZLEAP_MASTER_PLAN.md` 的所有可测试要求。
+- [x] 完整阅读并拆分 `docs/README.md` 的总览和不变量要求。
+- [x] 完整阅读并拆分 `docs/01-agent-philosophy.md` 的理念要求。
 - [x] 完整阅读并拆分 `docs/02-workspace-runtime.md` 的 workspace runtime 要求。
 - [x] 完整阅读并拆分 `docs/03-memory-model.md` 的 memory 要求。
 - [x] 完整阅读并拆分 `docs/04-multi-tenant-isolation.md` 的权限要求。
 - [x] 完整阅读并拆分 `docs/05-hooks-and-lifecycle.md` 的 hook 要求。
+- [x] 完整阅读并拆分 `docs/06-typescript-implementation-roadmap.md` 的实现路线图要求。
 - [x] 完整阅读并拆分 `docs/07-context-and-prompt-contracts.md` 的 context/prompt 要求。
+- [x] 完整阅读并拆分 `zleap-agent-framework.md` 的概念介绍要求。
 - [x] 针对 A2/A3/A4/A6 增加或确认测试覆盖。
 - [x] 针对 B3/B4 增加或确认测试覆盖。
 - [ ] 每轮修改后运行 `PATH=/opt/homebrew/bin:$PATH npm test` 和必要的 `npm run build`。
@@ -202,3 +214,11 @@
 | M6 | 已验证 | C1-C5、G1、K1-K7 对应代码和测试；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | SQLite/tenant/security 生命周期要求已映射：Raw SQL schema、conversation owner、显式 actor、tenant trace 写入校验、approval 隔离、creator-only 管理面、conversation/workspace/memory 删除和 audit 保留。 |
 | M7 | 已验证 | B1-B5、H4-H8、J1-J7 对应代码和测试；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 主计划 memory strategy 已映射：Impression/Event/Skill 分层、SQLite FTS 与 relation/version、自动 recall 投影、event hook 写入、skill 脱敏/证据/去重、runtime memory tools 小面和 direct API 同 policy。 |
 | M8 | 已验证 | E1、I4、I6、L7；`src/tests/run-tests.ts::testRuntimeConfigControlsRuntimeLimits`、`testBuiltInToolsAreSeededAndWorkspaceScoped`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | MCP/workspace tools/config 要求已映射：MCP server-first、workspace-scoped discovery/import/execute、placeholder structured failure、内置 dev tools reason 约束，以及 `runtime_config` seed/schema/API/UI 与运行时读取。 |
+| N1 | 已验证 | `docs/README.md`、`docs/01-agent-philosophy.md`；A1、A4、A5、I3、L5；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | README 和理念文档的核心定义是“稳定 Agent 身份 + 动态 workspace 状态”，不是多子 agent。实现证据覆盖 system/personality 稳定、handoff 隔离、child 需要结构化退出、manifest 可见但不授予 sibling tools。 |
+| N2 | 已验证 | `docs/README.md`、`docs/01-agent-philosophy.md`；B2、B4、J6、L1、L6；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 注意力分区和长对话记忆要求已落到 compact memory projection、raw payload 禁止、history/result/process/skill 分层、`readMemory/readSkill` 渐进披露和 `final_messages` debug-only 边界。 |
+| O1 | 已验证 | `docs/06-typescript-implementation-roadmap.md`；`src/core`、`src/db`、`src/server`、`src/web`、`src/tests`；G1、J4、I6；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 路线图中的单包 TypeScript MVP 和模块分层已对应当前目录结构；首版 `main/dev`、SQLite Raw SQL、FTS relation/version 和无 vector 首版策略均有测试覆盖。 |
+| O2 | 已验证 | `docs/06-typescript-implementation-roadmap.md`；H1-H8、I6、J1-J7、E1；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | tool reason/schema、policy hook、memory schema/projection、hook event/skill、conversation window 和 MCP server-first 已按路线图实现并由测试覆盖。 |
+| O3 | 已修正文档并补强验证 | `docs/06-typescript-implementation-roadmap.md`；F1、M2、M3、`testWebUiMasterPlanContracts`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 原路线图的“三 tab”和 Chat 右栏放日志/trace 表述已按主计划修正为七页签、Chat 右栏只看 workspace/context/memory writes，日志走独立 `日志` 页。 |
+| P1 | 已修正文档并验证 | `zleap-agent-framework.md`；F2、M5、M7；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | framework 文档的 Dev workspace 工具和 MVP 范围已从旧 File/CLI 表述修正为统一 Dev workspace；概念页和 framework 继续明确 Browser/vector 是未来方向，`listWorkspaces` 不是工具，`final_messages` 不是上下文层。 |
+| P2 | 已验证 | `zleap-agent-framework.md`；O1 与 A-M 证据；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | framework 文档中的 runtime、workspace session、tool registry、memory service、policy、context/prompt、SQLite repository、React/Vite UI 分层均能映射到当前实现模块和测试。 |
+| P3 | 已验证 | `zleap-agent-framework.md`；C3、H8、J5、K1-K7；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | framework 对多租户和共享 skill 的表达与实现一致：用户数据按 user/conversation/workspace 隔离，skill workspace-scoped shared 且脱敏/质量门禁，creator 管理和审批权限清晰。 |

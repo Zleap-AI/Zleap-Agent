@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:57 +08:00
+
+目的：
+- 完成剩余总览、理念、路线图和 framework 文档的首轮细项拆分，并消除与主计划冲突的旧 UI/workspace 表述。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 `docs/README.md`、`docs/01-agent-philosophy.md`、`docs/06-typescript-implementation-roadmap.md` 和 `zleap-agent-framework.md` 拆成 N1-N2、O1-O3、P1-P3。
+- 修正 `docs/06-typescript-implementation-roadmap.md`：Web UI 路线图从旧“三 tab”和 Chat 右栏日志/trace，改为主计划要求的七页签、Chat 右栏只展示 workspace/context/memory writes，日志进入独立页。
+- 修正 `zleap-agent-framework.md`：首版 MVP 从旧 File/CLI workspace 表述改为统一 Dev workspace，并补齐 `readFile`/`writeFile` 作为 Dev runtime 工具。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:53 +08:00
 
 目的：
