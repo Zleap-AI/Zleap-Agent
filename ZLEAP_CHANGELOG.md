@@ -17,7 +17,7 @@
 - `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
 
 Git：
-- 待提交。
+- `14d1a17` 启动文档实现对齐审计。
 
 ## 2026-06-01 07:15 +08:00
 
