@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-02 01:22 +08:00
+
+目的：
+- 修复开发者模式下消息列表底部多出一块全局“运行过程”的问题，避免与已绑定到消息上方的运行过程面板重复展示。
+
+变更：
+- 更新 `src/web/main.tsx`：移除 `developer-process-list` 全局运行过程渲染，删除只服务该列表的 `developerProcessDetails` 包装函数。
+- 更新 `src/web/styles.css`：删除 `.developer-process-list` 和 `.developer-process-readable` 旧样式。
+- 更新 `src/tests/run-tests.ts`：增加回归断言，禁止旧全局运行过程列表和对应样式回归。
+- 更新 `docs/08-user-ui-guide.md`：明确开发者模式不得在消息列表底部额外渲染全局运行过程列表，所有过程必须绑定到对应 assistant message 上方。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：开发者模式开启后 `.developer-process-list` 和 `.developer-process-readable` 数量均为 0，页面只保留绑定到消息上方的 `.tool-process-panel`；页面不再出现 raw `enterWorkspace 返回` / `exitWorkspace 返回` 文本。
+
+Git：
+- 本次提交：移除开发者模式重复运行过程列表。
+
 ## 2026-06-02 01:08 +08:00
 
 目的：

@@ -66,6 +66,9 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("isWorkspaceExitProcess(item)");
   expectWeb("workspaceDisplayName(workspaceWindow.workspaceId)");
   expectWeb("className=\"tool-workspace-window\"");
+  assert.equal(webSource.includes("developer-process-list"), false);
+  assert.equal(webSource.includes("developerProcessDetails"), false);
+  assert.equal(webCssSource.includes(".developer-process-list"), false);
   expectWeb("${mobileSidebarOpen ? \"sidebar-drawer-open\" : \"\"}");
   expectWeb("const sidebarPinLabel = sidebarCollapsed ? \"侧边栏未固定，点击固定\" : \"侧边栏已固定，点击取消固定\"");
   expectWeb("function SidebarStateIcon({ pinned }: { pinned: boolean })");

@@ -1208,10 +1208,6 @@ function readableProcessDetails(item: UserRunProcess): ProcessReadableDetail[] {
   return details;
 }
 
-function developerProcessDetails(item: UserRunProcess): ProcessReadableDetail[] {
-  return readableProcessDetails(item);
-}
-
 function userProcessesFromTrace(trace: ConversationTrace, runId: string): UserRunProcess[] {
   return (trace.toolCalls ?? [])
     .slice()
@@ -2379,24 +2375,6 @@ function UserChatApp() {
                   ))}
                 </div>
               </div>
-            </section>
-          )}
-          {developerMode && allProcessItems.length > 0 && (
-            <section className="developer-process-list">
-              <h2>运行过程</h2>
-              {allProcessItems.map((item) => (
-                <details key={item.id}>
-                  <summary>{userProcessActivityLabel(item)}<span>{item.workspaceId}</span></summary>
-                  <div className="developer-process-readable">
-                    {developerProcessDetails(item).map((detail, index) => (
-                      <div key={`${item.id}-${index}`}>
-                        <strong>{detail.url ? <a href={detail.url} target="_blank" rel="noreferrer">{detail.label}</a> : detail.label}</strong>
-                        <span>{detail.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              ))}
             </section>
           )}
         </div>
