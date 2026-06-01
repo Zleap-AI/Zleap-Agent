@@ -1663,24 +1663,29 @@ export class MemoryService {
       memoryType: memory.memoryType,
       title: memory.title,
       summary: memory.summary,
+      snippet: memory.summary,
+      disclosure: "summary_only",
+      detailAvailable: true,
+      detailInjected: false,
       relationId: memory.relationId,
       version: memory.version,
       workspaceId: memory.workspaceId,
       updatedAt: memory.updatedAt,
-      readTool: memory.memoryType === "skill" ? "readSkill" : "readMemory"
+      readTool: memory.memoryType === "skill" ? "readSkill" : "readMemory",
+      readInstruction: memory.memoryType === "skill"
+        ? "调用 readSkill(skillId) 读取完整 procedure/appliesWhen/avoidWhen/detail。"
+        : "调用 readMemory(memoryId) 读取完整 detail；不要把 summary/snippet 扩写成事实。"
     };
     if (memory.memoryType === "event") {
       return {
         ...base,
         eventKind: typeof metadata.eventKind === "string" ? metadata.eventKind : undefined,
-        outcome: metadata.outcome,
-        detailSnippet: compactText(memory.detail, 360)
+        outcome: metadata.outcome
       };
     }
     if (memory.memoryType === "skill") {
       return {
         ...base,
-        disclosure: "summary_only",
         confidence: metadata.confidence
       };
     }

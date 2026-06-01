@@ -36,7 +36,7 @@
 | A5 | child natural-language 不能直接终答 | child 返回文本但不 `exitWorkspace` 时只能保存 trace，runtime 应继续要求退出。 | 待验证 | 检查 tool loop 和测试。 |
 | A6 | `exitWorkspace` 结构校验 | 必须校验完整 `WorkspaceResult`，拒绝 `running`、重复退出、畸形 payload，失败时不触发 exit hook。 | 进行中 | 对照 `ToolRegistry.validateWorkspaceResult` 和测试覆盖。 |
 | B1 | memory 类型和隔离 | impression 跨 workspace；event 为 `userId + workspaceId`；skill 为 workspace scoped shared 且脱敏。 | 待验证 | 检查 `MemoryService`、repository policy 和测试。 |
-| B2 | memory 渐进披露 | 自动召回/search 只给 summary/id，标记 `summary_only`、`detailInjected=false`，需要详情时使用 `readMemory`/`readSkill`。 | 进行中 | 检查 context projection、tool schema、prompt 测试。 |
+| B2 | memory 渐进披露 | 自动召回/search 只给 summary/id，标记 `summary_only`、`detailInjected=false`，需要详情时使用 `readMemory`/`readSkill`。 | 已验证 | 已修正 `searchMemory` event 投影不再返回 `detailSnippet`，并补测试。 |
 | B3 | event 自动写入 | 模型没有 event 写入工具；conversation window 和 workspace exit hook 自动写 process/result event。 | 待验证 | 检查 seed 工具列表、hook 触发、metadata。 |
 | B4 | memory metadata 禁止原始载荷 | metadata 只能存语义投影和 `sourceRefs`，不能复制 raw messages/tool calls/finalMessages 等。 | 进行中 | 检查 `MemoryService.findRawSourcePayloadKey` 和测试。 |
 | B5 | FTS + relation/version | 首版不用 vector；recall 需按完整 partition 判断最新版本，避免跨用户/跨 workspace 覆盖。 | 待验证 | 检查 repository 查询和测试。 |
@@ -91,3 +91,4 @@
 | --- | --- | --- | --- |
 | A2 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`、`testWorkspaceBoundary`、`testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：main 的 workspace tools 不包含 `exitWorkspace`；child 的 provider `toolsJson` 与 callable tools 均不包含 `enterWorkspace`/`askUser`/`finishTask`，且包含 `exitWorkspace`。 |
 | A3 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：child workspace 的 `runtime_context.workspace` 能看到 `main` 与 `dev` manifest，但这不授予 main-only tools。 |
+| B2 | 发现并修复偏差 | `src/core/memory-service.ts::projectMemorySearchResult`；`src/tests/run-tests.ts::testSearchMemoryToolUsesPolicyLayer`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 文档要求 `searchMemory` 返回 compact projection、disclosure/read-tool hints 和 detail availability，不默认返回完整 detail。原实现对 event 返回 `detailSnippet`，短 detail 时会等同泄露完整 detail；现改为 `snippet=summary`、`disclosure=summary_only`、`detailInjected=false`、`readTool`/`readInstruction`，详情只能通过 `readMemory`/`readSkill`。 |

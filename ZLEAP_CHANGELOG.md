@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:27 +08:00
+
+目的：
+- 修正 docs 审计发现的 `searchMemory` 渐进披露偏差，避免搜索结果默认暴露 event detail 片段。
+
+变更：
+- `projectMemorySearchResult` 统一返回 compact projection：`snippet=summary`、`disclosure=summary_only`、`detailAvailable=true`、`detailInjected=false`、`readTool` 和 `readInstruction`。
+- 移除 event 搜索结果中的 `detailSnippet`，详情必须通过 `readMemory(memoryId)` 读取。
+- 补充 `testSearchMemoryToolUsesPolicyLayer` 断言，确认 searchMemory 不包含 event/impression/skill 的 `detail` 或 `detailSnippet`，并保留正确读取工具提示。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 B2 memory 渐进披露标记为已验证并记录偏差修复证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:20 +08:00
 
 目的：

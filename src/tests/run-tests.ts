@@ -4294,6 +4294,21 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   assert.equal(userMemories.some((memory) => memory.id === otherEvent.id), false);
   assert.equal(userMemories.some((memory) => memory.id === agentSelf.id), false);
   assert.equal(JSON.stringify(userMemories).includes("stable identity detail"), false);
+  assert.equal(JSON.stringify(userMemories).includes("Visible to the owning user."), false);
+  const ownEventProjection = userMemories.find((memory) => memory.id === ownEvent.id) as unknown as Record<string, unknown>;
+  const ownImpressionProjection = userMemories.find((memory) => memory.id === ownImpression.id) as unknown as Record<string, unknown>;
+  const sharedSkillProjection = userMemories.find((memory) => memory.id === sharedSkill.id) as unknown as Record<string, unknown>;
+  for (const projection of [ownEventProjection, ownImpressionProjection, sharedSkillProjection]) {
+    assert.equal(projection.disclosure, "summary_only");
+    assert.equal(projection.detailAvailable, true);
+    assert.equal(projection.detailInjected, false);
+    assert.equal(Boolean(projection.detail), false);
+    assert.equal(Boolean(projection.detailSnippet), false);
+  }
+  assert.equal(ownEventProjection.readTool, "readMemory");
+  assert.equal(ownImpressionProjection.readTool, "readMemory");
+  assert.equal(sharedSkillProjection.readTool, "readSkill");
+  assert.equal(String(ownEventProjection.readInstruction ?? "").includes("readMemory"), true);
   assert.equal(JSON.stringify(userMemories).includes("readMemory"), true);
   const dottedUserResult = service.executeMemoryTool({
     run: {
