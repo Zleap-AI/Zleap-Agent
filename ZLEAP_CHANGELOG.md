@@ -2,6 +2,21 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:34 +08:00
+
+目的：
+- 记录 `docs/04-multi-tenant-isolation.md` 中 approval 权限隔离的实现审计结果。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 C3 approval 权限标记为已验证。
+- 记录现有证据：workspace entry 高风险审批、tool 高风险审批、普通用户列表隔离、普通用户不能 resolve approval、creator resolve 成功。
+
+验证：
+- 复用本轮 `PATH=/opt/homebrew/bin:$PATH npm test` 通过结果。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:30 +08:00
 
 目的：
