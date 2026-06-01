@@ -896,9 +896,68 @@ button:disabled {
   outline: none;
 }
 
+.composer-tool-menu-wrap {
+  position: relative;
+  align-self: end;
+}
+
 .tool-menu-button {
   align-self: end;
   border-radius: 999px;
+}
+
+.tool-menu-button.active {
+  border-color: rgba(16, 163, 127, 0.36);
+  background: rgba(16, 163, 127, 0.10);
+}
+
+.composer-tool-menu {
+  position: absolute;
+  left: 0;
+  bottom: 48px;
+  z-index: 50;
+  width: min(280px, calc(100vw - 40px));
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--shadow-pop);
+  backdrop-filter: blur(14px);
+  animation: soft-pop 140ms ease both;
+}
+
+.composer-tool-menu button {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+}
+
+.composer-tool-menu strong,
+.composer-tool-menu span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-tool-menu strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.composer-tool-menu span {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .send-button {

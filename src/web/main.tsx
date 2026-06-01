@@ -1301,6 +1301,7 @@ function UserChatApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("basic");
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [composerToolsOpen, setComposerToolsOpen] = useState(false);
   const [powerBusy, setPowerBusy] = useState(false);
   const [agentDraft, setAgentDraft] = useState<Partial<AgentConfig>>({});
   const [workspaces, setWorkspaces] = useState<WorkspaceDefinition[]>([]);
@@ -1459,6 +1460,7 @@ function UserChatApp() {
     setMessages([]);
     setProcessItems([]);
     setProcessPanelOpen(false);
+    setComposerToolsOpen(false);
     setMessage("");
     setError("");
     setRetryMessage("");
@@ -1499,6 +1501,12 @@ function UserChatApp() {
 
   function openDev(targetId = conversationId) {
     window.location.href = `/dev?conversationId=${encodeURIComponent(targetId)}`;
+  }
+
+  function openSettingsSection(section: SettingsSection) {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+    setComposerToolsOpen(false);
   }
 
   function selectAgent(agentId: string) {
@@ -1870,6 +1878,7 @@ function UserChatApp() {
     setError("");
     setRetryMessage("");
     setProcessPanelOpen(true);
+    setComposerToolsOpen(false);
     setMessage("");
     setMessages((items) => [
       ...removeFailedRetryPair(items, cleanMessage),
@@ -2176,7 +2185,39 @@ function UserChatApp() {
             </div>
           )}
           <div className="user-composer">
-            <button className="tool-menu-button" type="button" title="工具菜单">+</button>
+            <div className="composer-tool-menu-wrap">
+              <button
+                className={`tool-menu-button ${composerToolsOpen ? "active" : ""}`}
+                type="button"
+                title="工具菜单"
+                aria-label="工具菜单"
+                aria-expanded={composerToolsOpen}
+                onClick={() => setComposerToolsOpen((value) => !value)}
+              >+</button>
+              {composerToolsOpen && (
+                <div className="composer-tool-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={() => openSettingsSection("workspaces")}>
+                    <strong>工作空间与工具</strong>
+                    <span>MCP Server、专属工具和场景能力</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => openSettingsSection("memory")}>
+                    <strong>记忆</strong>
+                    <span>查看、搜索和修正 Agent 记住的内容</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => openSettingsSection("agents")}>
+                    <strong>Agent</strong>
+                    <span>切换或编辑当前 Agent</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => {
+                    setComposerToolsOpen(false);
+                    openDev();
+                  }}>
+                    <strong>打开调试台</strong>
+                    <span>查看当前会话的完整开发者视图</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
