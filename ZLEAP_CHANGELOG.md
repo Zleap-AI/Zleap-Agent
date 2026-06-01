@@ -17,7 +17,7 @@
 - `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
 
 Git：
-- 待提交。
+- `c7570bc` 收紧记忆搜索渐进披露。
 
 ## 2026-06-01 08:20 +08:00
 
