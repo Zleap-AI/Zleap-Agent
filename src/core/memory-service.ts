@@ -1014,6 +1014,7 @@ export class MemoryService {
         source: "afterConversationWindow",
         conversationId: run.conversationId,
         workspaceId,
+        taskId: `conversation-window:${windowIndex}`,
         windowStartAt,
         windowEndAt,
         sourceRefs: [
@@ -1413,6 +1414,10 @@ export class MemoryService {
     const conversationId = typeof metadata.conversationId === "string" ? metadata.conversationId.trim() : "";
     if (!conversationId) {
       return { allowed: false, reason: "Event memory requires metadata.conversationId for audit and tenant isolation." };
+    }
+    const taskId = typeof metadata.taskId === "string" ? metadata.taskId.trim() : "";
+    if (!taskId) {
+      return { allowed: false, reason: "Event memory requires metadata.taskId for audit and tenant isolation." };
     }
     const eventKind = typeof metadata.eventKind === "string" ? metadata.eventKind.trim() : "";
     const allowedKinds = new Set(["process", "result", "manual", "agent_requested"]);

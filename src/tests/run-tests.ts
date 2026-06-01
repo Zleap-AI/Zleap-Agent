@@ -2787,6 +2787,7 @@ async function testEventMemoryIsHookGenerated() {
   assert.equal(events.length >= 2, true);
   assert.equal(events.every((memory) => metadataOf(memory).source === "afterConversationWindow"), true);
   assert.equal(events.every((memory) => metadataOf(memory).conversationId === "conv-event-hook-contract"), true);
+  assert.equal(events.every((memory) => typeof metadataOf(memory).taskId === "string" && metadataOf(memory).taskId.startsWith("conversation-window:")), true);
   assert.equal(events.every((memory) => Array.isArray(metadataOf(memory).sourceRefs)), true);
   assert.equal(events.every((memory) => JSON.stringify(metadataOf(memory)).includes("\"table\":\"messages\"")), true);
   assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), "windowMessages")), true);
@@ -2837,6 +2838,7 @@ async function testEventMemoryIsHookGenerated() {
       metadataJson: JSON.stringify({
         source: "manualMemoryApi",
         conversationId: "conv-event-hook-contract",
+        taskId: "task-manual-raw-payload",
         eventKind: "manual",
         windowMessages: [{ role: "user", content: "raw" }]
       })
@@ -3817,7 +3819,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Own direct event",
       summary: "The current user inspected files.",
       detail: "This record should be visible to the same user.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", taskId: "task-direct-own-event", eventKind: "manual" })
     }
   });
   assert.throws(() => service.createMemoryRecord({
@@ -3830,7 +3832,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Forged trace event",
       summary: "This event tries to attach to another user's conversation trace.",
       detail: "The write should be rejected before audit pollution.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-victim-memory-metadata", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-victim-memory-metadata", taskId: "task-forged-trace-event", eventKind: "manual" })
     }
   }), /different user|writing actor/);
   const victimTrace = repos.getTrace("conv-victim-memory-metadata", "victim-api-user", "user");
@@ -3870,7 +3872,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Other direct event",
       summary: "Another user inspected files.",
       detail: "This record must not be visible to ordinary-api-user.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-other-direct-event", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-other-direct-event", taskId: "task-other-direct-event", eventKind: "manual" })
     }
   });
   assert.throws(() => service.updateMemoryRecord({
@@ -3985,7 +3987,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Own CLI event",
       summary: "The current user ran a CLI check.",
       detail: "This event belongs to a different workspace than the file skill.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", taskId: "task-direct-cli-event", eventKind: "manual" })
     }
   });
   const evidenceSkillMetadata = (eventIds: string[], conversationId = "conv-direct-skill-evidence") => JSON.stringify({
@@ -4096,10 +4098,23 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       memoryType: "event",
       userId: "ordinary-api-user",
       workspaceId: "dev",
+      title: "Event without task id",
+      summary: "Event memory must include task evidence.",
+      detail: "This should be rejected because event metadata needs a task id.",
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "manual" })
+    }
+  }), /metadata\.taskId/);
+  assert.throws(() => service.createMemoryRecord({
+    actorId: "ordinary-api-user",
+    actorRole: "user",
+    memory: {
+      memoryType: "event",
+      userId: "ordinary-api-user",
+      workspaceId: "dev",
       title: "Event with bad kind",
       summary: "Event memory must include a recognized kind.",
       detail: "This should be rejected because eventKind is not part of the event contract.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "note" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", taskId: "task-direct-bad-kind", eventKind: "note" })
     }
   }), /metadata\.eventKind/);
   assert.throws(() => service.createMemoryRecord({

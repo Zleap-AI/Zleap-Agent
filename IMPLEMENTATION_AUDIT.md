@@ -19,7 +19,7 @@
 | `docs/01-agent-philosophy.md` | 211 | 待逐条核对 | Agent/workspace/memory 理念。 |
 | `docs/02-workspace-runtime.md` | 417 | 进行中 | workspace runtime、MCP、handoff、工具边界。 |
 | `docs/03-memory-model.md` | 495 | 进行中 | impression/event/skill、FTS、渐进披露。 |
-| `docs/04-multi-tenant-isolation.md` | 281 | 待逐条核对 | userId/权限/trace/memory 隔离。 |
+| `docs/04-multi-tenant-isolation.md` | 281 | 进行中 | userId/权限/trace/memory 隔离。 |
 | `docs/05-hooks-and-lifecycle.md` | 411 | 待逐条核对 | lifecycle hook、event/skill 提取。 |
 | `docs/06-typescript-implementation-roadmap.md` | 424 | 待逐条核对 | 模块/MVP/UI/阶段性要求。 |
 | `docs/07-context-and-prompt-contracts.md` | 527 | 待逐条核对 | context stack、prompt、tool loop 契约。 |
@@ -35,13 +35,13 @@
 | A4 | handoff 隔离 | parent-to-child 只携带总体要求、当前用户请求、少量用户原话；不得携带父级 assistant 执行记录、enterWorkspace 结果、父级工具证据或 sibling 记录。 | 进行中 | 检查 `AgentRuntime.createParentToChildHandoff`、history 构造和测试。 |
 | A5 | child natural-language 不能直接终答 | child 返回文本但不 `exitWorkspace` 时只能保存 trace，runtime 应继续要求退出。 | 待验证 | 检查 tool loop 和测试。 |
 | A6 | `exitWorkspace` 结构校验 | 必须校验完整 `WorkspaceResult`，拒绝 `running`、重复退出、畸形 payload，失败时不触发 exit hook。 | 进行中 | 对照 `ToolRegistry.validateWorkspaceResult` 和测试覆盖。 |
-| B1 | memory 类型和隔离 | impression 跨 workspace；event 为 `userId + workspaceId`；skill 为 workspace scoped shared 且脱敏。 | 待验证 | 检查 `MemoryService`、repository policy 和测试。 |
+| B1 | memory 类型和隔离 | impression 跨 workspace；event 为 `userId + workspaceId + conversationId + taskId`；skill 为 workspace scoped shared 且脱敏。 | 已验证 | 已补齐 event `metadata.taskId` final-row policy，并验证 direct API/hook event 行为。 |
 | B2 | memory 渐进披露 | 自动召回/search 只给 summary/id，标记 `summary_only`、`detailInjected=false`，需要详情时使用 `readMemory`/`readSkill`。 | 已验证 | 已修正 `searchMemory` event 投影不再返回 `detailSnippet`，并补测试。 |
 | B3 | event 自动写入 | 模型没有 event 写入工具；conversation window 和 workspace exit hook 自动写 process/result event。 | 待验证 | 检查 seed 工具列表、hook 触发、metadata。 |
 | B4 | memory metadata 禁止原始载荷 | metadata 只能存语义投影和 `sourceRefs`，不能复制 raw messages/tool calls/finalMessages 等。 | 进行中 | 检查 `MemoryService.findRawSourcePayloadKey` 和测试。 |
 | B5 | FTS + relation/version | 首版不用 vector；recall 需按完整 partition 判断最新版本，避免跨用户/跨 workspace 覆盖。 | 待验证 | 检查 repository 查询和测试。 |
-| C1 | 多租户 conversation ownership | conversationId 由唯一 `userId + agentId` 拥有，跨用户/agent 复用必须拒绝。 | 待验证 | 检查 `ensureConversation` 和测试。 |
-| C2 | 敏感调试端点 actor 显式要求 | LLM logs、approval、agent/workspace/memory、trace、conversation delete 都需要显式 actor。 | 待验证 | 检查 HTTP API 和 repository。 |
+| C1 | 多租户 conversation ownership | conversationId 由唯一 `userId + agentId` 拥有，跨用户/agent 复用必须拒绝。 | 已验证 | `ensureConversation`、trace/tool/LLM/session/approval 写入测试覆盖 owner mismatch。 |
+| C2 | 敏感调试端点 actor 显式要求 | LLM logs、approval、agent/workspace/memory、trace、conversation delete 都需要显式 actor。 | 进行中 | 代码入口已使用 `parseActor`/`parseActorFromSearchParams`；已有 parseActor 单测，仍需补 HTTP handler 级集成测试。 |
 | C3 | approval 权限 | 高风险非 creator tool/workspace 请求进入 approval，resolve creator-only，普通用户只能看自己的请求。 | 待验证 | 检查 policy 和测试。 |
 | D1 | LLM 协议 | OpenAI-compatible Chat Completions，streaming，工具走 `tools` array，API key 不入库/日志。 | 待验证 | 检查 `llm-client`、logs、UI cache。 |
 | D2 | tool loop | Observe/Decide/Act/Verify 循环，follow-up LLM 保留完整 context stack，不退化成只有工具结果。 | 待验证 | 检查 `AgentRuntime` 和测试。 |
@@ -92,3 +92,5 @@
 | A2 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`、`testWorkspaceBoundary`、`testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：main 的 workspace tools 不包含 `exitWorkspace`；child 的 provider `toolsJson` 与 callable tools 均不包含 `enterWorkspace`/`askUser`/`finishTask`，且包含 `exitWorkspace`。 |
 | A3 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：child workspace 的 `runtime_context.workspace` 能看到 `main` 与 `dev` manifest，但这不授予 main-only tools。 |
 | B2 | 发现并修复偏差 | `src/core/memory-service.ts::projectMemorySearchResult`；`src/tests/run-tests.ts::testSearchMemoryToolUsesPolicyLayer`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 文档要求 `searchMemory` 返回 compact projection、disclosure/read-tool hints 和 detail availability，不默认返回完整 detail。原实现对 event 返回 `detailSnippet`，短 detail 时会等同泄露完整 detail；现改为 `snippet=summary`、`disclosure=summary_only`、`detailInjected=false`、`readTool`/`readInstruction`，详情只能通过 `readMemory`/`readSkill`。 |
+| B1 | 发现并修复偏差 | `src/core/memory-service.ts::canWriteEventStructure`、`maybeWriteConversationWindowEvent`；`src/tests/run-tests.ts::testEventMemoryIsHookGenerated`、`testDirectMemoryApiUsesPolicyLayer`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | `docs/04` 要求 event 绑定 `userId`、`workspaceId`、`conversationId`、`taskId`。原 direct Memory API final-row policy 未强制 `metadata.taskId`；现补齐缺失拒绝，并让 conversation-window hook event 写入确定的 `conversation-window:{index}` task id。 |
+| C1 | 已验证 | `src/db/repositories.ts::ensureConversation`、`saveWorkspaceSession`、`saveToolCall`、`saveLlmCall`、`createApprovalRequest`、`getTrace`；`src/tests/run-tests.ts::testTraceAndToolLogsAreUserScoped`、`testLlmLogsAreUserScoped`、`testConversationDeletionLifecycle`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | conversation owner mismatch 会拒绝复用；trace 读取 owner-or-creator；conversation 删除后普通用户不能读取 audit-only trace。 |

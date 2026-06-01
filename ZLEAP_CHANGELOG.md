@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:30 +08:00
+
+目的：
+- 对齐 `docs/04-multi-tenant-isolation.md` 中 event memory 必须绑定 `userId + workspaceId + conversationId + taskId` 的多租户要求。
+
+变更：
+- `MemoryService` 的 event final-row policy 新增 `metadata.taskId` 强制校验，缺失时拒绝直接 Memory API 或 runtime memory 写入。
+- conversation-window 自动 event 增加确定的 `taskId: conversation-window:{index}`，避免 hook 自己生成的 process/result event 缺少任务边界。
+- 补充 `testEventMemoryIsHookGenerated` 和 `testDirectMemoryApiUsesPolicyLayer` 断言，覆盖 hook event 带 taskId、direct API event 缺少 taskId 被拒绝、现有手写 event fixture 带完整 trace metadata。
+- 更新 `IMPLEMENTATION_AUDIT.md`，记录 `docs/04` 多租户隔离审计进展和 B1/C1 验证证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:27 +08:00
 
 目的：
