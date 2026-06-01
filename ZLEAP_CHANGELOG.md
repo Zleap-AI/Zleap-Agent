@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-02 00:05 +08:00
+
+目的：
+- 修复用户级设置弹窗打开后背景出现灰色遮罩的问题，让弹窗外层关闭区域保持透明。
+
+变更：
+- 更新 `src/web/styles.css`：将 `.settings-backdrop` 背景改为透明，只保留点击关闭层。
+- 更新 `src/tests/run-tests.ts`：增加样式契约断言，确保 settings backdrop 保持透明。
+- 更新 `docs/08-user-ui-guide.md`：明确设置弹窗外层关闭区域不得使用灰色、模糊或变暗遮罩。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：设置弹窗打开后 `.settings-backdrop` 背景为 `rgba(0, 0, 0, 0)`，弹窗正常显示。
+
+Git：
+- 本次提交：让设置弹窗背景关闭层透明。
+
 ## 2026-06-01 23:45 +08:00
 
 目的：
