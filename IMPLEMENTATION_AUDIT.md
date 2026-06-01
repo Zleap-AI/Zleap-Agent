@@ -14,7 +14,7 @@
 
 | 文档 | 行数 | 审计状态 | 备注 |
 | --- | ---: | --- | --- |
-| `ZLEAP_MASTER_PLAN.md` | 440 | 进行中 | 长期主计划，当前最重要来源。 |
+| `ZLEAP_MASTER_PLAN.md` | 440 | 已完成首轮细项拆分 | 总纲要求已拆成 M1-M8，并映射到 A-L 运行时/数据/UI 证据。 |
 | `docs/README.md` | 112 | 进行中 | 文档组织和不变量摘要。 |
 | `docs/01-agent-philosophy.md` | 211 | 待逐条核对 | Agent/workspace/memory 理念。 |
 | `docs/02-workspace-runtime.md` | 417 | 已完成首轮细项拆分 | workspace runtime、MCP、handoff、工具边界已拆成 I1-I6。 |
@@ -87,6 +87,14 @@
 | L6 | Memory disclosure prompt contract | memory 注入必须是投影视图，提示模型详情追问先 `readMemory`，skill 高相关时先 `readSkill`。 | 已验证 | 已覆盖 memoryDisclosureProtocol、readMemory 正反例、summary_only projection、readSkill 渐进读取和 schema scope。 |
 | L7 | Attention budget and local history | context 窗口按预算截断，local history 只取当前 workspace 必要片段，tool result 长输出进入摘要/预算。 | 已验证 | 已覆盖 long history 截断、tokenEstimate 限制、history JSON 仍可解析、follow-up tool_result fitSegment。 |
 | L8 | Runtime invariants and final language | 身份稳定、工具隔离、memory scope、main 非万能工具、结构化退出、policy 写入和用户语言回复必须有测试。 | 已验证 | 已覆盖 A-K 不变量集合，并断言 system prompt 含“用户用中文就用中文/不要中英混杂”。 |
+| M1 | 主计划/流程总纲 | 主计划是代码改动前必读依据；文档/日志/提交默认中文；有意义改动需记录 changelog、commit 并 push。 | 已验证 | 本轮审计以 `ZLEAP_MASTER_PLAN.md` 为最高文档依据；`ZLEAP_CHANGELOG.md` 持续记录时间/目的/验证/Git hash；分支 `0601` 上提交信息使用中文并已推送到远端。 |
+| M2 | Web UI 会话体验 | 中文七页签、对话三栏、Markdown、安全渲染、失败临时错误/重试、清空当前会话、停止流、tab 切换保活、右栏宽度缓存。 | 已补强验证 | 新增 `src/tests/run-tests.ts::testWebUiMasterPlanContracts` 静态契约测试，覆盖 tab panel 常驻隐藏、`AbortController`/server disconnect abort、失败消息不进入缓存历史、临时重试、conversation DELETE、`apiKey/contextPanelWidth/messages/context` 浏览器缓存、Markdown 不使用 `dangerouslySetInnerHTML`。 |
+| M3 | Web UI trace/context/memory/debug 面 | 右侧只聚焦当前 workspace/context/memory writes；context 结构化视图与原始日志切换；Memory 表显示 scope 标识并避免 raw metadata 普通编辑；日志/数据表/配置为调试面。 | 已补强验证 | `ChatTab`、`ContextStack`、`RawContextLog`、`MemoryEvidencePanel`、`LogsTab`、`DatabaseTablesTab`、`ConfigTab`；`testWebUiMasterPlanContracts` 断言原始日志切换、Memory evidence 语义视图、`relationId`/scope 字段、数据表/配置入口存在；A-L 的 F1/L4/G1/J7 覆盖对应 API 权限。 |
+| M4 | Runtime workspace orchestration | main/dev 首版、memory 非 workspace；main manifest 注入；child 工具隔离、handoff、resume、structured `WorkspaceResult`、main terminal exits、artifact responsibility。 | 已验证 | A1-A6、I1-I6、L5 已覆盖 stable identity、manifest 可见不授权、main/child 工具边界、handoff 隔离、未完成 child resume、askUser/finishTask 终止、`exitWorkspace` 校验和 post-exit 失败 trace。 |
+| M5 | Context/prompt/LLM 协议 | OpenAI-compatible Chat Completions；tools 只走顶层 `tools`；context segment 稳定；attention budget 保 JSON；最终回答隐藏内部机制并跟随用户语言。 | 已验证 | D1-D2、L1-L8 已覆盖 provider request body/streaming/tool array、system prompt 不复制工具 schema、follow-up 完整 context stack、raw `final_messages` 仅调试、budget 可解析 JSON、中文语言契约。 |
+| M6 | SQLite/tenant/security lifecycle | Raw SQL + SQLite 核心表、conversation owner、显式 actor、approval、trace 写入 userId 校验、删除生命周期、creator-only agent/workspace/config/debug 面。 | 已验证 | C1-C5、G1、K1-K7 已覆盖 schema 表/字段、owner mismatch 拒绝、敏感 HTTP actor、approval list/resolve scope、trace/LLM/tool/session/approval tenant 校验、conversation/workspace/memory 删除和 creator-only 管理。 |
+| M7 | Memory strategy | Impression/Event/Skill 分层；SQLite FTS + relation/version；自动召回投影；event hook 写入；skill 脱敏去重；runtime memory tools 小面；direct API 走同 policy。 | 已验证 | B1-B5、H4-H8、J1-J7 已覆盖 memory scope、summary-only 渐进披露、hook-only event、raw payload 禁止、FTS 安全化、relation/version 分区、skill quality/evidence、memory recall audit、direct API final-row policy。 |
+| M8 | MCP/workspace tools/配置 | MCP server-first、workspace-scoped server/discover/import/execute；placeholder structured failure；runtime config SQLite 可调且 runtime 每次读取。 | 已验证 | E1、I4、I6、L7 和 `testRuntimeConfigControlsRuntimeLimits` 覆盖 stdio/Streamable HTTP binding、discover/import/callTool、placeholder failed result、内置 dev tools reason 约束、`runtime_config` seed/schema/UI/API 与运行时读取。 |
 
 ## 当前验证记录
 
@@ -105,7 +113,7 @@
 
 ## 待办队列
 
-- [ ] 完整阅读并拆分 `ZLEAP_MASTER_PLAN.md` 的所有可测试要求。
+- [x] 完整阅读并拆分 `ZLEAP_MASTER_PLAN.md` 的所有可测试要求。
 - [x] 完整阅读并拆分 `docs/02-workspace-runtime.md` 的 workspace runtime 要求。
 - [x] 完整阅读并拆分 `docs/03-memory-model.md` 的 memory 要求。
 - [x] 完整阅读并拆分 `docs/04-multi-tenant-isolation.md` 的权限要求。
@@ -186,3 +194,11 @@
 | L6 | 已验证 | `src/core/context-builder.ts::memoryDisclosureProtocol`、`projectMemoryBase`、`projectSkill`；`src/core/memory-service.ts::executeMemoryTool`；`src/tests/run-tests.ts::testRuntimeContextAndTools`、`testLlmMemoryContextUsesWorkspaceSessionRecall`、`testSearchMemoryToolUsesPolicyLayer`、`testToolBindingsAndMcpReadiness`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | `runtime_context.memory` 是投影视图，包含 `summary_only/detailInjected=false/detailAvailable=true/readTool/readInstruction`，过程事件不含 `detailSnippet`，skill 不含完整 procedure。`memoryDisclosureProtocol` 带“详细说说”等触发词、正例/反例和必须先 `readMemory(memoryId)` 的规则；`readMemory/readSkill` schema 不暴露 scope 字段。 |
 | L7 | 已验证 | `src/core/attention-budget.ts::AttentionBudgetManager`；`src/core/agent-runtime.ts::attentionBudgetConfig`、`saveFollowUpLlmCall`；`src/tests/run-tests.ts::testAttentionBudgetTrimsHistoryButKeepsJson`、`testRuntimeConfigControlsRuntimeLimits`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | history、memory、tool_result 等 segment 会按 attention budget 截断并保留可解析 JSON。长 history 测试断言 `runtime_context.local_conversation` 仍能 JSON.parse，含 `[truncated by attention budget]`，长度受控，`history` segment `tokenEstimate <= 2200`。runtime config 可调整 context/memory recall 相关限制。 |
 | L8 | 已验证 | `src/tests/run-tests.ts` 中 A1-A6、B1-B5、C1-C5、D1-D2、H1-H8、I1-I6、J1-J7、K1-K7 覆盖的 runtime invariants；`src/core/context-builder.ts::runtimeInstructionText`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | docs/07 明列的不变量已映射为测试：身份稳定、active workspace tool isolation、event/skill scope、main 非万能工具、child 结构化退出、memory 写入 policy。system prompt 同时断言包含中文语言契约：用户用中文就用中文，不要因内部 prompt/tool/runtime context 混杂导致中英意外切换。 |
+| M1 | 已验证 | `ZLEAP_MASTER_PLAN.md`；`ZLEAP_CHANGELOG.md`；`git log --oneline origin/0601`；`git status --short --branch`。 | 主计划流程要求已在本轮执行：先读主计划，再拆分审计；所有有意义改动写入 changelog、使用中文提交信息并推送到 `origin/0601`。 |
+| M2 | 已补强验证 | `src/web/main.tsx::App`、`ChatTab`、`MarkdownMessage`；`src/server/index.ts` stream abort；`src/tests/run-tests.ts::testWebUiMasterPlanContracts`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | UI 会话体验要求已拆分并加静态契约测试：七页签常驻隐藏而非卸载、Chat 三栏、Markdown React 节点渲染且无 `dangerouslySetInnerHTML`、失败请求从聊天消息/缓存剔除并保留临时重试、清空当前会话调用 server DELETE、停止按钮 abort 浏览器流并让服务端把 disconnect 传入 runtime/provider。 |
+| M3 | 已补强验证 | `src/web/main.tsx::ContextStack`、`RawContextLog`、`MemoryEvidencePanel`、`LogsTab`、`DatabaseTablesTab`、`ConfigTab`；`src/tests/run-tests.ts::testWebUiMasterPlanContracts`、`testSensitiveHttpEndpointsRequireExplicitActor`、`testRuntimeConfigControlsRuntimeLimits`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | Chat 右栏聚焦 current workspace/context/memory writes，结构化 context 与 raw provider log 用同一 `llmCallId` 切换；Memory editor 展示语义字段和 evidence refs，不把 `metadataJson` 作为普通 raw JSON 编辑面；日志/数据表/配置面走 creator/actor API 边界。 |
+| M4 | 已验证 | A1-A6、I1-I6、L5 对应代码和测试；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 主计划 runtime workspace 编排要求已映射：首版 `main/dev`、memory 非 workspace、manifest 注入、child 工具隔离、有限 handoff、未完成 child 续跑、structured `WorkspaceResult`、main terminal tool exits 和 artifact responsibility 边界。 |
+| M5 | 已验证 | D1-D2、L1-L8 对应代码和测试；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 主计划 context/prompt/LLM 协议已映射：OpenAI-compatible Chat Completions、顶层 `tools`、system prompt 不塞工具 JSON、context segment 稳定、attention budget 保 JSON、`final_messages` 只作 raw log、最终用户语言和内部机制隐藏契约。 |
+| M6 | 已验证 | C1-C5、G1、K1-K7 对应代码和测试；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | SQLite/tenant/security 生命周期要求已映射：Raw SQL schema、conversation owner、显式 actor、tenant trace 写入校验、approval 隔离、creator-only 管理面、conversation/workspace/memory 删除和 audit 保留。 |
+| M7 | 已验证 | B1-B5、H4-H8、J1-J7 对应代码和测试；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 主计划 memory strategy 已映射：Impression/Event/Skill 分层、SQLite FTS 与 relation/version、自动 recall 投影、event hook 写入、skill 脱敏/证据/去重、runtime memory tools 小面和 direct API 同 policy。 |
+| M8 | 已验证 | E1、I4、I6、L7；`src/tests/run-tests.ts::testRuntimeConfigControlsRuntimeLimits`、`testBuiltInToolsAreSeededAndWorkspaceScoped`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | MCP/workspace tools/config 要求已映射：MCP server-first、workspace-scoped discovery/import/execute、placeholder structured failure、内置 dev tools reason 约束，以及 `runtime_config` seed/schema/API/UI 与运行时读取。 |

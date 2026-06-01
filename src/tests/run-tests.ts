@@ -38,6 +38,40 @@ class FakeLLMClient implements LLMClient {
   }
 }
 
+async function testWebUiMasterPlanContracts() {
+  const webSource = await fs.readFile(path.resolve("src/web/main.tsx"), "utf8");
+  const serverSource = await fs.readFile(path.resolve("src/server/index.ts"), "utf8");
+
+  const expectWeb = (needle: string) => assert.ok(webSource.includes(needle), `Web UI contract missing: ${needle}`);
+  const expectServer = (needle: string) => assert.ok(serverSource.includes(needle), `Server stream contract missing: ${needle}`);
+
+  for (const tab of ["chat", "workspace", "memory", "logs", "tables", "config", "concept"]) {
+    expectWeb(`renderTabPanel("${tab}"`);
+  }
+  expectWeb("aria-hidden={tab !== item}");
+  expectWeb("const [apiKey, setApiKey] = useState(cached.apiKey ?? \"\")");
+  expectWeb("saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined })");
+  expectWeb("normalizeCachedMessages(cached.messages)");
+  expectWeb("if (item.failed) return false");
+  expectWeb("setMessages((items) => items.filter((item) => item.runId !== runId && item.id !== userMessageId && item.id !== assistantMessageId))");
+  expectWeb("currentRunControllerRef.current?.abort()");
+  expectWeb("signal: controller.signal");
+  expectWeb("content: item.content || \"已停止运行。\", streaming: false, failed: false, requestText: undefined");
+  expectWeb("await api(`/api/conversations/${encodeURIComponent(conversationId)}`");
+  expectWeb("method: \"DELETE\"");
+  expectWeb("function MarkdownMessage");
+  assert.equal(webSource.includes("dangerouslySetInnerHTML"), false);
+  expectWeb("showRawContextLogs ? \"显示结构化视图\" : \"显示原始日志\"");
+  expectWeb("MemoryEvidencePanel");
+  expectWeb("记忆只保存语义投影");
+  expectWeb("relationId");
+
+  expectServer("const abortController = new AbortController()");
+  expectServer("request.on(\"aborted\", stopRun)");
+  expectServer("response.on(\"close\", stopRun)");
+  expectServer("runtime.runStream({ ...body, abortSignal: abortController.signal })");
+}
+
 function assertFollowUpContextStacksIncludeBaseSegments(trace: ReturnType<Repositories["getTrace"]>): void {
   const followUpSegments = trace.contextSegments.filter((segment) => segment.segmentType === "tool_result");
   assert.equal(followUpSegments.length > 0, true);
@@ -5843,6 +5877,7 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
 }
 
 async function main() {
+  await testWebUiMasterPlanContracts();
   await testDatabaseAndMemory();
   await testOpenAIClientRetriesAndDecodesErrors();
   await testAgentUpdateRequiresCreatorRole();

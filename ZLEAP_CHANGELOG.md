@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:53 +08:00
+
+目的：
+- 完成 `ZLEAP_MASTER_PLAN.md` 的首轮细项拆分，并把主计划里的 UI/stream 易回退约束补成测试证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将主计划总纲拆成 M1-M8，覆盖流程总纲、Web UI 会话体验、trace/context/memory/debug 面、runtime workspace 编排、context/prompt/LLM 协议、SQLite/tenant/security 生命周期、memory strategy、MCP/workspace tools/config。
+- 新增 `src/tests/run-tests.ts::testWebUiMasterPlanContracts`，静态校验七页签常驻、浏览器缓存、失败请求清理/重试、停止流 abort、server disconnect cancellation、conversation DELETE、Markdown 安全渲染、context raw log 切换和 Memory evidence 语义视图等主计划 UI 契约。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:46 +08:00
 
 目的：
