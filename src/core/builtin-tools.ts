@@ -208,8 +208,13 @@ export async function executeWriteFile(argumentsJson: string, context: BuiltinTo
 }
 
 export function conversationWorkspaceRoot(conversationId: string): string {
-  const base = process.env.ZLEAP_FILE_WORKSPACE_ROOT ?? path.join(os.tmpdir(), "zleap-agent", "conversations");
+  const base = process.env.ZLEAP_FILE_WORKSPACE_ROOT ?? defaultFileWorkspaceBaseRoot();
   return path.join(path.resolve(process.cwd(), base), safeConversationPathSegment(conversationId));
+}
+
+export function defaultFileWorkspaceBaseRoot(): string {
+  const homeDir = os.homedir() || process.cwd();
+  return path.join(homeDir, "Documents", "Zleap", "conversations");
 }
 
 async function ensureConversationWorkspaceRoot(conversationId: string): Promise<string> {

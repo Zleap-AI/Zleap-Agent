@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 23:02 +08:00
+
+目的：
+- 修正内置文件工具默认存储位置：文件数据应进入用户文档目录下的 Zleap 文件夹，而不是系统临时目录。
+
+变更：
+- 更新 `src/core/builtin-tools.ts`：默认文件工作区根目录改为 `~/Documents/Zleap/conversations/`，Windows 下对应用户文档目录里的 `Documents\Zleap\conversations\`；仍支持 `ZLEAP_FILE_WORKSPACE_ROOT` 覆盖。
+- 更新 `src/db/seed.ts`、`docs/02-workspace-runtime.md`、`docs/07-context-and-prompt-contracts.md`、`docs/08-user-ui-guide.md` 和 `ZLEAP_MASTER_PLAN.md`：同步默认文件工作区位置说明。
+- 更新 `src/tests/run-tests.ts`：测试断言默认文件工作区位于 `Documents/Zleap/conversations`。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已用 `conversationWorkspaceRoot("conv-path-check")` 验证默认路径为 `/Users/jomymac/Documents/Zleap/conversations/conv-path-check-5c797ab5`。
+
+Git：
+- 本次提交：将默认文件工作区迁移到用户文档目录。
+
 ## 2026-06-01 22:46 +08:00
 
 目的：

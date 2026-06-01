@@ -274,14 +274,14 @@ export function seedDefaults(db: Database.Database): void {
   `);
 
   insertWorkspace.run("main", "主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。多阶段任务要按能力切片调度，例如搜索完成后回到 main，再进入开发/文件工作空间生成网页或写文件。", "只使用编排工具。", "low", now, now);
-  insertWorkspace.run("dev", "开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是系统临时目录下的当前会话专属工作目录，目录名形如 <tmp>/zleap-agent/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", "medium", now, now);
+  insertWorkspace.run("dev", "开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是用户文档目录下的 Zleap 会话专属工作目录，目录名形如 ~/Documents/Zleap/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", "medium", now, now);
 
   const updateWorkspace = db.prepare(`
     UPDATE workspaces SET name = ?, description = ?, instructions = ?, toolInstructions = ?, updatedAt = ?
     WHERE id = ?
   `);
   updateWorkspace.run("主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。多阶段任务要按能力切片调度，例如搜索完成后回到 main，再进入开发/文件工作空间生成网页或写文件。", "只使用编排工具。", now, "main");
-  updateWorkspace.run("开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是系统临时目录下的当前会话专属工作目录，目录名形如 <tmp>/zleap-agent/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", now, "dev");
+  updateWorkspace.run("开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是用户文档目录下的 Zleap 会话专属工作目录，目录名形如 ~/Documents/Zleap/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", now, "dev");
   db.prepare("DELETE FROM workspace_tools WHERE workspaceId = 'memory'").run();
   db.prepare("DELETE FROM workspaces WHERE id = 'memory'").run();
   db.prepare("UPDATE memories SET workspaceId = 'dev', updatedAt = ? WHERE workspaceId IN ('file', 'cli')").run(now);

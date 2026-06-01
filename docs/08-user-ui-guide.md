@@ -181,7 +181,7 @@ Agent：
 - 编辑名称、用途说明、能力清单、是否需要确认。
 - 配置 MCP Server，用来为当前工作空间增加外部专属工具。
 - 展示当前工作空间可用的专属工具列表。
-- 内置文件工具不得默认操作项目根目录，也不得使用项目内 `.codex` 目录；每个会话必须使用专属工作目录，默认目录名形如 `<tmp>/zleap-agent/conversations/<conversationId>-<hash>/`。
+- 内置文件工具不得默认操作项目根目录，也不得使用项目内 `.codex` 或系统临时目录作为默认位置；每个会话必须使用专属工作目录，默认目录名形如 `~/Documents/Zleap/conversations/<conversationId>-<hash>/`，Windows 下对应用户文档目录里的 `Documents\Zleap\conversations\<conversationId>-<hash>\`。
 - 服务部署方可以通过环境变量 `ZLEAP_FILE_WORKSPACE_ROOT` 指向自选基础目录；UI 后续可在高级设置中暴露为“文件工作目录”。
 - 不暴露系统内置工具、工具 JSON、参数 schema、memoryPolicyJson。
 - 手动编辑工具 schema、runtime binding 和底层 manifest 仍跳转 `/dev`。

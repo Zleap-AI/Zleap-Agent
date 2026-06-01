@@ -1,6 +1,5 @@
 ﻿import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import type { AddressInfo } from "node:net";
@@ -9,7 +8,7 @@ import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
 import { Repositories, mcpServerToBindingJson } from "../db/repositories";
 import { AgentRuntime } from "../core/agent-runtime";
-import { conversationWorkspaceRoot } from "../core/builtin-tools";
+import { conversationWorkspaceRoot, defaultFileWorkspaceBaseRoot } from "../core/builtin-tools";
 import { MemoryService } from "../core/memory-service";
 import { WorkspaceRuntime } from "../core/workspace-runtime";
 import { McpToolExecutor } from "../core/mcp-executor";
@@ -5158,7 +5157,8 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(builtinWriteFileTool.lastToolResult.includes("\"created\":true"), true);
   assert.equal(await pathExists(path.join(scratchDir, "zleap-tool-scratch", "read-write-test.txt")), true);
   assert.equal(await pathExists(path.join(oldProjectScratchDir, "read-write-test.txt")), false);
-  assert.equal(scratchDir.startsWith(path.join(os.tmpdir(), "zleap-agent", "conversations")), true);
+  assert.equal(scratchDir.startsWith(defaultFileWorkspaceBaseRoot()), true);
+  assert.equal(defaultFileWorkspaceBaseRoot().endsWith(path.join("Documents", "Zleap", "conversations")), true);
   assert.equal(builtinWriteFileTool.lastToolResult.includes(".codex"), false);
 
   const builtinReadFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "readFile", {
