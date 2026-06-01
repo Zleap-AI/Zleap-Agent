@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:40 +08:00
+
+目的：
+- 完成 `docs/03-memory-model.md` 的首轮细项拆分，明确 memory 模型各项要求已有的代码与测试证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/03 拆成 J1-J7，覆盖 memory recall 可观察性、impression scope、event metadata、SQLite FTS relation/version、skill 渐进披露与质量门禁、memory 注入策略、runtime tools 与 direct API 分层。
+- 本次只更新审计记录，不改运行时代码。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:37 +08:00
 
 目的：
