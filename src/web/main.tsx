@@ -2188,12 +2188,9 @@ function UserChatApp() {
             <span>{chatHeaderSubtitle}</span>
           </div>
           <div className="chat-header-actions">
-            <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="模型">
-              <option value={model}>{model}</option>
-              <option value="gpt-5-mini">gpt-5-mini</option>
-              <option value="gpt-5">gpt-5</option>
-              <option value="gpt-4.1">gpt-4.1</option>
-            </select>
+            <button className="model-chip" type="button" onClick={() => openSettingsSection("basic")} title="当前模型，点击在设置中编辑">
+              {model}
+            </button>
             <button onClick={() => setSettingsOpen(true)}>设置</button>
             {developerMode && <button onClick={() => openDev()}>/dev</button>}
           </div>

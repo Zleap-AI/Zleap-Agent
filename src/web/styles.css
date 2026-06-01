@@ -440,6 +440,12 @@ button:disabled {
   white-space: nowrap;
 }
 
+.chat-header-actions .model-chip {
+  max-width: min(220px, 34vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .user-message-list {
   min-height: 0;
   overflow: auto;

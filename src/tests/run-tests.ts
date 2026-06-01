@@ -61,6 +61,9 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("const [processDetailOpenByItemId, setProcessDetailOpenByItemId] = useState<Record<string, boolean>>({})");
   expectWeb("aria-expanded={detailOpen}");
   expectWeb("{detailOpen && <div className=\"tool-activity-detail\">");
+  expectWeb("className=\"model-chip\"");
+  assert.equal(webSource.includes("<option value=\"gpt-5\">gpt-5</option>"), false);
+  assert.equal(webSource.includes("<option value=\"gpt-4.1\">gpt-4.1</option>"), false);
   expectWeb("当前智能体");
   expectWeb("新建智能体");
   expectWeb("defaultModel: model || sourceAgent.defaultModel");

@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 23:27 +08:00
+
+目的：
+- 修复用户级 UI Header 模型下拉展示硬编码模型列表的问题，避免把不存在于数据库的模型 catalog 伪装成真实列表。
+
+变更：
+- 更新 `src/web/main.tsx`：移除 Header 中硬编码的 `gpt-5-mini`、`gpt-5`、`gpt-4.1` 选项；改为只显示当前生效模型，点击后进入基础设置编辑 Model。
+- 更新 `src/web/styles.css`：补充当前模型 chip 的宽度和截断样式。
+- 更新 `src/tests/run-tests.ts`：增加契约断言，禁止 Header 再出现硬编码模型 option。
+- 更新 `docs/08-user-ui-guide.md`：明确没有真实模型 catalog 时，不得硬编码模型下拉列表。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：Header 中模型 `<select>` 数量为 0，只显示当前模型按钮 `step-3.7-flash`，控制台无 error。
+
+Git：
+- 本次提交：移除 Header 硬编码模型下拉。
+
 ## 2026-06-01 23:15 +08:00
 
 目的：
