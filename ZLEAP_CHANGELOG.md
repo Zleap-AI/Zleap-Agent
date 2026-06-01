@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:37 +08:00
+
+目的：
+- 完成 `docs/02-workspace-runtime.md` 的首轮细项拆分，并补齐 dev 工具 reason 契约的测试证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/02 拆成 I1-I6，覆盖中断子工作空间恢复、main 终止型编排工具、manifest/tool 可见性、MCP server-first、handoff/WorkspaceResult 和 dev 工具契约。
+- 补强 `testToolBindingsAndMcpReadiness`：明确断言 `searchFiles` schema 与其他 dev 工具一样要求 `reason`。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:33 +08:00
 
 目的：

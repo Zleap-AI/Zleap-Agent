@@ -4935,6 +4935,8 @@ async function testToolBindingsAndMcpReadiness() {
   for (const field of ["status", "summary", "artifacts", "observations", "errors", "suggestedNextSteps"]) {
     assert.equal(exitWorkspaceSchema.required?.includes(field), true);
   }
+  const searchFilesSchema = JSON.parse(searchFiles?.parametersJson ?? "{}") as { required?: string[] };
+  assert.equal(searchFilesSchema.required?.includes("reason"), true);
   const searchMemorySchema = JSON.parse(searchMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
   assert.equal(searchMemorySchema.required?.includes("reason"), true);
   assert.equal(Boolean(searchMemorySchema.properties?.memoryType), true);
