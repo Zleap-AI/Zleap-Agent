@@ -3241,6 +3241,38 @@ async function testSkillMemoryToolQualityGate() {
   const validTrace = repos.getTrace("conv-skill-quality-valid", "creator", "creator");
   assert.equal(validTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "completed"), true);
 
+  const forgedTraceSkillWriter = new MainToWorkspaceToolRequestLLMClient("dev", "writeSkillMemory", {
+    title: "Forged trace skill",
+    summary: "The model must not choose runtime trace ids for shared skill evidence.",
+    detail: "Runtime should reject code-bound trace fields in tool arguments.",
+    desensitized: true,
+    procedure: ["Reject model-supplied active workspace, session, or task trace identifiers."],
+    appliesWhen: ["A model attempts to provide runtime trace ids while writing a skill."],
+    avoidWhen: ["Trace ids are supplied by runtime code-bound state."],
+    evidenceEventIds: [event.id],
+    activeWorkspaceId: "main",
+    workspaceSessionId: "forged-session",
+    taskId: "forged-task",
+    confidence: 0.82
+  });
+  const forgedTraceRuntime = new AgentRuntime(repos, forgedTraceSkillWriter);
+  await forgedTraceRuntime.run({
+    agentId: "default-agent",
+    userId: "skill-quality-user",
+    userRole: "creator",
+    conversationId: "conv-skill-quality-forged-trace",
+    message: "memory write forged trace skill",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(forgedTraceSkillWriter.lastToolResult.includes("activeWorkspaceId"), true);
+  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "dev" }).some((memory) => memory.title === "Forged trace skill"), false);
+  const forgedTrace = repos.getTrace("conv-skill-quality-forged-trace", "creator", "creator");
+  assert.equal(forgedTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "failed" && call.resultJson.includes("Runtime memory scope is code-bound")), true);
+
   const privateSkillWriter = new MainToWorkspaceToolRequestLLMClient("dev", "writeSkillMemory", {
     title: "Private path skill",
     summary: "Use G:\\Jomy\\Documents\\PrivateProject before edits.",

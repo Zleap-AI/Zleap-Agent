@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:23 +08:00
+
+目的：
+- 对齐 `docs/05-hooks-and-lifecycle.md` 中 runtime trace evidence 只能由代码绑定的要求。
+
+变更：
+- `writeUserImpression`、`writeAgentSelfImpression`、`writeSkillMemory` 显式拒绝模型传入 `activeWorkspaceId`、`workspaceSessionId`、`taskId`。
+- 补强 `testSkillMemoryToolQualityGate`：验证模型伪造 skill trace id 会失败，不会写入共享 skill，真实成功路径仍由 runtime metadata 写入 active workspace/session/task。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 H3 验证记录。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:19 +08:00
 
 目的：

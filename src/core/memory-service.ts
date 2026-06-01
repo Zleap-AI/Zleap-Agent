@@ -823,7 +823,7 @@ export class MemoryService {
 
     let memory: MemoryWriteInput | undefined;
     if (input.toolName === "writeUserImpression") {
-      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId", "activeWorkspaceId", "workspaceSessionId", "taskId"]);
       if (scopeError) return { ok: false, result: { error: scopeError } };
       const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
       memory = {
@@ -841,7 +841,7 @@ export class MemoryService {
       };
     }
     if (input.toolName === "writeAgentSelfImpression") {
-      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId", "activeWorkspaceId", "workspaceSessionId", "taskId"]);
       if (scopeError) return { ok: false, result: { error: scopeError } };
       const runtimeEvidence = this.runtimeMemoryEvidence(input.activeWorkspaceSessionId, input.activeTaskId);
       memory = {
@@ -859,7 +859,7 @@ export class MemoryService {
       };
     }
     if (input.toolName === "writeSkillMemory") {
-      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId"]);
+      const scopeError = this.rejectRuntimeScopeArguments(args, ["userId", "agentId", "workspaceId", "activeWorkspaceId", "workspaceSessionId", "taskId"]);
       if (scopeError) return { ok: false, result: { error: scopeError } };
       const workspaceScope = this.requireActiveWorkspaceScope(input.activeWorkspaceId);
       if (!workspaceScope.allowed) return { ok: false, result: { error: workspaceScope.reason } };
