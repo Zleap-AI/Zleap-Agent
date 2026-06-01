@@ -179,6 +179,20 @@ button:disabled {
   padding-left: 64px;
 }
 
+@media (min-width: 900px) {
+  .user-shell.sidebar-collapsed.sidebar-drawer-open {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .user-shell.sidebar-collapsed.sidebar-drawer-open .user-chat {
+    grid-column: 2;
+  }
+
+  .user-shell.sidebar-collapsed.sidebar-drawer-open .user-chat-header {
+    padding-left: 24px;
+  }
+}
+
 .sidebar-scrim {
   position: fixed;
   inset: 0;
@@ -1418,6 +1432,10 @@ button:disabled {
 
   .user-shell.sidebar-drawer-open .sidebar-scrim {
     left: min(84vw, 320px);
+  }
+
+  .user-shell.sidebar-collapsed.sidebar-drawer-open .user-chat {
+    grid-column: 1;
   }
 
   .user-chat-header {

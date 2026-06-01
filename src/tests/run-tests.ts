@@ -76,6 +76,8 @@ async function testWebUiMasterPlanContracts() {
   assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;\n  inset: 0;\n  z-index: 35;\n  border: 0;\n  border-radius: 0;\n  padding: 0;\n  background: transparent;\n}"), true);
   assert.equal(webCssSource.includes(".user-shell.sidebar-drawer-open .sidebar-scrim {\n  left: 280px;\n}"), true);
   assert.equal(webCssSource.includes(".user-shell.sidebar-drawer-open .sidebar-scrim {\n    left: min(84vw, 320px);\n  }"), true);
+  assert.equal(webCssSource.includes(".user-shell.sidebar-collapsed.sidebar-drawer-open .user-chat {\n    grid-column: 2;\n  }"), true);
+  assert.equal(webCssSource.includes(".user-shell.sidebar-collapsed.sidebar-drawer-open .user-chat {\n    grid-column: 1;\n  }"), true);
   assert.equal(webCssSource.includes(".settings-backdrop {\n  position: fixed;\n  inset: 0;\n  z-index: 35;\n  border: 0;\n  border-radius: 0;\n  padding: 0;\n  background: transparent;\n}"), true);
   expectWeb("当前智能体");
   expectWeb("新建智能体");

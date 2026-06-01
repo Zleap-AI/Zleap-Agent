@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-02 00:31 +08:00
+
+目的：
+- 修复宽屏折叠 sidebar 后临时弹出时，右侧主聊天内容被排到第 1 列、看起来向左错位并藏到 sidebar 后面的问题。
+
+变更：
+- 更新 `src/web/styles.css`：宽屏 `sidebar-collapsed sidebar-drawer-open` 状态下恢复 `280px + 主区` 两列，并强制 `.user-chat` 位于第 2 列；窄屏仍回到第 1 列的 drawer 行为。
+- 更新 `src/tests/run-tests.ts`：增加样式契约断言，覆盖宽屏和窄屏抽屉打开态下 `.user-chat` 的 grid column。
+- 更新 `docs/08-user-ui-guide.md`：明确宽屏临时打开 sidebar 时主聊天区不能被重新排到第 1 列。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：宽屏 sidebar 弹出后，主聊天区 `left: 280px`，sidebar `right: 280px`，关闭层也从 `280px` 开始；主聊天区不再被左移到 sidebar 下方。
+
+Git：
+- 本次提交：修正 sidebar 弹出时主区错位。
+
 ## 2026-06-02 00:18 +08:00
 
 目的：
