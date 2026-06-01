@@ -1039,17 +1039,6 @@ function storedMessageToChatMessage(message: StoredMessage): ChatMessage {
   };
 }
 
-function formatConversationTime(value: string): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const today = new Date();
-  const sameDay = date.toDateString() === today.toDateString();
-  return sameDay
-    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : date.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
 function isSearchLikeTool(name: string): boolean {
   return /search|web|google|metaso|bing|查找|搜索/i.test(name);
 }
@@ -1383,7 +1372,7 @@ function UserChatApp() {
   const filteredConversations = conversations.filter((item) => {
     const query = conversationFilter.trim().toLowerCase();
     if (!query) return true;
-    return `${item.title} ${item.lastMessagePreview ?? ""} ${item.id}`.toLowerCase().includes(query);
+    return item.title.toLowerCase().includes(query);
   });
 
   useEffect(() => {
@@ -2146,8 +2135,6 @@ function UserChatApp() {
                 <>
                   <div className="conversation-copy">
                     <strong>{conversation.title}</strong>
-                    <span>{conversation.lastMessagePreview || "新的会话"}</span>
-                    <small>{formatConversationTime(conversation.updatedAt)}</small>
                   </div>
                   <button className="conversation-menu-button" type="button" aria-label="会话菜单" onClick={(event) => {
                     event.stopPropagation();

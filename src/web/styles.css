@@ -289,24 +289,17 @@ button:disabled {
 
 .conversation-copy {
   min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.conversation-copy strong,
-.conversation-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .conversation-copy strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
   line-height: 1.25;
 }
 
-.conversation-copy span,
-.conversation-copy small,
 .sidebar-empty,
 .composer-note {
   color: var(--text-secondary);

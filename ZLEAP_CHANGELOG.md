@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 21:20 +08:00
+
+目的：
+- 精简用户级 UI 左侧会话列表，只显示会话标题，不显示消息内容预览。
+
+变更：
+- 更新 `src/web/main.tsx`：移除 sidebar 会话项中的 `lastMessagePreview` 和更新时间显示；会话搜索改为只按标题匹配。
+- 更新 `src/web/styles.css`：简化会话标题单行截断样式。
+- 更新 `docs/08-user-ui-guide.md`：明确会话项只显示标题，不显示内容预览和更新时间。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run build`、`npm run test`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：左侧会话列表每项只有标题和菜单按钮，`.conversation-copy span/small` 数量为 0。
+
+Git：
+- 本次提交：精简 sidebar 会话项为标题。
+
 ## 2026-06-01 21:02 +08:00
 
 目的：
