@@ -4409,6 +4409,39 @@ async function testDirectMemoryApiUsesPolicyLayer() {
   });
   assert.equal(creatorList.some((memory) => memory.id === otherEvent.id), true);
   assert.equal(creatorList.some((memory) => memory.id === agentSelf.id), true);
+
+  service.deleteMemoryRecord({
+    actorId: "creator",
+    actorRole: "creator",
+    memoryId: evidenceBackedSkill.id,
+    deleteReason: "retire shared skill fixture"
+  });
+  assert.equal(repos.getMemoryIncludingDeleted(evidenceBackedSkill.id).deletedBy, "creator");
+  assert.equal(repos.getMemoryIncludingDeleted(evidenceBackedSkill.id).deleteReason, "retire shared skill fixture");
+  assert.equal(service.listMemoryRecords({
+    actorId: "creator",
+    actorRole: "creator",
+    filters: { memoryType: "skill", workspaceId: "dev" }
+  }).some((memory) => memory.id === evidenceBackedSkill.id), false);
+  assert.equal(repos.recallMemories({
+    userId: "ordinary-api-user",
+    workspaceId: "dev",
+    query: "Evidence-backed direct skill"
+  }).some((memory) => memory.id === evidenceBackedSkill.id), false);
+  const deletedSkillRead = service.executeMemoryTool({
+    run: {
+      agentId: "default-agent",
+      userId: "ordinary-api-user",
+      userRole: "user",
+      conversationId: "conv-direct-skill-evidence",
+      message: "read deleted skill"
+    },
+    activeWorkspaceId: "dev",
+    toolName: "readSkill",
+    argumentsJson: JSON.stringify({ skillId: evidenceBackedSkill.id })
+  });
+  assert.equal(deletedSkillRead.ok, false);
+  assert.equal(JSON.stringify(deletedSkillRead.result).includes("not found"), true);
 }
 
 async function testSearchMemoryToolUsesPolicyLayer() {

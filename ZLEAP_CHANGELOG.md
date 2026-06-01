@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:46 +08:00
+
+目的：
+- 补齐 `docs/04-multi-tenant-isolation.md` 数据删除要求的测试证据和审计记录。
+
+变更：
+- 在 `testDirectMemoryApiUsesPolicyLayer` 中增加 creator 直接删除 shared skill 的验证。
+- 确认删除后的 shared skill 在 direct memory list、runtime recall 和 `readSkill` 中均不可见，同时保留 `deletedBy` 和 `deleteReason`。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 C5 数据删除条目，记录 memory soft delete、conversation deletion、workspace deletion 和 deleted 记录排除证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:43 +08:00
 
 目的：
