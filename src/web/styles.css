@@ -746,6 +746,34 @@ textarea {
   overflow: hidden auto;
 }
 
+.raw-log-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  background: #172331;
+  border-bottom: 1px solid #26384a;
+}
+
+.raw-log-search input {
+  width: 100%;
+  min-width: 0;
+  border-color: #3a5068;
+  background: #0f1720;
+  color: #e8eef5;
+}
+
+.raw-log-search input::placeholder {
+  color: #93a4b5;
+}
+
+.raw-log-search span {
+  color: #aebdcc;
+  font-size: 12px;
+}
+
 .context-substack details {
   border-color: #e6ebef;
 }
@@ -1164,6 +1192,13 @@ pre {
   color: #e8eef5;
   background: transparent;
   max-height: 520px;
+}
+
+.raw-log-match {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #facc15;
+  color: #111827;
 }
 
 .workspace-grid {

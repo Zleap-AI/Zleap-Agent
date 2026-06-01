@@ -2380,13 +2380,58 @@ function rawLlmCallLog(call: LLMCallSnapshot, segment?: ContextSegment): string 
 }
 
 function RawContextLog({ call, segment }: { call?: LLMCallSnapshot; segment?: ContextSegment }) {
+  const [rawLogQuery, setRawLogQuery] = useState("");
   if (!call && !segment) return <div className="empty">这次 LLM 调用还没有保存原始日志。</div>;
   const content = call ? rawLlmCallLog(call, segment) : segment?.content ?? "";
+  const matchCount = rawLogMatchCount(content, rawLogQuery);
   return (
     <div className="raw-context-view">
-      <pre className="raw-json">{content}</pre>
+      <div className="raw-log-search">
+        <input
+          value={rawLogQuery}
+          onChange={(event) => setRawLogQuery(event.target.value)}
+          placeholder="搜索原始日志关键词"
+        />
+        <span>{rawLogQuery.trim() ? `${matchCount} 处命中` : "输入关键词定位内容"}</span>
+      </div>
+      <pre className="raw-json">{renderRawLogSearchHighlights(content, rawLogQuery)}</pre>
     </div>
   );
+}
+
+function rawLogMatchCount(content: string, query: string): number {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return 0;
+  let count = 0;
+  let index = 0;
+  const haystack = content.toLowerCase();
+  while (index < haystack.length) {
+    const found = haystack.indexOf(needle, index);
+    if (found < 0) break;
+    count += 1;
+    index = found + needle.length;
+  }
+  return count;
+}
+
+function renderRawLogSearchHighlights(content: string, query: string): React.ReactNode[] | string {
+  const needle = query.trim();
+  if (!needle) return content;
+  const haystack = content.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  let index = 0;
+  while (cursor < content.length) {
+    const found = haystack.indexOf(lowerNeedle, cursor);
+    if (found < 0) break;
+    if (found > cursor) nodes.push(content.slice(cursor, found));
+    nodes.push(<mark className="raw-log-match" key={`raw-log-match-${index}`}>{content.slice(found, found + needle.length)}</mark>);
+    cursor = found + needle.length;
+    index += 1;
+  }
+  if (cursor < content.length) nodes.push(content.slice(cursor));
+  return nodes;
 }
 
 function JsonValueView({ value, depth = 0 }: { value: unknown; depth?: number }) {

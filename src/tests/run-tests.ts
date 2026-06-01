@@ -62,6 +62,9 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("function MarkdownMessage");
   assert.equal(webSource.includes("dangerouslySetInnerHTML"), false);
   expectWeb("showRawContextLogs ? \"显示结构化视图\" : \"显示原始日志\"");
+  expectWeb("placeholder=\"搜索原始日志关键词\"");
+  expectWeb("renderRawLogSearchHighlights");
+  expectWeb("rawLogMatchCount");
   expectWeb("MemoryEvidencePanel");
   expectWeb("记忆只保存语义投影");
   expectWeb("relationId");

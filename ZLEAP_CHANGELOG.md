@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 11:17 +08:00
+
+目的：
+- 在 Chat 右侧原始 LLM 日志视图里增加关键词搜索，方便调试时定位字段和内容。
+
+变更：
+- 更新 `src/web/main.tsx`：`RawContextLog` 增加搜索输入、命中计数和匹配片段高亮。
+- 更新 `src/web/styles.css`：为原始日志搜索栏和高亮样式补充样式。
+- 更新 `src/tests/run-tests.ts`：补充 UI contract 断言，避免原始日志搜索入口回退。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 10:54 +08:00
 
 目的：
