@@ -32,9 +32,9 @@
 | A1 | 稳定 Agent 身份 | workspace 切换不改变 system/personality，变化的是工具、局部记忆和局部上下文。 | 待验证 | 检查 `ContextBuilder` 和 workspace 切换测试。 |
 | A2 | main/child workspace 工具边界 | `enterWorkspace`/`askUser`/`finishTask` 仅 main 可见；`exitWorkspace` 仅 child 可见；错误绑定也必须隐藏和拒绝。 | 已验证 | 已补充 provider tools、workspace local context 和错误绑定拒绝测试。 |
 | A3 | workspace manifest 可见性 | main 和 child 都可看到 workspace manifest；child 看到 sibling manifest 不等于获得 sibling tools。 | 已验证 | 已补充 child manifest 可见但 main-only tools 不可调用的测试。 |
-| A4 | handoff 隔离 | parent-to-child 只携带总体要求、当前用户请求、少量用户原话；不得携带父级 assistant 执行记录、enterWorkspace 结果、父级工具证据或 sibling 记录。 | 进行中 | 检查 `AgentRuntime.createParentToChildHandoff`、history 构造和测试。 |
-| A5 | child natural-language 不能直接终答 | child 返回文本但不 `exitWorkspace` 时只能保存 trace，runtime 应继续要求退出。 | 待验证 | 检查 tool loop 和测试。 |
-| A6 | `exitWorkspace` 结构校验 | 必须校验完整 `WorkspaceResult`，拒绝 `running`、重复退出、畸形 payload，失败时不触发 exit hook。 | 进行中 | 对照 `ToolRegistry.validateWorkspaceResult` 和测试覆盖。 |
+| A4 | handoff 隔离 | parent-to-child 只携带总体要求、当前用户请求、少量用户原话；不得携带父级 assistant 执行记录、enterWorkspace 结果、父级工具证据或 sibling 记录。 | 已验证 | 已核对 parent/child handoff 构造和隔离断言。 |
+| A5 | child natural-language 不能直接终答 | child 返回文本但不 `exitWorkspace` 时只能保存 trace，runtime 应继续要求退出。 | 已验证 | 已确认 runtime 会注入退出提醒并继续 tool loop。 |
+| A6 | `exitWorkspace` 结构校验 | 必须校验完整 `WorkspaceResult`，拒绝 `running`、重复退出、畸形 payload，失败时不触发 exit hook。 | 已验证 | 已补强缺字段 payload 验证，并覆盖重复退出/post-exit/tool hook 去重。 |
 | B1 | memory 类型和隔离 | impression 跨 workspace；event 为 `userId + workspaceId + conversationId + taskId`；skill 为 workspace scoped shared 且脱敏。 | 已验证 | 已补齐 event `metadata.taskId` final-row policy，并验证 direct API/hook event 行为。 |
 | B2 | memory 渐进披露 | 自动召回/search 只给 summary/id，标记 `summary_only`、`detailInjected=false`，需要详情时使用 `readMemory`/`readSkill`。 | 已验证 | 已修正 `searchMemory` event 投影不再返回 `detailSnippet`，并补测试。 |
 | B3 | event 自动写入 | 模型没有 event 写入工具；conversation window 和 workspace exit hook 自动写 process/result event。 | 已验证 | 已确认工具面无 `writeEventMemory`，event 由 lifecycle hook 写入。 |
@@ -75,7 +75,7 @@
 - [ ] 完整阅读并拆分 `docs/04-multi-tenant-isolation.md` 的权限要求。
 - [ ] 完整阅读并拆分 `docs/05-hooks-and-lifecycle.md` 的 hook 要求。
 - [ ] 完整阅读并拆分 `docs/07-context-and-prompt-contracts.md` 的 context/prompt 要求。
-- [ ] 针对 A2/A3/A4/A6 增加或确认测试覆盖。
+- [x] 针对 A2/A3/A4/A6 增加或确认测试覆盖。
 - [x] 针对 B3/B4 增加或确认测试覆盖。
 - [ ] 每轮修改后运行 `PATH=/opt/homebrew/bin:$PATH npm test` 和必要的 `npm run build`。
 
@@ -93,6 +93,9 @@
 | --- | --- | --- | --- |
 | A2 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`、`testWorkspaceBoundary`、`testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：main 的 workspace tools 不包含 `exitWorkspace`；child 的 provider `toolsJson` 与 callable tools 均不包含 `enterWorkspace`/`askUser`/`finishTask`，且包含 `exitWorkspace`。 |
 | A3 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：child workspace 的 `runtime_context.workspace` 能看到 `main` 与 `dev` manifest，但这不授予 main-only tools。 |
+| A4 | 已验证 | `src/core/agent-runtime.ts::createParentToChildHandoff`、`createChildToMainHandoff`、`saveFollowUpLlmCall`；`src/tests/run-tests.ts::testWorkspaceExitReturnsToMain`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | parent-to-child handoff 含当前用户请求、总体要求和少量用户原话参考，但不含 `enterWorkspace` tool result、父级工具结果、父级 assistant 执行记录或 sibling workspace 记录。child-to-main 只携带 `WorkspaceResult`、子 workspace AI 摘要、最后结论和关键工具结果；follow-up LLM call 复用完整 active base stack。 |
+| A5 | 已验证 | `src/core/agent-runtime.ts::runToolLoop`、`requireChildWorkspaceExit`；`src/tests/run-tests.ts::testRuntimeContextAndTools`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 子 workspace 直接返回自然语言时不会作为最终用户回答；runtime 记录内部退出要求，向下一轮 LLM 注入 “cannot produce the final user-facing answer” 提醒，并继续要求 `exitWorkspace`。达到上限仍未退出时记录 `workspace_exit_missing` 并保持 child session running。 |
+| A6 | 已补强验证 | `src/core/tool-registry.ts::validateWorkspaceResult`；`src/core/agent-runtime.ts::applyExitWorkspaceResult`；`src/tests/run-tests.ts::testMalformedWorkspaceExitDoesNotCommitSession`、`testDuplicateWorkspaceExitCannotOverwriteCommittedSession`、`testWorkspaceExitHookRunsOncePerSuccessfulExitToolCall`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | `exitWorkspace` 拒绝 `running` status 和缺少 `artifacts` 等 required arrays 的 payload；失败时 child session 仍 running、无 `hook.beforeWorkspaceExit`/`hook.afterWorkspaceExit`、不写 event。重复退出和同 batch post-exit tool call 只记录 failed trace，不覆盖首次结果，也不重复执行 exit hook 或 skill usage。 |
 | B2 | 发现并修复偏差 | `src/core/memory-service.ts::projectMemorySearchResult`；`src/tests/run-tests.ts::testSearchMemoryToolUsesPolicyLayer`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 文档要求 `searchMemory` 返回 compact projection、disclosure/read-tool hints 和 detail availability，不默认返回完整 detail。原实现对 event 返回 `detailSnippet`，短 detail 时会等同泄露完整 detail；现改为 `snippet=summary`、`disclosure=summary_only`、`detailInjected=false`、`readTool`/`readInstruction`，详情只能通过 `readMemory`/`readSkill`。 |
 | B1 | 发现并修复偏差 | `src/core/memory-service.ts::canWriteEventStructure`、`maybeWriteConversationWindowEvent`；`src/tests/run-tests.ts::testEventMemoryIsHookGenerated`、`testDirectMemoryApiUsesPolicyLayer`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | `docs/04` 要求 event 绑定 `userId`、`workspaceId`、`conversationId`、`taskId`。原 direct Memory API final-row policy 未强制 `metadata.taskId`；现补齐缺失拒绝，并让 conversation-window hook event 写入确定的 `conversation-window:{index}` task id。 |
 | B5 | 发现并修复偏差 | `src/db/repositories.ts::buildFtsQuery`、`recallMemories`、`getMemoryByRelation`；`src/core/memory-service.ts::memoryRelationScope`；`src/tests/run-tests.ts::testDatabaseAndMemory`、`testConversationWindowEventExtractionUsesAbsoluteWindows`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | FTS query 会把 `302.AI` 等带标点自然语言拆成安全 token 后再进入 `MATCH`；recall 的 latest-version 判断按 `memoryType + userId + agentId + workspaceId + relationId` 分区。原 repository relation lookup 可不传 scope 走全局查询，现改为必须显式 scope，并验证跨 user/workspace/type 同名 relation 不互相遮蔽，软删 latest 后同分区回落到旧版本。 |

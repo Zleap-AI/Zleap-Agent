@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:54 +08:00
+
+目的：
+- 完成 workspace handoff、child 直接答复拦截和 `exitWorkspace` 结构校验的文档对齐验证。
+
+变更：
+- 补强 malformed exit 测试：同一 child session 内分别验证 `running` status 和缺少 required arrays 的 `WorkspaceResult` 都会失败。
+- 确认失败退出不会提交 child session，不触发 before/after exit hook，也不会写入 event memory。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 A4/A5/A6 标记为已验证，并记录 handoff 隔离、直接答复 guard、重复退出和 post-exit tool call 证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:52 +08:00
 
 目的：

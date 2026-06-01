@@ -436,6 +436,26 @@ class MainToFileMalformedExitLLMClient implements LLMClient {
         raw: { step: "bad-exit" }
       };
     }
+    if (this.calls === 3) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-incomplete-exit-file",
+            type: "function",
+            function: {
+              name: "exitWorkspace",
+              arguments: JSON.stringify({
+                status: "completed",
+                summary: "This exit is missing required WorkspaceResult arrays."
+              })
+            }
+          }]
+        },
+        raw: { step: "incomplete-exit" }
+      };
+    }
     return {
       message: {
         role: "assistant",
@@ -2679,9 +2699,11 @@ async function testMalformedWorkspaceExitDoesNotCommitSession() {
   assert.equal(output.activeWorkspaceId, "dev");
   assert.equal(output.assistantMessage.length > 0, true);
   const trace = repos.getTrace("conv-workspace-bad-exit", "creator", "creator");
-  const exitCall = trace.toolCalls.find((call) => call.toolName === "exitWorkspace");
-  assert.equal(exitCall?.status, "failed");
-  assert.equal(exitCall?.resultJson.includes("WorkspaceResult.status"), true);
+  const exitCalls = trace.toolCalls.filter((call) => call.toolName === "exitWorkspace");
+  assert.equal(exitCalls.length, 2);
+  assert.equal(exitCalls.every((call) => call.status === "failed"), true);
+  assert.equal(exitCalls.some((call) => call.resultJson.includes("WorkspaceResult.status")), true);
+  assert.equal(exitCalls.some((call) => call.resultJson.includes("WorkspaceResult.artifacts")), true);
   const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.completedAt, undefined);
   assert.equal(fileSession?.status, "running");
