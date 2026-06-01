@@ -710,6 +710,44 @@ button:disabled {
   padding: 0 10px 10px;
 }
 
+.tool-workspace-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 10px 10px;
+}
+
+.tool-workspace-window {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(247, 247, 245, 0.46);
+}
+
+.tool-workspace-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tool-workspace-title strong {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-workspace-window .tool-activity-list {
+  padding: 0;
+}
+
 .tool-activity {
   min-width: 0;
   border: 1px solid var(--border-subtle);

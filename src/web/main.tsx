@@ -110,6 +110,14 @@ type ProcessReadableDetail = {
   url?: string;
 };
 
+type WorkspaceProcessWindow = {
+  id: string;
+  workspaceId: string;
+  items: UserRunProcess[];
+  status?: string;
+  completed: boolean;
+};
+
 type AskUserPrompt = {
   id: string;
   question: string;
@@ -265,6 +273,12 @@ function parseJsonString(value: string): unknown {
   } catch {
     return value;
   }
+}
+
+function parseJsonRecord(value: string | undefined): Record<string, unknown> {
+  if (!value) return {};
+  const parsed = parseJsonString(value);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
 }
 
 function searchResultFromRecord(record: Record<string, unknown>): SearchResultPreview | null {
@@ -1043,9 +1057,88 @@ function isSearchLikeTool(name: string): boolean {
   return /search|web|google|metaso|bing|查找|搜索/i.test(name);
 }
 
+function processToolName(item: UserRunProcess): string {
+  return item.items?.[0]?.toolName ?? item.toolNames?.[0] ?? "";
+}
+
+function isWorkspaceEnterProcess(item: UserRunProcess): boolean {
+  return item.eventKind === "entered" || processToolName(item) === "enterWorkspace";
+}
+
+function isWorkspaceExitProcess(item: UserRunProcess): boolean {
+  return item.eventKind === "exit" || processToolName(item) === "exitWorkspace";
+}
+
+function workspaceIdFromProcessPayload(item: UserRunProcess, kind: "enter" | "exit"): string {
+  if (item.eventKind === "entered" || item.eventKind === "exit") return item.workspaceId;
+  const processItem = item.items?.[0];
+  const args = parseJsonRecord(processItem?.argumentsJson);
+  const result = parseJsonRecord(processItem?.resultJson);
+  const workspaceResult = result.workspaceResult && typeof result.workspaceResult === "object" && !Array.isArray(result.workspaceResult)
+    ? result.workspaceResult as Record<string, unknown>
+    : {};
+  const candidates = kind === "enter"
+    ? [args.workspaceId, result.workspaceId, workspaceResult.workspaceId, item.workspaceId]
+    : [result.exitedWorkspaceId, args.workspaceId, workspaceResult.workspaceId, item.workspaceId];
+  const found = candidates.find((value) => typeof value === "string" && value.trim());
+  return typeof found === "string" ? found : item.workspaceId;
+}
+
+function workspaceDisplayName(workspaceId: string): string {
+  if (workspaceId === "main") return "主工作空间";
+  if (workspaceId === "dev") return "开发工作空间";
+  if (workspaceId === "search") return "搜索工作空间";
+  return `${workspaceId} 工作空间`;
+}
+
+function workspaceProcessWindows(items: UserRunProcess[]): WorkspaceProcessWindow[] {
+  const windows: WorkspaceProcessWindow[] = [];
+  let current: WorkspaceProcessWindow | undefined;
+  for (const item of items) {
+    if (isWorkspaceEnterProcess(item)) {
+      const workspaceId = workspaceIdFromProcessPayload(item, "enter");
+      current = {
+        id: `${item.id}-workspace-${windows.length}`,
+        workspaceId,
+        items: [],
+        status: item.status,
+        completed: false
+      };
+      windows.push(current);
+      continue;
+    }
+    if (isWorkspaceExitProcess(item)) {
+      const workspaceId = workspaceIdFromProcessPayload(item, "exit");
+      const target = current && current.workspaceId === workspaceId
+        ? current
+        : [...windows].reverse().find((workspaceWindow) => workspaceWindow.workspaceId === workspaceId && !workspaceWindow.completed);
+      if (target) {
+        target.status = item.status ?? target.status;
+        target.completed = true;
+      }
+      if (current?.workspaceId === workspaceId) current = undefined;
+      continue;
+    }
+    const workspaceId = item.workspaceId === "main" && current ? current.workspaceId : item.workspaceId;
+    if (!current || current.workspaceId !== workspaceId || current.completed) {
+      current = {
+        id: `${item.id}-workspace-${windows.length}`,
+        workspaceId,
+        items: [],
+        status: item.status,
+        completed: false
+      };
+      windows.push(current);
+    }
+    current.items.push(item);
+    if (item.status && item.status !== "completed") current.status = item.status;
+  }
+  return windows.filter((workspaceWindow) => workspaceWindow.items.length > 0);
+}
+
 function userProcessActivityLabel(item: UserRunProcess): string {
   const processItem = item.items?.[0];
-  const toolName = processItem?.toolName ?? item.toolNames?.[0] ?? "";
+  const toolName = processToolName(item);
   const argumentPreview = summarizeArgumentsPreview(processItem?.argumentsJson);
   const searchSummary = processItem && isSearchLikeTool(toolName) ? formatSearchResultSummary(processItem.resultJson) : "";
   const resultPreview = searchSummary || summarizeResultPreview(processItem?.resultJson);
@@ -1238,11 +1331,12 @@ function isProcessActive(item: UserRunProcess, allItems: UserRunProcess[], loadi
 
 function processPanelSummary(items: UserRunProcess[], loading: boolean): string {
   if (items.length === 0) return "运行过程";
-  const active = items.find((item) => isProcessActive(item, items, loading));
+  const visibleItems = items.filter((item) => !isWorkspaceEnterProcess(item) && !isWorkspaceExitProcess(item));
+  const active = visibleItems.find((item) => isProcessActive(item, items, loading));
   if (active) return userProcessActivityLabel(active);
-  const searchCount = items.filter((item) => (item.toolNames ?? []).some(isSearchLikeTool)).length;
-  if (searchCount > 0) return `运行过程 · ${searchCount} 次搜索 / ${items.length} 个步骤`;
-  return `运行过程 · ${items.length} 个步骤`;
+  const searchCount = visibleItems.filter((item) => (item.toolNames ?? []).some(isSearchLikeTool)).length;
+  if (searchCount > 0) return `运行过程 · ${searchCount} 次搜索 / ${visibleItems.length} 个操作`;
+  return `运行过程 · ${visibleItems.length || items.length} 个操作`;
 }
 
 function memoryTypeLabel(value: string | undefined): string {
@@ -2066,6 +2160,7 @@ function UserChatApp() {
     if (processItems.length === 0) return null;
     const active = processItems.some((item) => isProcessActive(item, processItems, loading));
     const open = Boolean(processPanelOpenByMessageId[messageId]);
+    const windows = workspaceProcessWindows(processItems);
     return (
       <section className="tool-process-row" aria-label="Agent 运行进展">
         <div className="assistant-avatar process-avatar">Z</div>
@@ -2084,33 +2179,43 @@ function UserChatApp() {
             <span>{processPanelSummary(processItems, active)}</span>
             <small>{open ? "收起详情" : active ? "运行中" : "点击查看详情"}</small>
           </button>
-          {open && <div className="tool-activity-list">
-            {processItems.map((item) => {
-              const itemActive = isProcessActive(item, processItems, active);
-              const detailOpen = Boolean(processDetailOpenByItemId[item.id]);
-              return (
-                <section key={item.id} className={`tool-activity ${itemActive ? "active" : "done"} ${detailOpen ? "open" : ""}`}>
-                  <button
-                    className="tool-activity-summary"
-                    type="button"
-                    aria-expanded={detailOpen}
-                    onClick={() => setProcessDetailOpenByItemId((details) => ({ ...details, [item.id]: !detailOpen }))}
-                  >
-                    <span className="tool-activity-dot" />
-                    <span>{userProcessActivityLabel(item)}</span>
-                    <small>{detailOpen ? "收起详情" : "查看详情"}</small>
-                  </button>
-                  {detailOpen && <div className="tool-activity-detail">
-                    {readableProcessDetails(item).map((detail, index) => (
-                      <div key={`${item.id}-${index}`}>
-                        <strong>{detail.url ? <a href={detail.url} target="_blank" rel="noreferrer">{detail.label}</a> : detail.label}</strong>
-                        <span>{detail.value}</span>
-                      </div>
-                    ))}
-                  </div>}
-                </section>
-              );
-            })}
+          {open && <div className="tool-workspace-list">
+            {windows.map((workspaceWindow) => (
+              <section key={workspaceWindow.id} className="tool-workspace-window">
+                <div className="tool-workspace-title">
+                  <strong>{workspaceDisplayName(workspaceWindow.workspaceId)}</strong>
+                  <small>{workspaceWindow.completed ? "已完成" : workspaceWindow.status ? workspaceStatusLabel(workspaceWindow.status as WorkspaceSession["status"]) : "运行中"}</small>
+                </div>
+                <div className="tool-activity-list">
+                  {workspaceWindow.items.map((item) => {
+                    const itemActive = isProcessActive(item, processItems, active);
+                    const detailOpen = Boolean(processDetailOpenByItemId[item.id]);
+                    return (
+                      <section key={item.id} className={`tool-activity ${itemActive ? "active" : "done"} ${detailOpen ? "open" : ""}`}>
+                        <button
+                          className="tool-activity-summary"
+                          type="button"
+                          aria-expanded={detailOpen}
+                          onClick={() => setProcessDetailOpenByItemId((details) => ({ ...details, [item.id]: !detailOpen }))}
+                        >
+                          <span className="tool-activity-dot" />
+                          <span>{userProcessActivityLabel(item)}</span>
+                          <small>{detailOpen ? "收起详情" : "查看详情"}</small>
+                        </button>
+                        {detailOpen && <div className="tool-activity-detail">
+                          {readableProcessDetails(item).map((detail, index) => (
+                            <div key={`${item.id}-${index}`}>
+                              <strong>{detail.url ? <a href={detail.url} target="_blank" rel="noreferrer">{detail.label}</a> : detail.label}</strong>
+                              <span>{detail.value}</span>
+                            </div>
+                          ))}
+                        </div>}
+                      </section>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>}
         </section>
       </section>

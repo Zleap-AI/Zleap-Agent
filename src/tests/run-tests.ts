@@ -60,6 +60,12 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("const chatHeaderSubtitle = messages.length > 0 ? currentConversation?.title ?? \"新对话\" : \"新对话\"");
   expectWeb("void refreshConversations(conversationId, true)");
   expectWeb("const [processDetailOpenByItemId, setProcessDetailOpenByItemId] = useState<Record<string, boolean>>({})");
+  expectWeb("type WorkspaceProcessWindow = {");
+  expectWeb("function workspaceProcessWindows(items: UserRunProcess[]): WorkspaceProcessWindow[]");
+  expectWeb("isWorkspaceEnterProcess(item)");
+  expectWeb("isWorkspaceExitProcess(item)");
+  expectWeb("workspaceDisplayName(workspaceWindow.workspaceId)");
+  expectWeb("className=\"tool-workspace-window\"");
   expectWeb("aria-expanded={detailOpen}");
   expectWeb("{detailOpen && <div className=\"tool-activity-detail\">");
   expectWeb("className=\"model-chip\"");
