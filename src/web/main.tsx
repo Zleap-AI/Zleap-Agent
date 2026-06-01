@@ -2063,30 +2063,31 @@ function UserChatApp() {
     return (
       <section className="tool-process-row" aria-label="Agent 运行进展">
         <div className="assistant-avatar process-avatar">Z</div>
-        <details
-          className="tool-process-panel"
-          open={open}
-          onToggle={(event) => {
-            if (!active) {
-              setProcessPanelOpenByMessageId((groups) => ({ ...groups, [messageId]: event.currentTarget.open }));
-            }
-          }}
-        >
-          <summary>
+        <section className={`tool-process-panel ${open ? "open" : ""}`}>
+          <button
+            className="tool-process-summary"
+            type="button"
+            aria-expanded={open}
+            onClick={() => {
+              if (!active) {
+                setProcessPanelOpenByMessageId((groups) => ({ ...groups, [messageId]: !open }));
+              }
+            }}
+          >
             <span className={`tool-activity-dot ${active ? "active" : "done"}`} />
             <span>{processPanelSummary(processItems, active)}</span>
             <small>{active ? "运行中" : "点击查看详情"}</small>
-          </summary>
-          <div className="tool-activity-list">
+          </button>
+          {open && <div className="tool-activity-list">
             {processItems.map((item) => {
               const itemActive = isProcessActive(item, processItems, active);
               return (
-                <details key={item.id} className={`tool-activity ${itemActive ? "active" : "done"}`}>
-                  <summary>
+                <section key={item.id} className={`tool-activity ${itemActive ? "active" : "done"}`}>
+                  <div className="tool-activity-summary">
                     <span className="tool-activity-dot" />
                     <span>{userProcessActivityLabel(item)}</span>
                     <small>{item.workspaceId}</small>
-                  </summary>
+                  </div>
                   <div className="tool-activity-detail">
                     {readableProcessDetails(item).map((detail, index) => (
                       <div key={`${item.id}-${index}`}>
@@ -2095,11 +2096,11 @@ function UserChatApp() {
                       </div>
                     ))}
                   </div>
-                </details>
+                </section>
               );
             })}
-          </div>
-        </details>
+          </div>}
+        </section>
       </section>
     );
   }
