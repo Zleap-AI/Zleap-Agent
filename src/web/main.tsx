@@ -1365,6 +1365,7 @@ function UserChatApp() {
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const currentConversation = conversations.find((item) => item.id === conversationId);
+  const chatHeaderSubtitle = messages.length > 0 ? currentConversation?.title ?? "新对话" : "新对话";
   const allProcessItems = Object.values(processItemsByMessageId)
     .flat()
     .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
@@ -1419,7 +1420,7 @@ function UserChatApp() {
 
   useEffect(() => {
     if (!selectedAgentId) return;
-    void refreshConversations(conversationId, false);
+    void refreshConversations(conversationId, true);
   }, [selectedAgentId, userId, userRole]);
 
   useEffect(() => {
@@ -2171,7 +2172,7 @@ function UserChatApp() {
         <header className="user-chat-header">
           <div>
             <strong>{agent?.name ?? "Zleap Agent"}</strong>
-            <span>{currentConversation?.title ?? "新对话"}</span>
+            <span>{chatHeaderSubtitle}</span>
           </div>
           <div className="chat-header-actions">
             <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="模型">

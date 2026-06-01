@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 23:12 +08:00
+
+目的：
+- 修复用户级 UI 主区为空时，Header 仍显示历史会话标题的问题。
+
+变更：
+- 更新 `src/web/main.tsx`：初始化恢复 `conversationId` 后会加载对应消息；Header subtitle 改为只在主消息列表有内容时显示当前会话标题，否则显示“新对话”。
+- 更新 `src/tests/run-tests.ts`：增加前端契约断言，防止恢复会话时只刷新 sidebar 而不加载消息，或空消息区显示历史标题。
+- 更新 `docs/08-user-ui-guide.md`：明确 Header 标题必须和主消息列表状态一致，空对话不得显示历史会话标题。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：刷新后历史会话会加载消息并显示对应标题；点击“新对话”后主区为空，Header subtitle 显示“新对话”，控制台无 error。
+
+Git：
+- 本次提交：修复空对话 Header 残留历史标题。
+
 ## 2026-06-01 23:02 +08:00
 
 目的：

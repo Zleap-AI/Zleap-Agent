@@ -56,6 +56,8 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("aria-hidden={tab !== item}");
   expectWeb("const [apiKey, setApiKey] = useState(cached.apiKey ?? \"\")");
   expectWeb("const [agents, setAgents] = useState<AgentConfig[]>([])");
+  expectWeb("const chatHeaderSubtitle = messages.length > 0 ? currentConversation?.title ?? \"新对话\" : \"新对话\"");
+  expectWeb("void refreshConversations(conversationId, true)");
   expectWeb("当前智能体");
   expectWeb("新建智能体");
   expectWeb("defaultModel: model || sourceAgent.defaultModel");
