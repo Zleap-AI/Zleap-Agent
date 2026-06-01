@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:33 +08:00
+
+目的：
+- 完成 `docs/05-hooks-and-lifecycle.md` 的首轮细项拆分，避免已有实现证据散落在 A/B/C/D 项里。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/05 拆成 H1-H8，补齐 memory tool 面、conversation window、workspace enter local context、workspace exit evidence 和 skill extraction 的证据映射。
+- 将 docs/05 待办标记为已完成首轮拆分；本次只更新审计记录，不改运行时代码。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:23 +08:00
 
 目的：
