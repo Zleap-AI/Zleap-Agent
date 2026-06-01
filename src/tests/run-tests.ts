@@ -1403,6 +1403,46 @@ async function testDatabaseAndMemory() {
   repos.ensureConversation("conv-owner", "default-agent", "user-a");
   repos.addMessage("conv-owner", "user", "owner message");
   const tableList = repos.listDatabaseTables("creator");
+  const tableNames = new Set(tableList.map((table) => table.name));
+  for (const expectedTable of [
+    "agents",
+    "approval_requests",
+    "audit_logs",
+    "context_segments",
+    "conversations",
+    "llm_calls",
+    "llm_profiles",
+    "mcp_servers",
+    "memories",
+    "memories_fts",
+    "messages",
+    "runtime_config",
+    "schema_migrations",
+    "tool_calls",
+    "tool_definitions",
+    "users",
+    "workspace_sessions",
+    "workspace_tools",
+    "workspaces"
+  ]) {
+    assert.equal(tableNames.has(expectedTable), true, `missing database table ${expectedTable}`);
+  }
+  const assertTableColumns = (table: string, columns: string[]) => {
+    const rows = repos.readDatabaseTable(table, { actorRole: "creator", limit: 1, offset: 0 });
+    for (const column of columns) {
+      assert.equal(rows.columns.includes(column), true, `missing database column ${table}.${column}`);
+    }
+  };
+  assertTableColumns("agents", ["id", "systemPrompt", "personalityPrompt", "defaultModel", "defaultBaseUrl"]);
+  assertTableColumns("workspaces", ["id", "capabilitiesJson", "inputKindsJson", "outputKindsJson", "requiresApproval", "memoryPolicyJson", "riskLevel"]);
+  assertTableColumns("mcp_servers", ["id", "workspaceId", "transport", "command", "argsJson", "envJson", "url", "headersJson", "timeoutMs"]);
+  assertTableColumns("tool_definitions", ["id", "name", "workspaceId", "bindingType", "bindingJson", "mcpServerId", "mcpToolName"]);
+  assertTableColumns("tool_calls", ["id", "conversationId", "userId", "workspaceId", "workspaceSessionId", "taskId", "toolName", "argumentsJson", "resultJson", "status"]);
+  assertTableColumns("memories", ["id", "memoryType", "userId", "agentId", "workspaceId", "relationId", "version", "metadataJson", "deletedAt"]);
+  assertTableColumns("runtime_config", ["key", "category", "valueType", "valueJson", "defaultValueJson", "minValue", "maxValue"]);
+  assertTableColumns("llm_calls", ["id", "conversationId", "userId", "providerBaseUrl", "normalizedEndpoint", "messagesJson", "toolsJson", "status", "responseJson", "errorText", "completedAt"]);
+  assertTableColumns("context_segments", ["id", "llmCallId", "conversationId", "segmentType", "content", "sortOrder"]);
+  assertTableColumns("workspace_sessions", ["id", "conversationId", "userId", "workspaceId", "taskId", "status", "taskJson", "resultJson", "localContextJson"]);
   assert.equal(tableList.some((table) => table.name === "messages" && table.rowCount >= 1), true);
   const messageRows = repos.readDatabaseTable("messages", { actorRole: "creator", limit: 10, offset: 0 });
   assert.equal(messageRows.columns.includes("conversationId"), true);

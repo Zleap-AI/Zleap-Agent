@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:07 +08:00
+
+目的：
+- 完成 Web UI 顶层结构、概念介绍和 SQLite schema 的文档对齐验证。
+
+变更：
+- 使用 in-app browser 实测七个顶层页签：对话、工作空间、记忆、日志、数据表、配置、概念介绍。
+- 补强 `testDatabaseAndMemory`：断言核心数据库表存在，并验证 agents/workspaces/mcp_servers/tool_definitions/tool_calls/memories/runtime_config/llm_calls/context_segments/workspace_sessions 的关键字段。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 F1、F2、G1 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:02 +08:00
 
 目的：
