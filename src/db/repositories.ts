@@ -1011,6 +1011,17 @@ export class Repositories {
     return row;
   }
 
+  updateToolCallResult(id: string, result: { resultJson: string; status: Exclude<ToolCallLog["status"], "pending"> }): ToolCallLog {
+    const existing = this.db.prepare("SELECT * FROM tool_calls WHERE id = ?").get(id) as ToolCallLog | undefined;
+    if (!existing) throw new Error(`Tool call not found: ${id}`);
+    this.db.prepare(`
+      UPDATE tool_calls
+      SET resultJson = ?, status = ?
+      WHERE id = ?
+    `).run(result.resultJson, result.status, id);
+    return this.db.prepare("SELECT * FROM tool_calls WHERE id = ?").get(id) as ToolCallLog;
+  }
+
   listToolCalls(conversationId: string, userId?: string): ToolCallLog[] {
     const userFilter = userId ? "AND userId = ?" : "";
     const params = userId ? [conversationId, userId] : [conversationId];

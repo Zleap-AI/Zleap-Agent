@@ -1186,16 +1186,30 @@ export class AgentRuntime {
       const activeSession = this.findActiveWorkspaceSession(prepared);
       let justExitedWorkspaceSession: WorkspaceSession | undefined;
       const rejectAfterExit = workspaceExitedInBatch && prepared.activeWorkspaceId !== "main";
+      const pendingToolCall = this.repos.saveToolCall({
+        conversationId: input.conversationId,
+        userId: input.userId,
+        workspaceId: prepared.activeWorkspaceId,
+        workspaceSessionId: activeSession?.id,
+        taskId: activeSession?.taskId,
+        toolName,
+        argumentsJson: toolCall.function.arguments,
+        resultJson: "{}",
+        status: "pending"
+      });
       this.hookManager.record({
         hook: "beforeToolCall",
         actorId: input.userId,
         actorRole: input.userRole,
         resourceKind: "tool",
+        resourceId: pendingToolCall.id,
         metadata: {
           conversationId: input.conversationId,
           workspaceId: prepared.activeWorkspaceId,
           workspaceSessionId: activeSession?.id,
           taskId: activeSession?.taskId,
+          toolCallId: pendingToolCall.id,
+          status: "pending",
           toolName
         }
       });
@@ -1231,14 +1245,7 @@ export class AgentRuntime {
       if (result.terminalAssistantMessage) {
         terminalAssistantMessage = result.terminalAssistantMessage;
       }
-      const savedToolCall = this.repos.saveToolCall({
-        conversationId: input.conversationId,
-        userId: input.userId,
-        workspaceId: prepared.activeWorkspaceId,
-        workspaceSessionId: activeSession?.id,
-        taskId: activeSession?.taskId,
-        toolName,
-        argumentsJson: toolCall.function.arguments,
+      const savedToolCall = this.repos.updateToolCallResult(pendingToolCall.id, {
         resultJson: JSON.stringify(result.result),
         status: result.status
       });

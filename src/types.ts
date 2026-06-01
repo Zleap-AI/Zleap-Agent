@@ -371,7 +371,7 @@ export type ToolCallLog = {
   toolName: string;
   argumentsJson: string;
   resultJson: string;
-  status: "completed" | "failed" | "blocked";
+  status: "pending" | "completed" | "failed" | "blocked";
   createdAt: string;
 };
 

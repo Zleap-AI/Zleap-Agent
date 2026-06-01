@@ -2,6 +2,27 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:14 +08:00
+
+目的：
+- 对齐 `docs/05-hooks-and-lifecycle.md` 中 tool call lifecycle 的 pending 记录要求。
+
+变更：
+- `ToolCallLog.status` 增加 `pending` 状态。
+- Runtime 执行工具前先创建 `tool_calls` pending 行，`hook.beforeToolCall` 绑定该 `toolCallId`；工具执行后更新同一行的 `resultJson` 和最终状态。
+- 新增 repository `updateToolCallResult`，并补测试覆盖 pending -> completed，以及 runtime before pending / after blocked 审计链。
+- Web UI 工具日志支持 pending / blocked 状态标签。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 H1 验证记录，并将 `docs/05-hooks-and-lifecycle.md` 标为进行中。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:07 +08:00
 
 目的：

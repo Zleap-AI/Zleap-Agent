@@ -1795,9 +1795,26 @@ async function testTraceAndToolLogsAreUserScoped() {
     resultJson: "{}",
     status: "completed"
   });
+  const pendingToolCall = repos.saveToolCall({
+    conversationId: "conv-trace-owner",
+    userId: "trace-owner",
+    workspaceId: "main",
+    toolName: "askUser",
+    argumentsJson: JSON.stringify({ question: "Need input?" }),
+    resultJson: "{}",
+    status: "pending"
+  });
+  assert.equal(repos.getTrace("conv-trace-owner", "trace-owner", "user").toolCalls.some((call) => call.id === pendingToolCall.id && call.status === "pending"), true);
+  const completedPendingToolCall = repos.updateToolCallResult(pendingToolCall.id, {
+    resultJson: JSON.stringify({ ok: true }),
+    status: "completed"
+  });
+  assert.equal(completedPendingToolCall.status, "completed");
+  assert.equal(completedPendingToolCall.resultJson.includes("\"ok\":true"), true);
 
   const ownerTrace = repos.getTrace("conv-trace-owner", "trace-owner", "user");
   assert.equal(ownerTrace.toolCalls.some((call) => call.id === toolCall.id && call.userId === "trace-owner"), true);
+  assert.equal(ownerTrace.toolCalls.some((call) => call.id === pendingToolCall.id && call.status === "completed"), true);
   assert.throws(() => (repos.getTrace as unknown as (conversationId: string) => unknown)("conv-trace-owner"), /explicit actor identity/);
   assert.throws(() => repos.getTrace("conv-trace-owner", "trace-intruder", "user"), /different user/);
   assert.equal(repos.listAuditLogs({ limit: 20 }).some((log) => log.action === "trace_read_rejected" && log.resourceId === "conv-trace-owner"), true);
@@ -3999,13 +4016,18 @@ async function testToolPolicyGates() {
   assert.equal(wrongWorkspaceTrace.toolCalls.length, 1);
   assert.equal(wrongWorkspaceTrace.toolCalls[0].toolName, "runCommand");
   assert.equal(wrongWorkspaceTrace.toolCalls[0].status, "blocked");
+  const pendingToolAudit = wrongWorkspaceTrace.auditLogs.find((log) => log.action === "hook.beforeToolCall" && log.resourceId === wrongWorkspaceTrace.toolCalls[0].id);
+  assert.ok(pendingToolAudit);
+  const pendingToolAuditMetadata = JSON.parse(pendingToolAudit.metadataJson) as { toolName?: string; status?: string; toolCallId?: string };
+  assert.equal(pendingToolAuditMetadata.toolName, "runCommand");
+  assert.equal(pendingToolAuditMetadata.status, "pending");
+  assert.equal(pendingToolAuditMetadata.toolCallId, wrongWorkspaceTrace.toolCalls[0].id);
   const blockedToolAudit = wrongWorkspaceTrace.auditLogs.find((log) => log.action === "hook.afterToolCall" && log.resourceId === wrongWorkspaceTrace.toolCalls[0].id);
   assert.ok(blockedToolAudit);
   const blockedToolAuditMetadata = JSON.parse(blockedToolAudit.metadataJson) as { toolName?: string; status?: string; taskId?: string };
   assert.equal(blockedToolAuditMetadata.toolName, "runCommand");
   assert.equal(blockedToolAuditMetadata.status, "blocked");
   assert.equal(typeof blockedToolAuditMetadata.taskId, "string");
-  assert.equal(wrongWorkspaceTrace.auditLogs.some((log) => log.action === "hook.beforeToolCall" && log.metadataJson.includes("runCommand")), true);
 
   const highRisk = new MainToCliToolRequestLLMClient("runCommand", { command: "npm test" });
   updateWorkspaceGate(repos, "dev", { requiresApproval: 0, riskLevel: "medium" });

@@ -20,7 +20,7 @@
 | `docs/02-workspace-runtime.md` | 417 | 进行中 | workspace runtime、MCP、handoff、工具边界。 |
 | `docs/03-memory-model.md` | 495 | 进行中 | impression/event/skill、FTS、渐进披露。 |
 | `docs/04-multi-tenant-isolation.md` | 281 | 进行中 | userId/权限/trace/memory 隔离。 |
-| `docs/05-hooks-and-lifecycle.md` | 411 | 待逐条核对 | lifecycle hook、event/skill 提取。 |
+| `docs/05-hooks-and-lifecycle.md` | 411 | 进行中 | lifecycle hook、event/skill 提取；已读完全文，正在按细节补强证据。 |
 | `docs/06-typescript-implementation-roadmap.md` | 424 | 待逐条核对 | 模块/MVP/UI/阶段性要求。 |
 | `docs/07-context-and-prompt-contracts.md` | 527 | 待逐条核对 | context stack、prompt、tool loop 契约。 |
 | `zleap-agent-framework.md` | 589 | 进行中 | 概念介绍的产品表达，需与主计划一致。 |
@@ -51,6 +51,7 @@
 | F1 | Web UI 顶层结构 | 顶层 tab、对话三栏、工作空间/MCP、记忆、日志、数据表、概念介绍符合文档。 | 已验证 | 已用 in-app browser 切换全部顶层页签，并核对源码结构。 |
 | F2 | 概念介绍 | 需与主计划一致，不能展示废弃概念；context stack 只展示真实层。 | 已验证 | `ConceptIntroTab` 覆盖稳定身份、workspace、memory、context stack、lifecycle、实现模块。 |
 | G1 | SQLite schema | 表和字段覆盖 agents、workspaces、mcp_servers、tool_calls、memories、runtime config 等。 | 已验证 | 已补 schema 必备表和关键字段断言，并确认数据表 UI 读取 creator-only DB API。 |
+| H1 | Tool call lifecycle | `beforeToolCall` 应记录待执行 tool call，`afterToolCall` 保存 result 并标记成功/失败/阻塞。 | 已验证 | 已补 pending tool_call 持久化，before/after hook 绑定同一 tool_call id，并补测试。 |
 
 ## 当前验证记录
 
@@ -114,3 +115,4 @@
 | F1 | 已验证 | `src/web/main.tsx::App`、`ChatTab`、`WorkspaceTab`、`MemoryTab`、`LogsTab`、`DatabaseTablesTab`、`RuntimeConfigTab`、`ConceptIntroTab`；in-app browser `http://localhost:4173/` 七个顶层页签实测；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 顶层 tab 包含对话、工作空间、记忆、日志、数据表、配置、概念介绍。对话页是智能体配置、当前会话、上下文/记忆三栏；工作空间页含 MCP Server 注册、检测工具、挂载选中工具；日志页显示 LLM、audit、tool、approval；数据表页通过 creator actor 读取 DB 表。 |
 | F2 | 已验证 | `src/web/main.tsx::ConceptIntroTab`；in-app browser 概念介绍页可见文本；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 概念页与主计划一致：以 `Stable Identity + Dynamic Workspace State` 为核心，明确 workspace 是能力边界不是子 Agent，memory 分 Impression/Event/Skill，记忆召回采用 summary/id 渐进披露，context stack 只列 `system/workspace/tools/memory/local_conversation/user/tool_result` 等真实层，未展示废弃的全工具/全记忆大 Agent 方案。 |
 | G1 | 已补强验证 | `src/db/schema.ts::migrate`；`src/db/repositories.ts::listDatabaseTables`、`readDatabaseTable`；`src/web/main.tsx::DatabaseTablesTab`；`src/tests/run-tests.ts::testDatabaseAndMemory`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | schema 覆盖 agents、users、llm_profiles、runtime_config、conversations、messages、workspaces、tool_definitions、workspace_tools、mcp_servers、workspace_sessions、llm_calls、context_segments、tool_calls、memories、memories_fts、approval_requests、audit_logs。测试新增核心表存在性与 agents/workspaces/mcp_servers/tool_definitions/tool_calls/memories/runtime_config/llm_calls/context_segments/workspace_sessions 关键字段断言；数据表 UI 使用 creator-only `/api/db/tables` 浏览原始记录。 |
+| H1 | 发现并修复偏差 | `src/core/agent-runtime.ts::executeToolCalls`；`src/db/repositories.ts::saveToolCall`、`updateToolCallResult`；`src/tests/run-tests.ts::testTraceAndToolLogsAreUserScoped`、`testToolPolicyGates`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 原实现只在工具执行后插入 `tool_calls`，`beforeToolCall` 没有待执行 tool call 记录。现改为工具执行前先落库 `status=pending`，`hook.beforeToolCall` 的 `resourceId/toolCallId` 指向该记录；执行后用同一记录更新 `resultJson` 和最终状态，`hook.afterToolCall` 继续指向同一 id。测试覆盖 repository pending->completed 转换，以及 runtime blocked tool 的 before pending / after blocked 审计链。 |
