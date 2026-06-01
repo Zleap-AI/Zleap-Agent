@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 23:31 +08:00
+
+目的：
+- 修复 sidebar 覆盖打开时右侧关闭区域显示灰色遮罩，导致主聊天区像空白不可见的问题。
+
+变更：
+- 更新 `src/web/styles.css`：拆分 `.sidebar-scrim` 和 `.settings-backdrop` 样式；sidebar scrim 改为完全透明，设置弹窗仍保留半透明遮罩。
+- 更新 `src/tests/run-tests.ts`：增加样式契约断言，确保 sidebar scrim 是透明点击层。
+- 更新 `docs/08-user-ui-guide.md`：明确 sidebar 临时覆盖打开时，右侧点击关闭区域必须透明，不得把主聊天区变成灰色或空白遮罩。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：折叠后重新打开 sidebar 时，`.sidebar-scrim` 背景为 `rgba(0, 0, 0, 0)`，主聊天区仍可见，控制台无 error。
+
+Git：
+- 本次提交：让 sidebar 关闭层透明。
+
 ## 2026-06-01 23:27 +08:00
 
 目的：

@@ -179,7 +179,16 @@ button:disabled {
   padding-left: 64px;
 }
 
-.sidebar-scrim,
+.sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .settings-backdrop {
   position: fixed;
   inset: 0;

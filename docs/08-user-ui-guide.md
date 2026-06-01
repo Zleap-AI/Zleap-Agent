@@ -716,6 +716,7 @@ zleap.user.ui.state.v1
 - Sidebar 固定左侧，宽 `280px`。
 - Sidebar 默认展开，即使 localStorage 里保存过折叠状态也不应让宽屏第一屏默认收起。
 - 用户仍可通过折叠按钮临时收起 sidebar；当窗口从窄屏切回宽屏时，sidebar 应恢复展开。
+- 折叠后临时打开 sidebar 时，sidebar 应覆盖在主区之上；右侧点击关闭区域必须完全透明，不得把主聊天区变成灰色或空白遮罩。
 - 主聊天区占剩余空间。
 - 消息列和 composer 居中，最大 `768px`。
 
@@ -729,7 +730,7 @@ zleap.user.ui.state.v1
 
 - Sidebar 变为 drawer。
 - Header 左侧显示菜单按钮。
-- 打开 drawer 时显示遮罩。
+- 打开 drawer 时右侧点击关闭区域保持透明；不要用灰色遮罩遮住主聊天区。
 - Composer sticky bottom。
 - 消息列表底部 padding 避开 composer。
 - 菜单项单行截断。

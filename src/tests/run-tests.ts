@@ -45,6 +45,7 @@ class FakeLLMClient implements LLMClient {
 
 async function testWebUiMasterPlanContracts() {
   const webSource = await fs.readFile(path.resolve("src/web/main.tsx"), "utf8");
+  const webCssSource = await fs.readFile(path.resolve("src/web/styles.css"), "utf8");
   const serverSource = await fs.readFile(path.resolve("src/server/index.ts"), "utf8");
 
   const expectWeb = (needle: string) => assert.ok(webSource.includes(needle), `Web UI contract missing: ${needle}`);
@@ -64,6 +65,8 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("className=\"model-chip\"");
   assert.equal(webSource.includes("<option value=\"gpt-5\">gpt-5</option>"), false);
   assert.equal(webSource.includes("<option value=\"gpt-4.1\">gpt-4.1</option>"), false);
+  assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;"), true);
+  assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;\n  inset: 0;\n  z-index: 35;\n  border: 0;\n  border-radius: 0;\n  padding: 0;\n  background: transparent;\n}"), true);
   expectWeb("当前智能体");
   expectWeb("新建智能体");
   expectWeb("defaultModel: model || sourceAgent.defaultModel");
