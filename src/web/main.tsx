@@ -8,6 +8,7 @@ type ChatMessage = {
   id: string;
   role: string;
   content: string;
+  createdAt?: string;
   runId?: string;
   inspectLlmCallId?: string;
   workspaceId?: string;
@@ -1033,7 +1034,8 @@ function storedMessageToChatMessage(message: StoredMessage): ChatMessage {
   return {
     id: message.id,
     role: message.role === "user" ? "用户" : message.role === "assistant" ? "助手" : message.role,
-    content: message.content
+    content: message.content,
+    createdAt: message.createdAt
   };
 }
 
@@ -1126,6 +1128,42 @@ function userProcessesFromTrace(trace: ConversationTrace, runId: string): UserRu
       items: [processItemFromToolLog(log, "tool_result")],
       createdAt: log.createdAt
     }));
+}
+
+function userProcessGroupsFromTrace(trace: ConversationTrace, messages: ChatMessage[], runId: string): Record<string, UserRunProcess[]> {
+  const assistantMessages = messages.filter((item) => item.role === "助手");
+  if (assistantMessages.length === 0) return {};
+  const groups: Record<string, UserRunProcess[]> = {};
+  for (const processItem of userProcessesFromTrace(trace, runId)) {
+    const anchorId = messageIdForProcessTime(processItem.createdAt, messages) ?? assistantMessages.at(-1)?.id;
+    if (!anchorId) continue;
+    groups[anchorId] = [...(groups[anchorId] ?? []), processItem];
+  }
+  for (const messageId of Object.keys(groups)) {
+    groups[messageId] = groups[messageId].slice().sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+  }
+  return groups;
+}
+
+function messageIdForProcessTime(createdAt: string | undefined, messages: ChatMessage[]): string | undefined {
+  const processTime = createdAt ? Date.parse(createdAt) : Number.NaN;
+  if (Number.isNaN(processTime)) return undefined;
+  let previousUserTime: number | undefined;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const currentTime = message.createdAt ? Date.parse(message.createdAt) : Number.NaN;
+    if (message.role === "用户" && !Number.isNaN(currentTime)) {
+      previousUserTime = currentTime;
+      continue;
+    }
+    if (message.role !== "助手") continue;
+    const nextUser = messages.slice(index + 1).find((candidate) => candidate.role === "用户" && candidate.createdAt);
+    const nextUserTime = nextUser?.createdAt ? Date.parse(nextUser.createdAt) : Number.NaN;
+    const turnStart = previousUserTime ?? Number.NEGATIVE_INFINITY;
+    const turnEnd = Number.isNaN(nextUserTime) ? Number.POSITIVE_INFINITY : nextUserTime;
+    if (processTime >= turnStart - 1000 && processTime < turnEnd + 1000) return message.id;
+  }
+  return messages.filter((item) => item.role === "助手").at(-1)?.id;
 }
 
 function askUserPayloadFromValue(value: unknown): Record<string, unknown> | undefined {
@@ -1325,8 +1363,8 @@ function UserChatApp() {
   const [memoryEditing, setMemoryEditing] = useState<Partial<MemoryRow> | null>(null);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [processItems, setProcessItems] = useState<UserRunProcess[]>([]);
-  const [processPanelOpen, setProcessPanelOpen] = useState(false);
+  const [processItemsByMessageId, setProcessItemsByMessageId] = useState<Record<string, UserRunProcess[]>>({});
+  const [processPanelOpenByMessageId, setProcessPanelOpenByMessageId] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
@@ -1338,6 +1376,10 @@ function UserChatApp() {
   const messageListRef = useRef<HTMLDivElement | null>(null);
 
   const currentConversation = conversations.find((item) => item.id === conversationId);
+  const allProcessItems = Object.values(processItemsByMessageId)
+    .flat()
+    .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+  const processItemCount = allProcessItems.length;
   const filteredConversations = conversations.filter((item) => {
     const query = conversationFilter.trim().toLowerCase();
     if (!query) return true;
@@ -1418,7 +1460,7 @@ function UserChatApp() {
 
   useEffect(() => {
     messageListRef.current?.scrollTo({ top: messageListRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, messages.at(-1)?.content, developerMode, processItems.length]);
+  }, [messages.length, messages.at(-1)?.content, developerMode, processItemCount]);
 
   async function refreshConversations(preferredId = conversationId, shouldLoadMessages = true): Promise<ConversationSummary[]> {
     const params = new URLSearchParams({
@@ -1436,8 +1478,8 @@ function UserChatApp() {
       await loadConversationMessages(nextId);
     } else if (!data.conversations.length && !messages.length) {
       setMessages([]);
-      setProcessItems([]);
-      setProcessPanelOpen(false);
+      setProcessItemsByMessageId({});
+      setProcessPanelOpenByMessageId({});
     }
     return data.conversations;
   }
@@ -1450,8 +1492,9 @@ function UserChatApp() {
       const params = new URLSearchParams({ actorId: userId, actorRole: userRole, limit: "240" });
       const data = await api<{ messages: StoredMessage[] }>(`/api/conversations/${encodeURIComponent(targetId)}/messages?${params.toString()}`);
       setConversationId(targetId);
-      setMessages(data.messages.map(storedMessageToChatMessage));
-      await loadConversationProcesses(targetId, false);
+      const loadedMessages = data.messages.map(storedMessageToChatMessage);
+      setMessages(loadedMessages);
+      await loadConversationProcesses(targetId, loadedMessages, false);
       setRetryMessage("");
       setMobileSidebarOpen(false);
     } catch (err) {
@@ -1461,16 +1504,17 @@ function UserChatApp() {
     }
   }
 
-  async function loadConversationProcesses(targetId: string, keepOpen: boolean): Promise<void> {
+  async function loadConversationProcesses(targetId: string, messageItems: ChatMessage[], keepOpen: boolean): Promise<void> {
     if (!targetId) return;
     try {
       const params = new URLSearchParams({ actorId: userId, actorRole: userRole });
       const trace = await api<ConversationTrace>(`/api/conversations/${encodeURIComponent(targetId)}/trace?${params.toString()}`);
-      setProcessItems(userProcessesFromTrace(trace, `trace-${targetId}`));
-      setProcessPanelOpen(keepOpen);
+      const groups = userProcessGroupsFromTrace(trace, messageItems, `trace-${targetId}`);
+      setProcessItemsByMessageId(groups);
+      setProcessPanelOpenByMessageId(Object.fromEntries(Object.keys(groups).map((messageId) => [messageId, keepOpen])));
     } catch {
-      setProcessItems([]);
-      setProcessPanelOpen(false);
+      setProcessItemsByMessageId({});
+      setProcessPanelOpenByMessageId({});
     }
   }
 
@@ -1479,8 +1523,8 @@ function UserChatApp() {
     const nextId = `conv-${Date.now()}`;
     setConversationId(nextId);
     setMessages([]);
-    setProcessItems([]);
-    setProcessPanelOpen(false);
+    setProcessItemsByMessageId({});
+    setProcessPanelOpenByMessageId({});
     setComposerToolsOpen(false);
     setMessage("");
     setError("");
@@ -1898,7 +1942,8 @@ function UserChatApp() {
     setLoading(true);
     setError("");
     setRetryMessage("");
-    setProcessPanelOpen(true);
+    setProcessItemsByMessageId((groups) => ({ ...groups, [assistantMessageId]: [] }));
+    setProcessPanelOpenByMessageId((groups) => ({ ...groups, [assistantMessageId]: true }));
     setComposerToolsOpen(false);
     setMessage("");
     setMessages((items) => [
@@ -1948,26 +1993,29 @@ function UserChatApp() {
             setMessages((items) => items.map((item) => item.id === assistantMessageId ? { ...item, content: assistantText, streaming: true } : item));
           }
           if (payload.type === "workspace") {
-            setProcessItems((items) => [
-              ...items,
-              {
-                id: createLocalId("process"),
-                runId,
-                workspaceId: payload.workspaceId,
-                eventKind: payload.eventKind,
-                title: payload.title,
-                text: payload.text,
-                status: payload.status,
-                toolNames: payload.toolNames,
-                items: payload.items,
-                createdAt: new Date().toISOString()
-              }
-            ]);
+            setProcessItemsByMessageId((groups) => ({
+              ...groups,
+              [assistantMessageId]: [
+                ...(groups[assistantMessageId] ?? []),
+                {
+                  id: createLocalId("process"),
+                  runId,
+                  workspaceId: payload.workspaceId,
+                  eventKind: payload.eventKind,
+                  title: payload.title,
+                  text: payload.text,
+                  status: payload.status,
+                  toolNames: payload.toolNames,
+                  items: payload.items,
+                  createdAt: new Date().toISOString()
+                }
+              ]
+            }));
           }
           if (payload.type === "done") {
             setMessages((items) => items.map((item) => item.id === assistantMessageId ? { ...item, content: payload.output.assistantMessage, streaming: false } : item));
+            setProcessPanelOpenByMessageId((groups) => ({ ...groups, [assistantMessageId]: false }));
             await refreshConversations(payload.output.conversationId, false);
-            await loadConversationProcesses(payload.output.conversationId, false);
           }
           if (payload.type === "error") throw new Error(payload.error);
         }
@@ -1977,14 +2025,23 @@ function UserChatApp() {
         setMessages((items) => items.map((item) => item.id === assistantMessageId
           ? { ...item, content: item.content || "已停止运行。", streaming: false }
           : item.streaming ? { ...item, streaming: false } : item));
-        setProcessPanelOpen(false);
+        setProcessPanelOpenByMessageId((groups) => ({ ...groups, [assistantMessageId]: false }));
         setError("");
         return;
       }
       const messageText = err instanceof Error ? err.message : String(err);
       setError(messageText);
       setRetryMessage(cleanMessage);
-      setProcessPanelOpen(false);
+      setProcessPanelOpenByMessageId((groups) => {
+        const next = { ...groups };
+        delete next[assistantMessageId];
+        return next;
+      });
+      setProcessItemsByMessageId((groups) => {
+        const next = { ...groups };
+        delete next[assistantMessageId];
+        return next;
+      });
       setMessages((items) => items.filter((item) => item.runId !== runId));
     } finally {
       if (currentRunControllerRef.current === controller) currentRunControllerRef.current = null;
@@ -2005,32 +2062,37 @@ function UserChatApp() {
 
   const workspaceCustomTools = workspaceDraft?.tools.filter((tool) => !isSystemTool(tool)) ?? [];
   const workspaceHasUnsavedDraft = Boolean(workspaceDraft && !workspaces.some((workspace) => workspace.id === workspaceDraft.id));
-  const pendingAskUser = latestAskUserPrompt(processItems, messages, loading);
+  const latestProcessMessageId = messages.slice().reverse().find((item) => (processItemsByMessageId[item.id]?.length ?? 0) > 0)?.id ?? "";
+  const latestMessageProcessItems = latestProcessMessageId ? processItemsByMessageId[latestProcessMessageId] ?? [] : [];
+  const pendingAskUser = latestAskUserPrompt(latestMessageProcessItems.length ? latestMessageProcessItems : allProcessItems, messages, loading);
   const pendingAskQuestionVisible = askQuestionAlreadyVisible(messages, pendingAskUser);
-  const processAnchorMessageId = messages.slice().reverse().find((item) => item.role !== "用户")?.id ?? "";
 
-  function renderProcessPanel() {
+  function renderProcessPanel(messageId: string, processItems: UserRunProcess[]) {
     if (processItems.length === 0) return null;
+    const active = processItems.some((item) => isProcessActive(item, processItems, loading));
+    const open = active || Boolean(processPanelOpenByMessageId[messageId]);
     return (
       <section className="tool-process-row" aria-label="Agent 运行进展">
         <div className="assistant-avatar process-avatar">Z</div>
         <details
           className="tool-process-panel"
-          open={loading || processPanelOpen}
+          open={open}
           onToggle={(event) => {
-            if (!loading) setProcessPanelOpen(event.currentTarget.open);
+            if (!active) {
+              setProcessPanelOpenByMessageId((groups) => ({ ...groups, [messageId]: event.currentTarget.open }));
+            }
           }}
         >
           <summary>
-            <span className={`tool-activity-dot ${processItems.some((item) => isProcessActive(item, processItems, loading)) ? "active" : "done"}`} />
-            <span>{processPanelSummary(processItems, loading)}</span>
-            <small>{loading ? "运行中" : "点击查看详情"}</small>
+            <span className={`tool-activity-dot ${active ? "active" : "done"}`} />
+            <span>{processPanelSummary(processItems, active)}</span>
+            <small>{active ? "运行中" : "点击查看详情"}</small>
           </summary>
           <div className="tool-activity-list">
             {processItems.map((item) => {
-              const active = isProcessActive(item, processItems, loading);
+              const itemActive = isProcessActive(item, processItems, active);
               return (
-                <details key={item.id} className={`tool-activity ${active ? "active" : "done"}`}>
+                <details key={item.id} className={`tool-activity ${itemActive ? "active" : "done"}`}>
                   <summary>
                     <span className="tool-activity-dot" />
                     <span>{userProcessActivityLabel(item)}</span>
@@ -2146,9 +2208,11 @@ function UserChatApp() {
               <p>直接描述目标，Zleap 会在背后选择合适的工作空间和工具。</p>
             </div>
           )}
-          {messages.map((item) => (
+          {messages.map((item) => {
+            const messageProcessItems = processItemsByMessageId[item.id] ?? [];
+            return (
             <React.Fragment key={item.id}>
-              {item.id === processAnchorMessageId && renderProcessPanel()}
+              {item.role !== "用户" && renderProcessPanel(item.id, messageProcessItems)}
               <article className={`user-message ${item.role === "用户" ? "from-user" : "from-assistant"} ${item.streaming ? "streaming" : ""}`}>
                 {item.role !== "用户" && <div className="assistant-avatar">Z</div>}
                 <div className="user-message-bubble">
@@ -2156,8 +2220,8 @@ function UserChatApp() {
                 </div>
               </article>
             </React.Fragment>
-          ))}
-          {!processAnchorMessageId && renderProcessPanel()}
+            );
+          })}
           {pendingAskUser && (
             <section className="ask-user-panel" aria-label="需要你选择">
               <div className="assistant-avatar">Z</div>
@@ -2178,10 +2242,10 @@ function UserChatApp() {
               </div>
             </section>
           )}
-          {developerMode && processItems.length > 0 && (
+          {developerMode && allProcessItems.length > 0 && (
             <section className="developer-process-list">
               <h2>运行过程</h2>
-              {processItems.map((item) => (
+              {allProcessItems.map((item) => (
                 <details key={item.id}>
                   <summary>{userProcessActivityLabel(item)}<span>{item.workspaceId}</span></summary>
                   <div className="developer-process-readable">
