@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:46 +08:00
+
+目的：
+- 完成 `docs/07-context-and-prompt-contracts.md` 的首轮细项拆分，明确 context stack、prompt、tool loop 和 UI inspector 契约证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/07 拆成 L1-L8，覆盖稳定 context stack 类别、provider prompt 装配边界、follow-up tool loop 完整上下文、UI context/raw log inspector、workspace handoff/resume、memory disclosure prompt、attention budget 和 runtime invariants。
+- 本次只更新审计记录，不改运行时代码。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:43 +08:00
 
 目的：
