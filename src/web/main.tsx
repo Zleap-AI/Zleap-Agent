@@ -2223,7 +2223,7 @@ function UserChatApp() {
   }
 
   return (
-    <main className={`user-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <main className={`user-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileSidebarOpen ? "sidebar-drawer-open" : ""}`}>
       <button className="mobile-sidebar-button" type="button" aria-label="打开会话栏" onClick={() => setMobileSidebarOpen(true)}>☰</button>
       {mobileSidebarOpen && <button className="sidebar-scrim" aria-label="关闭会话栏" onClick={() => setMobileSidebarOpen(false)} />}
       <aside className={`user-sidebar ${mobileSidebarOpen ? "open" : ""}`}>

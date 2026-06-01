@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-02 00:18 +08:00
+
+目的：
+- 修复侧边栏临时弹出时右侧透明关闭区域的位置问题，避免关闭层覆盖 sidebar 或让打开按钮与抽屉内容重叠。
+
+变更：
+- 更新 `src/web/main.tsx`：在 sidebar 临时打开时给根容器增加 `sidebar-drawer-open` 状态类。
+- 更新 `src/web/styles.css`：让 `.sidebar-scrim` 在抽屉打开态从 sidebar 右边缘开始；抽屉打开期间隐藏左上角打开按钮；移动端按 drawer 实际宽度计算关闭区域起点。
+- 更新 `src/tests/run-tests.ts`：增加前端和样式契约断言，覆盖抽屉打开态类名与关闭区域位置。
+- 更新 `docs/08-user-ui-guide.md`：明确 sidebar / drawer 打开时右侧透明关闭区域必须从抽屉右边缘开始。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：侧边栏弹出时 `.sidebar-scrim` 背景为透明，左边界为 `280px`，与 sidebar 右边缘一致；打开按钮在抽屉打开期间隐藏。
+
+Git：
+- 本次提交：修正 sidebar 抽屉关闭区域位置。
+
 ## 2026-06-02 00:05 +08:00
 
 目的：

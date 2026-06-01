@@ -189,6 +189,14 @@ button:disabled {
   background: transparent;
 }
 
+.user-shell.sidebar-drawer-open .sidebar-scrim {
+  left: 280px;
+}
+
+.user-shell.sidebar-collapsed.sidebar-drawer-open .mobile-sidebar-button {
+  display: none;
+}
+
 .settings-backdrop {
   position: fixed;
   inset: 0;
@@ -1406,6 +1414,10 @@ button:disabled {
     padding: 12px;
     opacity: 1;
     pointer-events: auto;
+  }
+
+  .user-shell.sidebar-drawer-open .sidebar-scrim {
+    left: min(84vw, 320px);
   }
 
   .user-chat-header {

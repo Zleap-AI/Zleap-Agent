@@ -66,6 +66,7 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("isWorkspaceExitProcess(item)");
   expectWeb("workspaceDisplayName(workspaceWindow.workspaceId)");
   expectWeb("className=\"tool-workspace-window\"");
+  expectWeb("${mobileSidebarOpen ? \"sidebar-drawer-open\" : \"\"}");
   expectWeb("aria-expanded={detailOpen}");
   expectWeb("{detailOpen && <div className=\"tool-activity-detail\">");
   expectWeb("className=\"model-chip\"");
@@ -73,6 +74,8 @@ async function testWebUiMasterPlanContracts() {
   assert.equal(webSource.includes("<option value=\"gpt-4.1\">gpt-4.1</option>"), false);
   assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;"), true);
   assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;\n  inset: 0;\n  z-index: 35;\n  border: 0;\n  border-radius: 0;\n  padding: 0;\n  background: transparent;\n}"), true);
+  assert.equal(webCssSource.includes(".user-shell.sidebar-drawer-open .sidebar-scrim {\n  left: 280px;\n}"), true);
+  assert.equal(webCssSource.includes(".user-shell.sidebar-drawer-open .sidebar-scrim {\n    left: min(84vw, 320px);\n  }"), true);
   assert.equal(webCssSource.includes(".settings-backdrop {\n  position: fixed;\n  inset: 0;\n  z-index: 35;\n  border: 0;\n  border-radius: 0;\n  padding: 0;\n  background: transparent;\n}"), true);
   expectWeb("当前智能体");
   expectWeb("新建智能体");
