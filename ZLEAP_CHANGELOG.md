@@ -17,7 +17,7 @@
 - `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
 
 Git：
-- 待提交。
+- `7c71e5e` 补齐事件记忆任务边界。
 
 ## 2026-06-01 08:27 +08:00
 
