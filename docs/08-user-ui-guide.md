@@ -701,6 +701,8 @@ zleap.user.ui.state.v1
 ### Desktop `>= 900px`
 
 - Sidebar 固定左侧，宽 `280px`。
+- Sidebar 默认展开，即使 localStorage 里保存过折叠状态也不应让宽屏第一屏默认收起。
+- 用户仍可通过折叠按钮临时收起 sidebar；当窗口从窄屏切回宽屏时，sidebar 应恢复展开。
 - 主聊天区占剩余空间。
 - 消息列和 composer 居中，最大 `768px`。
 

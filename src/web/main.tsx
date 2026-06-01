@@ -805,6 +805,15 @@ function loadUserUiCache(): UserUiCachedState {
   }
 }
 
+function isWideUserViewport(): boolean {
+  return window.matchMedia("(min-width: 900px)").matches;
+}
+
+function initialSidebarCollapsed(cached: UserUiCachedState): boolean {
+  if (isWideUserViewport()) return false;
+  return Boolean(cached.sidebarCollapsed);
+}
+
 function normalizeCachedBaseUrl(value: string | undefined): string | undefined {
   if (!value) return value;
   const trimmed = value
@@ -1296,7 +1305,7 @@ function UserChatApp() {
   const [model, setModel] = useState(cached.model ?? "gpt-5-mini");
   const [apiKey, setApiKey] = useState(cached.apiKey ?? "");
   const [developerMode, setDeveloperMode] = useState(Boolean(cached.developerMode));
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(Boolean(cached.sidebarCollapsed));
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialSidebarCollapsed(cached));
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("basic");
@@ -1334,6 +1343,18 @@ function UserChatApp() {
     if (!query) return true;
     return `${item.title} ${item.lastMessagePreview ?? ""} ${item.id}`.toLowerCase().includes(query);
   });
+
+  useEffect(() => {
+    const wideViewportQuery = window.matchMedia("(min-width: 900px)");
+    const expandOnWideViewport = () => {
+      if (!wideViewportQuery.matches) return;
+      setSidebarCollapsed(false);
+      setMobileSidebarOpen(false);
+    };
+    expandOnWideViewport();
+    wideViewportQuery.addEventListener("change", expandOnWideViewport);
+    return () => wideViewportQuery.removeEventListener("change", expandOnWideViewport);
+  }, []);
 
   useEffect(() => {
     api<{ agents: AgentConfig[] }>("/api/agents")
