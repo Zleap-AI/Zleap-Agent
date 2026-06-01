@@ -296,6 +296,7 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, "memories", "deletedAt", "TEXT");
   ensureColumn(db, "memories", "deletedBy", "TEXT");
   ensureColumn(db, "memories", "deleteReason", "TEXT");
+  db.prepare("UPDATE memories SET agentId = 'default-agent', updatedAt = ? WHERE agentId IS NULL").run(nowIso());
   ensureColumn(db, "approval_requests", "conversationId", "TEXT");
   ensureColumn(db, "approval_requests", "argumentsJson", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, "approval_requests", "resolvedBy", "TEXT");

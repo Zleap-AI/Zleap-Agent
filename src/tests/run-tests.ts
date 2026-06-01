@@ -1560,7 +1560,7 @@ async function testDatabaseAndMemory() {
     }, "creator", "creator");
   }
 
-  const recalled = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
+  const recalled = repos.recallMemories({ userId: "user-a", agentId: "default-agent", workspaceId: "dev", query: "ripgrep search" });
   assert.equal(recalled.some((item) => item.title === "Latest file search"), true);
   assert.equal(recalled.some((item) => item.title === "Old file search"), false);
   assert.equal(recalled.some((item) => item.memoryType === "skill"), true);
@@ -1568,7 +1568,7 @@ async function testDatabaseAndMemory() {
   assert.equal(recalled.filter((item) => item.memoryType === "event").some((item) => item.id === latestEvent.id), true);
   const dottedList = repos.listMemories({ query: "302.AI", userId: "user-a", workspaceId: "dev" });
   assert.equal(dottedList.some((item) => item.id === dottedProcessEvent.id), true);
-  const dottedRecall = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "302.AI", resultEventLimit: 0, skillLimit: 0 });
+  const dottedRecall = repos.recallMemories({ userId: "user-a", agentId: "default-agent", workspaceId: "dev", query: "302.AI", resultEventLimit: 0, skillLimit: 0 });
   assert.equal(dottedRecall.some((item) => item.id === dottedProcessEvent.id), true);
 
   const collisionLatest = repos.createMemory({
@@ -1613,23 +1613,23 @@ async function testDatabaseAndMemory() {
     summary: "Other memory type ripgrep search should not hide event relation.",
     detail: "Cross-type relation collision fixture."
   }, "creator", "creator");
-  const collidedRecall = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
+  const collidedRecall = repos.recallMemories({ userId: "user-a", agentId: "default-agent", workspaceId: "dev", query: "ripgrep search" });
   assert.equal(collidedRecall.some((item) => item.id === collisionLatest.id), true);
   assert.equal(collidedRecall.some((item) => item.title === "Other user same relation"), false);
   assert.equal(collidedRecall.some((item) => item.title === "Other workspace same relation"), false);
   assert.equal(collidedRecall.some((item) => item.title === "Other type same relation"), true);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "dev" })?.id, collisionLatest.id);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-b", workspaceId: "dev" })?.id, otherUserCollision.id);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "other-workspace" })?.id, otherWorkspaceCollision.id);
-  assert.equal(repos.getMemoryByRelation("skill", "rel-collision", { workspaceId: "dev" })?.id, otherTypeCollision.id);
-  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "missing-user", workspaceId: "dev" }), undefined);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", agentId: "default-agent", workspaceId: "dev" })?.id, collisionLatest.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-b", agentId: "default-agent", workspaceId: "dev" })?.id, otherUserCollision.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", agentId: "default-agent", workspaceId: "other-workspace" })?.id, otherWorkspaceCollision.id);
+  assert.equal(repos.getMemoryByRelation("skill", "rel-collision", { agentId: "default-agent", workspaceId: "dev" })?.id, otherTypeCollision.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "missing-user", agentId: "default-agent", workspaceId: "dev" }), undefined);
   assert.throws(
     () => (repos.getMemoryByRelation as unknown as (memoryType: string, relationId: string) => unknown)("event", "rel-collision"),
     /explicit userId\/agentId\/workspaceId scope/
   );
 
   repos.deleteMemory(latestEvent.id, "creator", "creator", "superseded event cleanup");
-  const afterSoftDelete = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
+  const afterSoftDelete = repos.recallMemories({ userId: "user-a", agentId: "default-agent", workspaceId: "dev", query: "ripgrep search" });
   assert.equal(afterSoftDelete.some((item) => item.id === latestEvent.id), false);
   assert.equal(afterSoftDelete.some((item) => item.id === oldEvent.id), true);
   assert.equal(repos.listMemories({ memoryType: "event", userId: "user-a", workspaceId: "dev" }).some((item) => item.id === latestEvent.id), false);
@@ -1638,7 +1638,7 @@ async function testDatabaseAndMemory() {
   assert.equal(Boolean(deletedLatest.deletedAt), true);
   assert.equal(deletedLatest.deletedBy, "creator");
   assert.equal(deletedLatest.deleteReason, "superseded event cleanup");
-  assert.equal(repos.getMemoryByRelation("event", "rel-test", { userId: "user-a", workspaceId: "dev" })?.id, oldEvent.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-test", { userId: "user-a", agentId: "default-agent", workspaceId: "dev" })?.id, oldEvent.id);
 
   for (let index = 0; index < 25; index += 1) {
     repos.createMemory({
@@ -1652,6 +1652,7 @@ async function testDatabaseAndMemory() {
   }
   const fixedImpressions = repos.recallMemories({
     userId: "user-a",
+    agentId: "default-agent",
     workspaceId: "dev",
     query: "phrase that matches no impression",
     impressionLimit: 20,
@@ -3461,10 +3462,10 @@ async function testMemoryLifecycleHooks() {
   }
   assert.equal(lastOutput?.memoryWrites.some((memory) => memory.memoryType === "event"), true);
   const events = repos.listMemories({ memoryType: "event", userId: "user-memory", workspaceId: "main" });
-  assert.equal(events.some((memory) => memory.relationId === "event:user-memory:main:conv-memory-window:window:1:result"), true);
+  assert.equal(events.some((memory) => memory.relationId === "event:user-memory:agent:default-agent:main:conv-memory-window:window:1:result"), true);
   assert.equal(events.some((memory) => metadataOf(memory).eventKind === "process"), true);
   assert.equal(events.some((memory) => metadataOf(memory).eventKind === "result"), true);
-  const resultEvent = events.find((memory) => memory.relationId === "event:user-memory:main:conv-memory-window:window:1:result");
+  const resultEvent = events.find((memory) => memory.relationId === "event:user-memory:agent:default-agent:main:conv-memory-window:window:1:result");
   assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
   assert.equal(metadataSourceIds(resultEvent!, "tool_calls").includes("tool-old-window-evidence"), false);
   assert.equal(metadataSourceIds(resultEvent!, "workspace_sessions").includes("wss-old-window-evidence"), false);
@@ -3597,11 +3598,11 @@ async function testConversationWindowEventExtractionUsesAbsoluteWindows() {
     assistantMessage: "long-window assistant 520"
   });
 
-  assert.equal(writes.some((memory) => memory.relationId === "event:long-window-user:main:conv-long-memory-window:window:26:result"), true);
+  assert.equal(writes.some((memory) => memory.relationId === "event:long-window-user:agent:default-agent:main:conv-long-memory-window:window:26:result"), true);
   const resultEvent = repos.getMemoryByRelation(
     "event",
-    "event:long-window-user:main:conv-long-memory-window:window:26:result",
-    { userId: "long-window-user", workspaceId: "main" }
+    "event:long-window-user:agent:default-agent:main:conv-long-memory-window:window:26:result",
+    { userId: "long-window-user", agentId: "default-agent", workspaceId: "main" }
   );
   assert.equal(Boolean(resultEvent), true);
   assert.equal(resultEvent!.summary.includes("long-window assistant 520"), true);
@@ -3633,7 +3634,7 @@ async function testStreamingConversationWindowMemoryIncludesAssistantMessage() {
 
   assert.equal(lastDone?.output.memoryWrites.some((memory) => memory.memoryType === "event"), true);
   const events = repos.listMemories({ memoryType: "event", userId: "stream-memory-user", workspaceId: "main" });
-  const resultEvent = events.find((memory) => memory.relationId === "event:stream-memory-user:main:conv-stream-memory-window:window:1:result");
+  const resultEvent = events.find((memory) => memory.relationId === "event:stream-memory-user:agent:default-agent:main:conv-stream-memory-window:window:1:result");
   assert.equal(Boolean(resultEvent), true);
   assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
   assert.equal(resultEvent!.summary.includes("streamed assistant"), true);
@@ -4663,19 +4664,20 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       summary: "Impressions must not be global.",
       detail: "This should be rejected because it has no userId or agentId."
     }
-  }), /requires userId or agentId/);
-  assert.throws(() => service.createMemoryRecord({
+  }), /creator role/);
+  const agentScopedUserImpression = service.createMemoryRecord({
     actorId: "ordinary-api-user",
     actorRole: "user",
     memory: {
       memoryType: "impression",
       userId: "ordinary-api-user",
       agentId: "default-agent",
-      title: "Ambiguous impression",
-      summary: "Impressions must not target both user and agent.",
-      detail: "This should be rejected because the scope is ambiguous."
+      title: "Agent scoped user impression",
+      summary: "User impressions are isolated under the current agent.",
+      detail: "This should be accepted because user memories now require an agent scope."
     }
-  }), /either a user or agent self/);
+  });
+  assert.equal(agentScopedUserImpression.agentId, "default-agent");
   assert.throws(() => service.createMemoryRecord({
     actorId: "ordinary-api-user",
     actorRole: "user",
@@ -4714,7 +4716,8 @@ async function testDirectMemoryApiUsesPolicyLayer() {
 
   const ordinaryList = service.listMemoryRecords({
     actorId: "ordinary-api-user",
-    actorRole: "user"
+    actorRole: "user",
+    filters: { agentId: "default-agent" }
   });
   assert.equal(ordinaryList.some((memory) => memory.id === ownEvent.id), true);
   assert.equal(ordinaryList.some((memory) => memory.id === ownImpression.id), true);
@@ -4744,6 +4747,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
   }).some((memory) => memory.id === evidenceBackedSkill.id), false);
   assert.equal(repos.recallMemories({
     userId: "ordinary-api-user",
+    agentId: "default-agent",
     workspaceId: "dev",
     query: "Evidence-backed direct skill"
   }).some((memory) => memory.id === evidenceBackedSkill.id), false);

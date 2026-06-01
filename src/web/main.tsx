@@ -3478,6 +3478,7 @@ function memoryDraft(memoryType: MemoryRow["memoryType"]): Partial<MemoryRow> {
   if (memoryType === "skill") {
     return {
       ...base,
+      agentId: "default-agent",
       workspaceId: "main",
       metadataJson: JSON.stringify(skillMetadataTemplate(), null, 2)
     };
@@ -3486,12 +3487,14 @@ function memoryDraft(memoryType: MemoryRow["memoryType"]): Partial<MemoryRow> {
     return {
       ...base,
       userId: "creator",
+      agentId: "default-agent",
       metadataJson: JSON.stringify({ impressionKind: "userImpression", source: "manualMemoryApi" }, null, 2)
     };
   }
   return {
     ...base,
     userId: "creator",
+    agentId: "default-agent",
     workspaceId: "main",
     metadataJson: JSON.stringify({ source: "manualMemoryApi", eventKind: "manual", conversationId: "manual-memory-api", outcome: "partial" }, null, 2)
   };

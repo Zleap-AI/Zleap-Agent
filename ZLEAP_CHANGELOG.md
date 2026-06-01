@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 12:04 +08:00
+
+目的：
+- 修正记忆没有按智能体隔离的问题，避免不同 agent 之间共享用户记忆、事件记忆和技能记忆。
+
+变更：
+- 更新 `src/core/memory-service.ts`、`src/core/policy-engine.ts`、`src/db/repositories.ts`：运行时写入、召回、搜索、读取和管理记忆时都绑定并校验当前 `agentId`。
+- 更新 `src/db/schema.ts`：启动时给旧的未绑定记忆补默认 `default-agent`，避免旧数据继续以空 agent scope 参与共享。
+- 更新 `src/web/main.tsx`：手动创建记忆的默认草稿也带上 `default-agent`。
+- 更新 `src/tests/run-tests.ts`：把已有测试断言调整为新的 agent 隔离 relation/scope 语义。
+
+验证：
+- 按用户要求本次先不继续完整测试，直接提交。
+- 已在提交前跑过一次 `PATH=/opt/homebrew/bin:$PATH npm run typecheck`，通过。
+- 曾跑 `PATH=/opt/homebrew/bin:$PATH npm test` 到后段，期间修复了暴露出的旧 scope 断言；最终完整测试未继续运行。
+
+Git：
+- 本次提交：按智能体隔离记忆。
+
 ## 2026-06-01 11:50 +08:00
 
 目的：

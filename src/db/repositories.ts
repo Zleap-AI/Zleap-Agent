@@ -765,7 +765,7 @@ export class Repositories {
       params.push(filters.userId);
     }
     if (filters.agentId) {
-      clauses.push("(m.agentId = ? OR m.agentId IS NULL)");
+      clauses.push("m.agentId = ?");
       params.push(filters.agentId);
     }
     if (filters.workspaceId) {
@@ -784,7 +784,7 @@ export class Repositories {
     userId: string;
     workspaceId: string;
     query: string;
-    agentId?: string;
+    agentId: string;
     impressionLimit?: number;
     eventLimit?: number;
     resultEventLimit?: number;
@@ -826,24 +826,24 @@ export class Repositories {
     const impressions = recallPartition(`
       m.memoryType = 'impression'
       AND (
-        (m.userId = ? AND m.agentId IS NULL)
+        (m.userId = ? AND m.agentId = ?)
         OR (m.userId IS NULL AND m.agentId = ?)
       )
-    `, [input.userId, input.agentId ?? ""], input.impressionLimit ?? 20);
+    `, [input.userId, input.agentId, input.agentId], input.impressionLimit ?? 20);
     const resultEvents = recallPartition(
-      "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'result'",
-      [input.userId, input.workspaceId],
+      "m.memoryType = 'event' AND m.userId = ? AND m.agentId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'result'",
+      [input.userId, input.agentId, input.workspaceId],
       input.resultEventLimit ?? input.eventLimit ?? 10
     );
     const processEvents = recallPartition(
-      "m.memoryType = 'event' AND m.userId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'process'",
-      [input.userId, input.workspaceId],
+      "m.memoryType = 'event' AND m.userId = ? AND m.agentId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'process'",
+      [input.userId, input.agentId, input.workspaceId],
       input.processEventLimit ?? 8,
       { useFts: true }
     );
     const skills = recallPartition(
-      "m.memoryType = 'skill' AND m.workspaceId = ?",
-      [input.workspaceId],
+      "m.memoryType = 'skill' AND m.agentId = ? AND m.workspaceId = ?",
+      [input.agentId, input.workspaceId],
       input.skillLimit ?? 8
     );
 
@@ -853,6 +853,7 @@ export class Repositories {
   createMemory(input: Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail">, actorId: string, actorRole: UserRole): MemoryRow {
     const now = nowIso();
     const id = input.id ?? createId("mem");
+    const agentId = input.agentId ?? (input.userId || input.memoryType !== "impression" ? "default-agent" : undefined);
     const metadata = parseJson<Record<string, unknown>>(input.metadataJson ?? "{}", {});
     const metadataConversationId = typeof metadata.conversationId === "string" ? metadata.conversationId.trim() : "";
     if (actorRole !== "creator" && metadataConversationId) {
@@ -871,11 +872,11 @@ export class Repositories {
       INSERT INTO memories
         (id, memoryType, userId, agentId, workspaceId, relationId, version, title, summary, detail, metadataJson, createdAt, updatedAt)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, input.memoryType, input.userId ?? null, input.agentId ?? null, input.workspaceId ?? null, input.relationId ?? null, input.version ?? 1, input.title, input.summary, input.detail, input.metadataJson ?? "{}", now, now);
+    `).run(id, input.memoryType, input.userId ?? null, agentId ?? null, input.workspaceId ?? null, input.relationId ?? null, input.version ?? 1, input.title, input.summary, input.detail, input.metadataJson ?? "{}", now, now);
     this.audit(actorId, actorRole, "create", "memory", id, {
       memoryType: input.memoryType,
       userId: input.userId,
-      agentId: input.agentId,
+      agentId,
       workspaceId: input.workspaceId ?? (typeof metadata.activeWorkspaceId === "string" ? metadata.activeWorkspaceId : undefined),
       relationId: input.relationId,
       version: input.version ?? 1,
