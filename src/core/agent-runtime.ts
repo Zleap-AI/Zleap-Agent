@@ -119,6 +119,13 @@ function llmResponseSnapshot(completion: ChatCompletionOutput, extra: Record<str
   };
 }
 
+function llmTokenUsage(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const usage = (raw as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return undefined;
+  return usage as Record<string, unknown>;
+}
+
 export class AgentRuntime {
   private readonly promptAssembler = new PromptAssembler();
   private readonly workspaceRuntime: WorkspaceRuntime;
@@ -215,6 +222,7 @@ export class AgentRuntime {
         conversationId: input.conversationId,
         workspaceId: prepared.activeWorkspaceId,
         llmCallId: prepared.llmCallId,
+        tokenUsage: llmTokenUsage(completion.raw),
         memoryWriteCount: memoryWrites.length
       }
     });
@@ -652,6 +660,12 @@ export class AgentRuntime {
       }
     });
     const userMessageId = this.repos.addMessage(input.conversationId, "user", input.message);
+    this.repos.audit(input.userId, input.userRole, "user_message_received", "message", userMessageId, {
+      conversationId: input.conversationId,
+      agentId: input.agentId,
+      messageId: userMessageId,
+      contentLength: input.message.length
+    });
 
     if (resumableSession) {
       const activeSession = this.resumeWorkspaceSession(input, resumableSession);
@@ -1180,16 +1194,30 @@ export class AgentRuntime {
       const activeSession = this.findActiveWorkspaceSession(prepared);
       let justExitedWorkspaceSession: WorkspaceSession | undefined;
       const rejectAfterExit = workspaceExitedInBatch && prepared.activeWorkspaceId !== "main";
+      const pendingToolCall = this.repos.saveToolCall({
+        conversationId: input.conversationId,
+        userId: input.userId,
+        workspaceId: prepared.activeWorkspaceId,
+        workspaceSessionId: activeSession?.id,
+        taskId: activeSession?.taskId,
+        toolName,
+        argumentsJson: toolCall.function.arguments,
+        resultJson: "{}",
+        status: "pending"
+      });
       this.hookManager.record({
         hook: "beforeToolCall",
         actorId: input.userId,
         actorRole: input.userRole,
         resourceKind: "tool",
+        resourceId: pendingToolCall.id,
         metadata: {
           conversationId: input.conversationId,
           workspaceId: prepared.activeWorkspaceId,
           workspaceSessionId: activeSession?.id,
           taskId: activeSession?.taskId,
+          toolCallId: pendingToolCall.id,
+          status: "pending",
           toolName
         }
       });
@@ -1225,14 +1253,7 @@ export class AgentRuntime {
       if (result.terminalAssistantMessage) {
         terminalAssistantMessage = result.terminalAssistantMessage;
       }
-      const savedToolCall = this.repos.saveToolCall({
-        conversationId: input.conversationId,
-        userId: input.userId,
-        workspaceId: prepared.activeWorkspaceId,
-        workspaceSessionId: activeSession?.id,
-        taskId: activeSession?.taskId,
-        toolName,
-        argumentsJson: toolCall.function.arguments,
+      const savedToolCall = this.repos.updateToolCallResult(pendingToolCall.id, {
         resultJson: JSON.stringify(result.result),
         status: result.status
       });

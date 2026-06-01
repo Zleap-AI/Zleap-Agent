@@ -144,8 +144,8 @@ event 具有以下隔离规则：
 
 这意味着：
 
-- 用户 A 在 File workspace 的事件，不应该被用户 B 看到。
-- 用户 A 在 CLI workspace 的事件，不应该直接进入 Browser workspace。
+- 用户 A 在 Dev workspace 的事件，不应该被用户 B 看到。
+- 用户 A 在 Dev workspace 的事件，不应该直接进入未来 Browser workspace。
 - 同一个用户在同一个 workspace 的历史事件，可以在未来相似任务中召回。
 
 ### Event 类型
@@ -265,21 +265,21 @@ skill 的隔离规则：
 
 这意味着：
 
-- CLI workspace 的 skill 只用于 CLI workspace。
-- File workspace 的 skill 只用于 File workspace。
+- Dev workspace 的 skill 只用于 Dev workspace。
+- 未来 Browser workspace 的 skill 只用于 Browser workspace。
 - 不同用户的 event 可以共同贡献 skill。
 - skill 不应该泄露具体用户隐私。
 
 ### Skill 示例
 
-CLI workspace skill：
+Dev workspace skill：
 
 ```text
 在 Node 项目中运行测试前，优先检查 package.json 中的 scripts 和 lockfile。
 如果存在 pnpm-lock.yaml，默认优先使用 pnpm，而不是 npm。
 ```
 
-File workspace skill：
+Dev workspace skill：
 
 ```text
 修改已有代码前，先搜索相关调用点和测试文件。

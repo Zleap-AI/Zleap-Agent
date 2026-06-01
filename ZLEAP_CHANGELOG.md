@@ -2,6 +2,492 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:59 +08:00
+
+目的：
+- 清理设计文档中残留的旧 File/CLI workspace 示例，避免与首版统一 `dev` workspace 决策冲突。
+
+变更：
+- 更新 `docs/01-agent-philosophy.md`：将子 workspace 示例改为 Dev workspace、MCP workspace 和未来 Browser workspace。
+- 更新 `docs/03-memory-model.md`：将 event/skill 隔离示例从 File/CLI workspace 改为 Dev workspace 和未来 Browser workspace。
+- 更新 `docs/04-multi-tenant-isolation.md`：将危险命令示例改为 Dev workspace 的高风险命令工具。
+- 更新 `IMPLEMENTATION_AUDIT.md`：确认本轮审计修改均已运行测试和构建验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `3ff24cd` 清理旧工作空间示例。
+
+## 2026-06-01 09:57 +08:00
+
+目的：
+- 完成剩余总览、理念、路线图和 framework 文档的首轮细项拆分，并消除与主计划冲突的旧 UI/workspace 表述。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 `docs/README.md`、`docs/01-agent-philosophy.md`、`docs/06-typescript-implementation-roadmap.md` 和 `zleap-agent-framework.md` 拆成 N1-N2、O1-O3、P1-P3。
+- 修正 `docs/06-typescript-implementation-roadmap.md`：Web UI 路线图从旧“三 tab”和 Chat 右栏日志/trace，改为主计划要求的七页签、Chat 右栏只展示 workspace/context/memory writes，日志进入独立页。
+- 修正 `zleap-agent-framework.md`：首版 MVP 从旧 File/CLI workspace 表述改为统一 Dev workspace，并补齐 `readFile`/`writeFile` 作为 Dev runtime 工具。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `6b3e496` 对齐剩余设计文档审计。
+
+## 2026-06-01 09:53 +08:00
+
+目的：
+- 完成 `ZLEAP_MASTER_PLAN.md` 的首轮细项拆分，并把主计划里的 UI/stream 易回退约束补成测试证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将主计划总纲拆成 M1-M8，覆盖流程总纲、Web UI 会话体验、trace/context/memory/debug 面、runtime workspace 编排、context/prompt/LLM 协议、SQLite/tenant/security 生命周期、memory strategy、MCP/workspace tools/config。
+- 新增 `src/tests/run-tests.ts::testWebUiMasterPlanContracts`，静态校验七页签常驻、浏览器缓存、失败请求清理/重试、停止流 abort、server disconnect cancellation、conversation DELETE、Markdown 安全渲染、context raw log 切换和 Memory evidence 语义视图等主计划 UI 契约。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `2c836e3` 拆分主计划审计并补强 UI 契约。
+
+## 2026-06-01 09:46 +08:00
+
+目的：
+- 完成 `docs/07-context-and-prompt-contracts.md` 的首轮细项拆分，明确 context stack、prompt、tool loop 和 UI inspector 契约证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/07 拆成 L1-L8，覆盖稳定 context stack 类别、provider prompt 装配边界、follow-up tool loop 完整上下文、UI context/raw log inspector、workspace handoff/resume、memory disclosure prompt、attention budget 和 runtime invariants。
+- 本次只更新审计记录，不改运行时代码。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `8453290` 拆分上下文契约审计。
+
+## 2026-06-01 09:43 +08:00
+
+目的：
+- 完成 `docs/04-multi-tenant-isolation.md` 的首轮细项拆分，明确多租户隔离、权限和删除生命周期证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/04 拆成 K1-K7，覆盖 direct memory final-row policy、workspace 管理显式 actor 和原子性、trace/debug endpoint 权限、tenant-scoped trace writes、context 注入隔离矩阵、workspace/tool approval gates、audit/delete 生命周期。
+- 本次只更新审计记录，不改运行时代码。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `00478bb` 拆分多租户隔离审计。
+
+## 2026-06-01 09:40 +08:00
+
+目的：
+- 完成 `docs/03-memory-model.md` 的首轮细项拆分，明确 memory 模型各项要求已有的代码与测试证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/03 拆成 J1-J7，覆盖 memory recall 可观察性、impression scope、event metadata、SQLite FTS relation/version、skill 渐进披露与质量门禁、memory 注入策略、runtime tools 与 direct API 分层。
+- 本次只更新审计记录，不改运行时代码。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `9a9d141` 拆分记忆模型审计。
+
+## 2026-06-01 09:37 +08:00
+
+目的：
+- 完成 `docs/02-workspace-runtime.md` 的首轮细项拆分，并补齐 dev 工具 reason 契约的测试证据。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/02 拆成 I1-I6，覆盖中断子工作空间恢复、main 终止型编排工具、manifest/tool 可见性、MCP server-first、handoff/WorkspaceResult 和 dev 工具契约。
+- 补强 `testToolBindingsAndMcpReadiness`：明确断言 `searchFiles` schema 与其他 dev 工具一样要求 `reason`。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `97be45e` 拆分工作空间运行时审计。
+
+## 2026-06-01 09:33 +08:00
+
+目的：
+- 完成 `docs/05-hooks-and-lifecycle.md` 的首轮细项拆分，避免已有实现证据散落在 A/B/C/D 项里。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`：将 docs/05 拆成 H1-H8，补齐 memory tool 面、conversation window、workspace enter local context、workspace exit evidence 和 skill extraction 的证据映射。
+- 将 docs/05 待办标记为已完成首轮拆分；本次只更新审计记录，不改运行时代码。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `2e8993a` 拆分生命周期审计证据。
+
+## 2026-06-01 09:23 +08:00
+
+目的：
+- 对齐 `docs/05-hooks-and-lifecycle.md` 中 runtime trace evidence 只能由代码绑定的要求。
+
+变更：
+- `writeUserImpression`、`writeAgentSelfImpression`、`writeSkillMemory` 显式拒绝模型传入 `activeWorkspaceId`、`workspaceSessionId`、`taskId`。
+- 补强 `testSkillMemoryToolQualityGate`：验证模型伪造 skill trace id 会失败，不会写入共享 skill，真实成功路径仍由 runtime metadata 写入 active workspace/session/task。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 H3 验证记录。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `257014b` 拒绝模型伪造记忆追踪字段。
+
+## 2026-06-01 09:19 +08:00
+
+目的：
+- 对齐 `docs/05-hooks-and-lifecycle.md` 中 `afterAgentTurn` 记录 token 使用情况的要求。
+
+变更：
+- 新增 `llmTokenUsage`，从 provider raw response 的 `usage` 字段提取 token 使用情况。
+- `hook.afterAgentTurn` 审计 metadata 记录 `tokenUsage`，与 `llm_calls.responseJson` raw 记录形成明确生命周期证据。
+- 补强 `testRuntimeContextAndTools`，用带 `prompt_tokens` / `completion_tokens` / `total_tokens` 的 LLM fixture 验证 afterAgentTurn audit。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 H2 验证记录。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `7056b2e` 记录回合结束 token 用量。
+
+## 2026-06-01 09:14 +08:00
+
+目的：
+- 对齐 `docs/05-hooks-and-lifecycle.md` 中 tool call lifecycle 的 pending 记录要求。
+
+变更：
+- `ToolCallLog.status` 增加 `pending` 状态。
+- Runtime 执行工具前先创建 `tool_calls` pending 行，`hook.beforeToolCall` 绑定该 `toolCallId`；工具执行后更新同一行的 `resultJson` 和最终状态。
+- 新增 repository `updateToolCallResult`，并补测试覆盖 pending -> completed，以及 runtime before pending / after blocked 审计链。
+- Web UI 工具日志支持 pending / blocked 状态标签。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 H1 验证记录，并将 `docs/05-hooks-and-lifecycle.md` 标为进行中。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `4d9ca30` 落实工具调用待执行记录。
+
+## 2026-06-01 09:07 +08:00
+
+目的：
+- 完成 Web UI 顶层结构、概念介绍和 SQLite schema 的文档对齐验证。
+
+变更：
+- 使用 in-app browser 实测七个顶层页签：对话、工作空间、记忆、日志、数据表、配置、概念介绍。
+- 补强 `testDatabaseAndMemory`：断言核心数据库表存在，并验证 agents/workspaces/mcp_servers/tool_definitions/tool_calls/memories/runtime_config/llm_calls/context_segments/workspace_sessions 的关键字段。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 F1、F2、G1 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `6386e64` 验证 Web UI 与数据库结构。
+
+## 2026-06-01 09:02 +08:00
+
+目的：
+- 完成 MCP server-first 和 placeholder 工具执行边界验证。
+
+变更：
+- 补强 `testBuiltInToolsAreSeededAndWorkspaceScoped`：注册一个 workspace placeholder 工具，确认 runtime 返回 structured failed result，而不是静默执行。
+- 确认现有 stdio MCP fixture 覆盖 server 保存、工具发现、选中导入、MCP binding metadata 和 runtime `callTool` 执行。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 E1 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `20e0852` 验证 MCP 服务优先绑定。
+
+## 2026-06-01 08:59 +08:00
+
+目的：
+- 完成 LLM 协议和 tool loop 上下文契约验证。
+
+变更：
+- 补强 OpenAI-compatible client 测试，确认 non-streaming/streaming 请求体使用顶层 `tools` array，streaming 请求设置 `stream=true`。
+- 验证 API key 只进入 Authorization header，不出现在 provider request body，也不出现在 `llm_calls`、`context_segments`、`audit_logs` trace 数据里。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 D1/D2 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `9bfb330` 验证 LLM 协议与工具循环。
+
+## 2026-06-01 08:56 +08:00
+
+目的：
+- 完成 `docs/01-agent-philosophy.md` / `docs/07-context-and-prompt-contracts.md` 中稳定 Agent 身份不变量的验证。
+
+变更：
+- 新增 prompt section 测试 helper，用于从 system message 中精确抽取基础系统提示词和人格提示词。
+- 补强 `testRuntimeContextAndTools`：验证 main、child、返回 main 三次 LLM call 的基础 system prompt 和 personality prompt 与 persisted agent 配置一致。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 A1 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `f898eb3` 验证工作空间身份稳定。
+
+## 2026-06-01 08:54 +08:00
+
+目的：
+- 完成 workspace handoff、child 直接答复拦截和 `exitWorkspace` 结构校验的文档对齐验证。
+
+变更：
+- 补强 malformed exit 测试：同一 child session 内分别验证 `running` status 和缺少 required arrays 的 `WorkspaceResult` 都会失败。
+- 确认失败退出不会提交 child session，不触发 before/after exit hook，也不会写入 event memory。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 A4/A5/A6 标记为已验证，并记录 handoff 隔离、直接答复 guard、重复退出和 post-exit tool call 证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `161d52b` 补强工作空间退出契约验证。
+
+## 2026-06-01 08:52 +08:00
+
+目的：
+- 完成 `docs/03-memory-model.md` 中 event hook-only 写入和 memory metadata 禁止 raw payload 的验证。
+
+变更：
+- 补强 `testEventMemoryIsHookGenerated`：确认 hook 生成的 event metadata 不包含文档列出的 raw payload key。
+- direct Memory API create 测试逐项覆盖 `messages`、`windowMessages`、`toolCalls`、`argumentsJson`、`resultJson`、`messagesJson`、`responseJson`、`rawJson`、`finalMessages` 等 raw key。
+- 增加 update 路径的嵌套 raw payload 拒绝测试，避免先创建合法 memory 后再通过 metadata patch 塞入原始载荷。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 B3/B4 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `33cc0bf` 补强记忆原始载荷验证。
+
+## 2026-06-01 08:49 +08:00
+
+目的：
+- 对齐 `docs/03-memory-model.md` 中 FTS + relation/version 召回必须按完整 scope 分区判断的要求。
+
+变更：
+- `getMemoryByRelation` 不再允许省略 scope，避免 repository 层退回到全局 `memoryType + relationId` 查询。
+- 更新直接 relation lookup 测试，所有正常查询都显式传入 `userId`、`agentId`、`workspaceId` 分区 scope。
+- 补充无 scope 调用会被拒绝的断言，并保留已有跨 user/workspace/type 同名 relation、FTS 安全 token 和 soft delete 回落验证。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 B5 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `cd94923` 收紧记忆关系查询分区。
+
+## 2026-06-01 08:46 +08:00
+
+目的：
+- 补齐 `docs/04-multi-tenant-isolation.md` 数据删除要求的测试证据和审计记录。
+
+变更：
+- 在 `testDirectMemoryApiUsesPolicyLayer` 中增加 creator 直接删除 shared skill 的验证。
+- 确认删除后的 shared skill 在 direct memory list、runtime recall 和 `readSkill` 中均不可见，同时保留 `deletedBy` 和 `deleteReason`。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 C5 数据删除条目，记录 memory soft delete、conversation deletion、workspace deletion 和 deleted 记录排除证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `f91d162` 补强共享经验删除验证。
+
+## 2026-06-01 08:43 +08:00
+
+目的：
+- 完成 `docs/04-multi-tenant-isolation.md` 中审计日志覆盖和“audit 不注入模型上下文”的当前实现验证。
+
+变更：
+- 补强 `testToolPolicyGates`：确认 tool 调用 audit 可通过 `resourceId` 对应具体 `tool_calls.id`，metadata 包含 `toolName`、`status` 和 `taskId`。
+- 新增 `testAuditLogsStayOutOfModelContext`：预置 audit-only marker，确认 trace audit 可见，但不会出现在 LLM messages 或 context segments 中。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 C4 审计日志覆盖标记为已验证，并记录用户消息、workspace、tool、memory、skill、权限拒绝、creator 操作和 audit/context 隔离证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `578261e` 验证审计日志不入上下文。
+
+## 2026-06-01 08:40 +08:00
+
+目的：
+- 对齐 `docs/04-multi-tenant-isolation.md` 中审计日志至少记录用户消息的要求。
+
+变更：
+- `AgentRuntime.prepare` 在写入 user message 后新增 `user_message_received` audit log。
+- audit metadata 只保存 `conversationId`、`agentId`、`messageId` 和 `contentLength`，不复制用户消息正文，避免把 audit 变成另一份原始内容仓库。
+- 补充 `testRuntimeContextAndTools` 断言，确认 trace 中存在用户消息 audit，且 metadata 不包含用户原文。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 C4 审计日志覆盖条目并记录用户消息 audit 偏差修复。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `87e9aa2` 补记用户消息审计。
+
+## 2026-06-01 08:37 +08:00
+
+目的：
+- 补强 `docs/04-multi-tenant-isolation.md` 对敏感/调试/管理 HTTP 端点显式 actor 的验证，避免只测试 helper 而漏掉路由层。
+
+变更：
+- 将 `src/server/index.ts` 拆出 `createZleapServer` factory，生产入口仍直接启动原 server，测试可注入内存 repository、runtime、memory service 和 MCP executor。
+- 新增 `testSensitiveHttpEndpointsRequireExplicitActor`，用临时 HTTP server 逐端点验证缺失 `actorId` 和非法 `actorRole=system` 都被拒绝。
+- 覆盖端点包括 LLM logs、approval list/resolve、agent update、workspace create/update/delete、direct memory list/create/update/delete、conversation trace 和 conversation deletion。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 C2 HTTP actor 显式要求标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- `dff54da` 补强敏感端点身份边界测试。
+
+## 2026-06-01 08:34 +08:00
+
+目的：
+- 记录 `docs/04-multi-tenant-isolation.md` 中 approval 权限隔离的实现审计结果。
+
+变更：
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 C3 approval 权限标记为已验证。
+- 记录现有证据：workspace entry 高风险审批、tool 高风险审批、普通用户列表隔离、普通用户不能 resolve approval、creator resolve 成功。
+
+验证：
+- 复用本轮 `PATH=/opt/homebrew/bin:$PATH npm test` 通过结果。
+
+Git：
+- `e70e693` 补记审批权限审计。
+
+## 2026-06-01 08:30 +08:00
+
+目的：
+- 对齐 `docs/04-multi-tenant-isolation.md` 中 event memory 必须绑定 `userId + workspaceId + conversationId + taskId` 的多租户要求。
+
+变更：
+- `MemoryService` 的 event final-row policy 新增 `metadata.taskId` 强制校验，缺失时拒绝直接 Memory API 或 runtime memory 写入。
+- conversation-window 自动 event 增加确定的 `taskId: conversation-window:{index}`，避免 hook 自己生成的 process/result event 缺少任务边界。
+- 补充 `testEventMemoryIsHookGenerated` 和 `testDirectMemoryApiUsesPolicyLayer` 断言，覆盖 hook event 带 taskId、direct API event 缺少 taskId 被拒绝、现有手写 event fixture 带完整 trace metadata。
+- 更新 `IMPLEMENTATION_AUDIT.md`，记录 `docs/04` 多租户隔离审计进展和 B1/C1 验证证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+
+Git：
+- `7c71e5e` 补齐事件记忆任务边界。
+
+## 2026-06-01 08:27 +08:00
+
+目的：
+- 修正 docs 审计发现的 `searchMemory` 渐进披露偏差，避免搜索结果默认暴露 event detail 片段。
+
+变更：
+- `projectMemorySearchResult` 统一返回 compact projection：`snippet=summary`、`disclosure=summary_only`、`detailAvailable=true`、`detailInjected=false`、`readTool` 和 `readInstruction`。
+- 移除 event 搜索结果中的 `detailSnippet`，详情必须通过 `readMemory(memoryId)` 读取。
+- 补充 `testSearchMemoryToolUsesPolicyLayer` 断言，确认 searchMemory 不包含 event/impression/skill 的 `detail` 或 `detailSnippet`，并保留正确读取工具提示。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 B2 memory 渐进披露标记为已验证并记录偏差修复证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+
+Git：
+- `c7570bc` 收紧记忆搜索渐进披露。
+
+## 2026-06-01 08:20 +08:00
+
+目的：
+- 启动长期 docs 实现对齐审计，建立可追踪进度，并先补强 workspace 工具边界的测试证据。
+
+变更：
+- 新增 `IMPLEMENTATION_AUDIT.md`，记录文档范围、功能域清单、验证状态、历史记录来源和后续待办。
+- 在 `testRuntimeContextAndTools` 中补充 child workspace manifest 可见性与 provider `toolsJson` 可调用工具边界断言。
+- 在 `testWorkspaceBoundary` 中补充 main workspace 不暴露 `exitWorkspace` 的断言。
+- 检索父级/桌面 markdown 记录，确认当前相关历史记录主要是 `ZLEAP_CHANGELOG.md`。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+
+Git：
+- `14d1a17` 启动文档实现对齐审计。
+
 ## 2026-06-01 07:15 +08:00
 
 目的：

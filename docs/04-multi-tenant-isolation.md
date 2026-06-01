@@ -187,7 +187,7 @@ type WorkspacePermission = {
 例如：
 
 - 普通用户可以进入低风险且已授权的 workspace。
-- CLI workspace 的危险命令需要确认。
+- Dev workspace 的高风险命令工具需要确认。
 - 跨用户 memory 调试查询只能通过 creator 的直接 Memory Web UI/API 管理层进行；runtime 中不存在独立 Memory workspace。
 - Shared skill 管理需要较高权限。
 

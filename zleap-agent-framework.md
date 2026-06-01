@@ -89,7 +89,7 @@ Zleap 的 workspace 切换不是传统意义上的多 agent 或子 agent：
 
 | Workspace | 第一版用途 | 工具来源 |
 | --- | --- | --- |
-| **Dev Workspace** | 文件搜索、代码检查、命令行任务 | 内置 runtime 工具 `searchFiles` + `runCommand`；高风险命令仍需审批 |
+| **Dev Workspace** | 文件搜索、文件读写、代码检查、命令行任务 | 内置 runtime 工具 `searchFiles`、`readFile`、`writeFile`、`runCommand`；高风险命令仍需审批 |
 | **MCP Workspaces** | 外部或用户提供能力 | 绑定本地 stdio / 远程 Streamable HTTP MCP Server 后发现并挂载工具 |
 | **Browser Workspace** | 浏览器验证与页面检查 | 未来方向，不属于第一版内置范围 |
 
@@ -559,7 +559,7 @@ src/
 第一阶段不要一次实现所有理想功能。当前第一版范围：
 
 - 单进程 TypeScript runtime。
-- Main workspace、File workspace、CLI workspace。
+- Main workspace 和统一 Dev workspace；文件搜索、文件读写和命令执行都属于 Dev workspace，首版不拆成 File/CLI workspace。
 - SQLite Raw SQL 持久化。
 - Memory service 的 impression/event/skill MVP。
 - SQLite FTS 召回，Vector 暂不启用。

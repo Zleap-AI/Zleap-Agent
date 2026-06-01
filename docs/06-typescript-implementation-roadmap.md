@@ -364,13 +364,17 @@ Web UI 不应该只是普通聊天框。
 7. 用户可以查看和管理自己的 impression。
 8. 创建者可以查看和管理 workspace 与 shared skill。
 
-当前 Web UI 结构以三栏 + 三 tab 为准：
+当前 Web UI 结构以对话三栏 + 七个顶层页签为准：
 
 ```text
 顶部标签：
   - 对话
   - 工作空间
   - 记忆
+  - 日志
+  - 数据表
+  - 配置
+  - 概念介绍
 
 对话：
   左侧面板：
@@ -381,8 +385,14 @@ Web UI 不应该只是普通聊天框。
   右侧面板：
     - active workspace
     - context stack
-    - LLM logs
-    - tool/memory/audit trace
+    - memory writes for the selected/latest turn
+
+日志：
+  - lifecycle hook/audit logs
+  - tool call logs
+  - approval requests
+  - current-conversation LLM logs
+  - actor-scoped recent LLM logs
 
 工作空间：
   - workspace manifests

@@ -93,6 +93,20 @@ function workspaceStatusLabel(value: WorkspaceSession["status"]): string {
   return value;
 }
 
+function toolCallStatusLabel(value: ToolCallLog["status"]): string {
+  if (value === "completed") return "已完成";
+  if (value === "failed") return "失败";
+  if (value === "blocked") return "已阻塞";
+  if (value === "pending") return "等待中";
+  return value;
+}
+
+function toolCallStatusClass(value: ToolCallLog["status"]): string {
+  if (value === "completed") return "success";
+  if (value === "pending") return "pending";
+  return "danger";
+}
+
 type WorkspaceView = { primary: string; detail: string; involved: string[] };
 
 function describeWorkspaceView(output: AgentRunOutput | null): WorkspaceView {
@@ -1894,7 +1908,7 @@ function ToolLogPanel({ logs }: { logs: ToolCallLog[] }) {
         <details key={log.id}>
           <summary>
             <span>{log.toolName}</span>
-            <small className={`status-pill ${log.status === "completed" ? "success" : "danger"}`}>{log.status === "completed" ? "已完成" : "失败"}</small>
+            <small className={`status-pill ${toolCallStatusClass(log.status)}`}>{toolCallStatusLabel(log.status)}</small>
           </summary>
           <div className="llm-log-meta">
             <span>工作空间：{log.workspaceId}</span>

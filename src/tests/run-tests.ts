@@ -2,6 +2,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import type { AddressInfo } from "node:net";
 import Database from "better-sqlite3";
 import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
@@ -11,6 +12,7 @@ import { MemoryService } from "../core/memory-service";
 import { WorkspaceRuntime } from "../core/workspace-runtime";
 import { McpToolExecutor } from "../core/mcp-executor";
 import { parseActor, parseActorFromSearchParams } from "../server/actor";
+import { createZleapServer } from "../server/index";
 import type { ChatCompletionInput, ChatCompletionOutput, LLMClient, LLMStreamEvent } from "../core/llm-client";
 import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "../core/llm-client";
 import type { ContextSegment, MemoryRow } from "../types";
@@ -34,6 +36,40 @@ class FakeLLMClient implements LLMClient {
     yield "fake ";
     yield "stream";
   }
+}
+
+async function testWebUiMasterPlanContracts() {
+  const webSource = await fs.readFile(path.resolve("src/web/main.tsx"), "utf8");
+  const serverSource = await fs.readFile(path.resolve("src/server/index.ts"), "utf8");
+
+  const expectWeb = (needle: string) => assert.ok(webSource.includes(needle), `Web UI contract missing: ${needle}`);
+  const expectServer = (needle: string) => assert.ok(serverSource.includes(needle), `Server stream contract missing: ${needle}`);
+
+  for (const tab of ["chat", "workspace", "memory", "logs", "tables", "config", "concept"]) {
+    expectWeb(`renderTabPanel("${tab}"`);
+  }
+  expectWeb("aria-hidden={tab !== item}");
+  expectWeb("const [apiKey, setApiKey] = useState(cached.apiKey ?? \"\")");
+  expectWeb("saveCache({ userId, userRole, conversationId, baseUrl, model, apiKey, contextPanelWidth, messages, output, retryMessage, selectedTurnId, selectedLlmCallId, agentDraft: agent ?? undefined })");
+  expectWeb("normalizeCachedMessages(cached.messages)");
+  expectWeb("if (item.failed) return false");
+  expectWeb("setMessages((items) => items.filter((item) => item.runId !== runId && item.id !== userMessageId && item.id !== assistantMessageId))");
+  expectWeb("currentRunControllerRef.current?.abort()");
+  expectWeb("signal: controller.signal");
+  expectWeb("content: item.content || \"已停止运行。\", streaming: false, failed: false, requestText: undefined");
+  expectWeb("await api(`/api/conversations/${encodeURIComponent(conversationId)}`");
+  expectWeb("method: \"DELETE\"");
+  expectWeb("function MarkdownMessage");
+  assert.equal(webSource.includes("dangerouslySetInnerHTML"), false);
+  expectWeb("showRawContextLogs ? \"显示结构化视图\" : \"显示原始日志\"");
+  expectWeb("MemoryEvidencePanel");
+  expectWeb("记忆只保存语义投影");
+  expectWeb("relationId");
+
+  expectServer("const abortController = new AbortController()");
+  expectServer("request.on(\"aborted\", stopRun)");
+  expectServer("response.on(\"close\", stopRun)");
+  expectServer("runtime.runStream({ ...body, abortSignal: abortController.signal })");
 }
 
 function assertFollowUpContextStacksIncludeBaseSegments(trace: ReturnType<Repositories["getTrace"]>): void {
@@ -124,7 +160,14 @@ class MainToFileLLMClient implements LLMClient {
         role: "assistant",
         content: "fake response"
       },
-      raw: { ok: true }
+      raw: {
+        ok: true,
+        usage: {
+          prompt_tokens: 123,
+          completion_tokens: 45,
+          total_tokens: 168
+        }
+      }
     };
   }
 }
@@ -432,6 +475,26 @@ class MainToFileMalformedExitLLMClient implements LLMClient {
           }]
         },
         raw: { step: "bad-exit" }
+      };
+    }
+    if (this.calls === 3) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-incomplete-exit-file",
+            type: "function",
+            function: {
+              name: "exitWorkspace",
+              arguments: JSON.stringify({
+                status: "completed",
+                summary: "This exit is missing required WorkspaceResult arrays."
+              })
+            }
+          }]
+        },
+        raw: { step: "incomplete-exit" }
       };
     }
     return {
@@ -1254,6 +1317,39 @@ function createRepos(): Repositories {
   return new Repositories(db);
 }
 
+async function withTestHttpServer<T>(repos: Repositories, callback: (baseUrl: string) => Promise<T>): Promise<T> {
+  const server = createZleapServer({
+    repos,
+    runtime: new AgentRuntime(repos, new FakeLLMClient()),
+    memoryService: new MemoryService(repos),
+    mcpToolExecutor: new McpToolExecutor(),
+    serveStatic: async () => false
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  try {
+    return await callback(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+  }
+}
+
+async function httpJson(baseUrl: string, pathName: string, init: RequestInit = {}): Promise<{ status: number; body: any }> {
+  const response = await fetch(`${baseUrl}${pathName}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init.headers ?? {})
+    }
+  });
+  return {
+    status: response.status,
+    body: await response.json()
+  };
+}
+
 function metadataOf(memory: { metadataJson: string }): Record<string, any> {
   return JSON.parse(memory.metadataJson) as Record<string, any>;
 }
@@ -1264,6 +1360,35 @@ function metadataSourceIds(memory: { metadataJson: string }, table: string): str
   const ref = refs.find((item: any) => item?.table === table);
   return Array.isArray(ref?.ids) ? ref.ids : [];
 }
+
+function promptSection(content: string, heading: string, nextHeading: string): string {
+  const start = content.indexOf(heading);
+  assert.equal(start >= 0, true, `Missing prompt heading: ${heading}`);
+  const bodyStart = start + heading.length;
+  const end = content.indexOf(nextHeading, bodyStart);
+  assert.equal(end >= 0, true, `Missing next prompt heading: ${nextHeading}`);
+  return content.slice(bodyStart, end).trim();
+}
+
+const RAW_MEMORY_METADATA_PAYLOAD_KEYS = [
+  "messages",
+  "windowMessages",
+  "rawMessages",
+  "toolCalls",
+  "workspaceSessions",
+  "workspaceSession",
+  "llmCalls",
+  "contextSegments",
+  "argumentsJson",
+  "resultJson",
+  "messagesJson",
+  "toolsJson",
+  "responseJson",
+  "rawJson",
+  "finalMessages",
+  "localContextJson",
+  "taskJson"
+];
 
 function updateWorkspaceMemoryPolicy(repos: Repositories, workspaceId: string, patch: Record<string, unknown>) {
   const workspace = repos.getWorkspace(workspaceId);
@@ -1319,6 +1444,46 @@ async function testDatabaseAndMemory() {
   repos.ensureConversation("conv-owner", "default-agent", "user-a");
   repos.addMessage("conv-owner", "user", "owner message");
   const tableList = repos.listDatabaseTables("creator");
+  const tableNames = new Set(tableList.map((table) => table.name));
+  for (const expectedTable of [
+    "agents",
+    "approval_requests",
+    "audit_logs",
+    "context_segments",
+    "conversations",
+    "llm_calls",
+    "llm_profiles",
+    "mcp_servers",
+    "memories",
+    "memories_fts",
+    "messages",
+    "runtime_config",
+    "schema_migrations",
+    "tool_calls",
+    "tool_definitions",
+    "users",
+    "workspace_sessions",
+    "workspace_tools",
+    "workspaces"
+  ]) {
+    assert.equal(tableNames.has(expectedTable), true, `missing database table ${expectedTable}`);
+  }
+  const assertTableColumns = (table: string, columns: string[]) => {
+    const rows = repos.readDatabaseTable(table, { actorRole: "creator", limit: 1, offset: 0 });
+    for (const column of columns) {
+      assert.equal(rows.columns.includes(column), true, `missing database column ${table}.${column}`);
+    }
+  };
+  assertTableColumns("agents", ["id", "systemPrompt", "personalityPrompt", "defaultModel", "defaultBaseUrl"]);
+  assertTableColumns("workspaces", ["id", "capabilitiesJson", "inputKindsJson", "outputKindsJson", "requiresApproval", "memoryPolicyJson", "riskLevel"]);
+  assertTableColumns("mcp_servers", ["id", "workspaceId", "transport", "command", "argsJson", "envJson", "url", "headersJson", "timeoutMs"]);
+  assertTableColumns("tool_definitions", ["id", "name", "workspaceId", "bindingType", "bindingJson", "mcpServerId", "mcpToolName"]);
+  assertTableColumns("tool_calls", ["id", "conversationId", "userId", "workspaceId", "workspaceSessionId", "taskId", "toolName", "argumentsJson", "resultJson", "status"]);
+  assertTableColumns("memories", ["id", "memoryType", "userId", "agentId", "workspaceId", "relationId", "version", "metadataJson", "deletedAt"]);
+  assertTableColumns("runtime_config", ["key", "category", "valueType", "valueJson", "defaultValueJson", "minValue", "maxValue"]);
+  assertTableColumns("llm_calls", ["id", "conversationId", "userId", "providerBaseUrl", "normalizedEndpoint", "messagesJson", "toolsJson", "status", "responseJson", "errorText", "completedAt"]);
+  assertTableColumns("context_segments", ["id", "llmCallId", "conversationId", "segmentType", "content", "sortOrder"]);
+  assertTableColumns("workspace_sessions", ["id", "conversationId", "userId", "workspaceId", "taskId", "status", "taskJson", "resultJson", "localContextJson"]);
   assert.equal(tableList.some((table) => table.name === "messages" && table.rowCount >= 1), true);
   const messageRows = repos.readDatabaseTable("messages", { actorRole: "creator", limit: 10, offset: 0 });
   assert.equal(messageRows.columns.includes("conversationId"), true);
@@ -1449,6 +1614,10 @@ async function testDatabaseAndMemory() {
   assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "other-workspace" })?.id, otherWorkspaceCollision.id);
   assert.equal(repos.getMemoryByRelation("skill", "rel-collision", { workspaceId: "dev" })?.id, otherTypeCollision.id);
   assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "missing-user", workspaceId: "dev" }), undefined);
+  assert.throws(
+    () => (repos.getMemoryByRelation as unknown as (memoryType: string, relationId: string) => unknown)("event", "rel-collision"),
+    /explicit userId\/agentId\/workspaceId scope/
+  );
 
   repos.deleteMemory(latestEvent.id, "creator", "creator", "superseded event cleanup");
   const afterSoftDelete = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
@@ -1460,7 +1629,7 @@ async function testDatabaseAndMemory() {
   assert.equal(Boolean(deletedLatest.deletedAt), true);
   assert.equal(deletedLatest.deletedBy, "creator");
   assert.equal(deletedLatest.deleteReason, "superseded event cleanup");
-  assert.equal(repos.getMemoryByRelation("event", "rel-test")?.id, oldEvent.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-test", { userId: "user-a", workspaceId: "dev" })?.id, oldEvent.id);
 
   for (let index = 0; index < 25; index += 1) {
     repos.createMemory({
@@ -1538,6 +1707,123 @@ async function testHttpActorParsingRequiresExplicitIdentity() {
   });
 }
 
+async function testSensitiveHttpEndpointsRequireExplicitActor() {
+  const repos = createRepos();
+  repos.ensureConversation("conv-http-actor", "default-agent", "http-owner");
+  const approval = repos.createApprovalRequest({
+    userId: "http-owner",
+    conversationId: "conv-http-actor",
+    workspaceId: "dev",
+    toolName: "runCommand",
+    argumentsJson: "{}",
+    reason: "HTTP actor boundary fixture"
+  });
+  const memory = repos.createMemory({
+    memoryType: "impression",
+    userId: "http-owner",
+    title: "HTTP actor memory",
+    summary: "HTTP actor boundary fixture.",
+    detail: "This memory must not be mutated without an explicit actor.",
+    metadataJson: JSON.stringify({ source: "httpActorTest", impressionKind: "userImpression" })
+  }, "creator", "creator");
+  const originalAgentName = repos.getAgent("default-agent").name;
+
+  const workspaceBody = {
+    id: "http-actor-workspace",
+    name: "HTTP Actor Workspace",
+    description: "Should never be created without explicit actor.",
+    capabilitiesJson: "[]",
+    inputKindsJson: "[]",
+    outputKindsJson: "[]",
+    requiresApproval: 0,
+    instructions: "HTTP actor boundary.",
+    toolInstructions: "HTTP actor boundary.",
+    memoryPolicyJson: JSON.stringify({
+      eventRecallEnabled: true,
+      skillRecallEnabled: true,
+      eventWriteEnabled: true,
+      skillWriteEnabled: true,
+      maxEventMemories: 4,
+      maxSkillMemories: 4
+    }),
+    riskLevel: "low",
+    createdBy: "creator",
+    manifest: {
+      id: "http-actor-workspace",
+      name: "HTTP Actor Workspace",
+      description: "Should never be created without explicit actor.",
+      capabilities: [],
+      inputKinds: [],
+      outputKinds: [],
+      riskLevel: "low",
+      requiresApproval: false
+    },
+    memoryPolicy: {
+      eventRecallEnabled: true,
+      skillRecallEnabled: true,
+      eventWriteEnabled: true,
+      skillWriteEnabled: true,
+      maxEventMemories: 4,
+      maxSkillMemories: 4
+    },
+    toolIds: []
+  };
+
+  const requestWithBody = (method: string, body: Record<string, unknown>): RequestInit => ({
+    method,
+    body: JSON.stringify(body)
+  });
+  const sensitiveEndpoints: Array<{
+    label: string;
+    path: string;
+    init: RequestInit;
+    invalidRolePath?: string;
+    invalidRoleBody?: Record<string, unknown>;
+  }> = [
+    { label: "llm logs", path: "/api/llm-calls", init: { method: "GET" } },
+    { label: "approval list", path: "/api/approvals", init: { method: "GET" } },
+    { label: "approval resolve", path: `/api/approvals/${approval.id}/resolve`, init: requestWithBody("POST", { status: "approved" }), invalidRoleBody: { status: "approved" } },
+    { label: "agent update", path: "/api/agents/default-agent", init: requestWithBody("PUT", { name: "Missing actor agent" }), invalidRoleBody: { name: "Invalid actor agent" } },
+    { label: "workspace create", path: "/api/workspaces", init: requestWithBody("POST", workspaceBody), invalidRoleBody: workspaceBody },
+    { label: "workspace update", path: "/api/workspaces/dev", init: requestWithBody("PUT", { name: "Missing actor workspace" }), invalidRoleBody: { name: "Invalid actor workspace" } },
+    { label: "workspace delete", path: "/api/workspaces/dev", init: requestWithBody("DELETE", { deleteReason: "missing actor" }), invalidRoleBody: { deleteReason: "invalid actor" } },
+    { label: "memory list", path: "/api/memories", init: { method: "GET" } },
+    { label: "memory create", path: "/api/memories", init: requestWithBody("POST", { memoryType: "impression", userId: "http-owner", title: "Missing actor create", summary: "No actor.", detail: "No actor." }), invalidRoleBody: { memoryType: "impression", userId: "http-owner", title: "Invalid actor create", summary: "Bad actor.", detail: "Bad actor." } },
+    { label: "memory update", path: `/api/memories/${memory.id}`, init: requestWithBody("PUT", { summary: "Missing actor mutation" }), invalidRoleBody: { summary: "Invalid actor mutation" } },
+    { label: "memory delete", path: `/api/memories/${memory.id}`, init: requestWithBody("DELETE", { deleteReason: "missing actor" }), invalidRoleBody: { deleteReason: "invalid actor" } },
+    { label: "conversation trace", path: "/api/conversations/conv-http-actor/trace", init: { method: "GET" } },
+    { label: "conversation delete", path: "/api/conversations/conv-http-actor", init: requestWithBody("DELETE", { deleteReason: "missing actor" }), invalidRoleBody: { deleteReason: "invalid actor" } }
+  ];
+
+  await withTestHttpServer(repos, async (baseUrl) => {
+    for (const endpoint of sensitiveEndpoints) {
+      const missing = await httpJson(baseUrl, endpoint.path, endpoint.init);
+      assert.notEqual(missing.status, 200, endpoint.label);
+      assert.match(String(missing.body.error), /actorId/, endpoint.label);
+
+      const invalidRolePath = endpoint.init.method === "GET"
+        ? `${endpoint.path}${endpoint.path.includes("?") ? "&" : "?"}actorId=http-owner&actorRole=system`
+        : endpoint.path;
+      const invalidRoleInit = endpoint.init.method === "GET"
+        ? endpoint.init
+        : requestWithBody(String(endpoint.init.method), {
+          ...(endpoint.invalidRoleBody ?? {}),
+          actorId: "http-owner",
+          actorRole: "system"
+        });
+      const invalid = await httpJson(baseUrl, endpoint.invalidRolePath ?? invalidRolePath, invalidRoleInit);
+      assert.notEqual(invalid.status, 200, endpoint.label);
+      assert.match(String(invalid.body.error), /actorRole/, endpoint.label);
+    }
+  });
+
+  assert.equal(repos.getAgent("default-agent").name, originalAgentName);
+  assert.throws(() => repos.getWorkspace("http-actor-workspace"), /Workspace not found/);
+  assert.equal(repos.getMemory(memory.id).summary, "HTTP actor boundary fixture.");
+  assert.equal(repos.getApprovalRequest(approval.id).status, "pending");
+  assert.equal(Boolean(repos.getConversation("conv-http-actor")), true);
+}
+
 async function testTraceAndToolLogsAreUserScoped() {
   const repos = createRepos();
   repos.ensureConversation("conv-trace-owner", "default-agent", "trace-owner");
@@ -1550,9 +1836,26 @@ async function testTraceAndToolLogsAreUserScoped() {
     resultJson: "{}",
     status: "completed"
   });
+  const pendingToolCall = repos.saveToolCall({
+    conversationId: "conv-trace-owner",
+    userId: "trace-owner",
+    workspaceId: "main",
+    toolName: "askUser",
+    argumentsJson: JSON.stringify({ question: "Need input?" }),
+    resultJson: "{}",
+    status: "pending"
+  });
+  assert.equal(repos.getTrace("conv-trace-owner", "trace-owner", "user").toolCalls.some((call) => call.id === pendingToolCall.id && call.status === "pending"), true);
+  const completedPendingToolCall = repos.updateToolCallResult(pendingToolCall.id, {
+    resultJson: JSON.stringify({ ok: true }),
+    status: "completed"
+  });
+  assert.equal(completedPendingToolCall.status, "completed");
+  assert.equal(completedPendingToolCall.resultJson.includes("\"ok\":true"), true);
 
   const ownerTrace = repos.getTrace("conv-trace-owner", "trace-owner", "user");
   assert.equal(ownerTrace.toolCalls.some((call) => call.id === toolCall.id && call.userId === "trace-owner"), true);
+  assert.equal(ownerTrace.toolCalls.some((call) => call.id === pendingToolCall.id && call.status === "completed"), true);
   assert.throws(() => (repos.getTrace as unknown as (conversationId: string) => unknown)("conv-trace-owner"), /explicit actor identity/);
   assert.throws(() => repos.getTrace("conv-trace-owner", "trace-intruder", "user"), /different user/);
   assert.equal(repos.listAuditLogs({ limit: 20 }).some((log) => log.action === "trace_read_rejected" && log.resourceId === "conv-trace-owner"), true);
@@ -1750,6 +2053,7 @@ async function testRuntimeContextAndTools() {
   const firstInput = fake.inputs[0];
   const childInput = fake.inputs[1];
   const lastInput = fake.inputs.at(-1);
+  const agent = repos.getAgent("default-agent");
   assert.equal(firstInput?.baseUrl, "https://api.302ai.com");
   assert.equal(normalizeChatCompletionsEndpoint(firstInput!.baseUrl), "https://api.302ai.com/v1/chat/completions");
   assert.equal(firstInput?.messages.at(-1)?.role, "user");
@@ -1759,6 +2063,14 @@ async function testRuntimeContextAndTools() {
   assert.equal(firstLocalConversationPayload.currentTask.workspaceId, "main");
   assert.equal(firstLocalConversationPayload.messages.some((message) => message.content.includes("old global user chat unrelated to file workspace")), true);
   const systemMessage = lastInput?.messages[0]?.content ?? "";
+  const firstSystemMessage = firstInput?.messages[0]?.content ?? "";
+  const childSystemMessage = childInput?.messages[0]?.content ?? "";
+  assert.equal(promptSection(firstSystemMessage, "## 基础系统提示词", "## 人格提示词"), agent.systemPrompt);
+  assert.equal(promptSection(childSystemMessage, "## 基础系统提示词", "## 人格提示词"), agent.systemPrompt);
+  assert.equal(promptSection(systemMessage, "## 基础系统提示词", "## 人格提示词"), agent.systemPrompt);
+  assert.equal(promptSection(firstSystemMessage, "## 人格提示词", "## 内部运行策略"), agent.personalityPrompt);
+  assert.equal(promptSection(childSystemMessage, "## 人格提示词", "## 内部运行策略"), agent.personalityPrompt);
+  assert.equal(promptSection(systemMessage, "## 人格提示词", "## 内部运行策略"), agent.personalityPrompt);
   assert.equal(systemMessage.includes("内部运行策略"), true);
   assert.equal(systemMessage.includes("记忆写入协议"), true);
   assert.equal(systemMessage.includes("writeUserImpression"), true);
@@ -1791,7 +2103,6 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("workspace 是内部能力边界"), true);
   assert.equal(systemMessage.includes("产物责任边界"), true);
   assert.equal(systemMessage.includes("不能因为知道用户最终想要什么，就在错误 workspace 中生成文件、网页、报告或其他下游产物"), true);
-  const childSystemMessage = childInput?.messages[0]?.content ?? "";
   assert.equal(childSystemMessage.includes("搜索类 workspace 搜索完就返回搜索结果、来源、可信度和建议"), true);
   assert.equal(childSystemMessage.includes("不要伪造当前工具没有真实产出的 artifacts"), true);
   assert.equal(systemMessage.includes("enterWorkspace"), true);
@@ -1801,7 +2112,6 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("\"toolCount\""), false);
   assert.equal(systemMessage.includes("\"availableWorkspaces\""), false);
   assert.equal(firstInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.workspace"), true);
-  const agent = repos.getAgent("default-agent");
   assert.equal(/workspace|context|runtime/i.test(agent.personalityPrompt), false);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "enterWorkspace"), true);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "searchFiles"), false);
@@ -1819,7 +2129,30 @@ async function testRuntimeContextAndTools() {
   assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), false);
   const childWorkspaceToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
   assert.equal(childWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
+  const childWorkspacePayload = JSON.parse(childWorkspaceToolMessage?.content ?? "{}") as {
+    currentWorkspace?: { id?: string };
+    availableWorkspaces?: Array<{ id?: string }>;
+  };
+  assert.equal(childWorkspacePayload.currentWorkspace?.id, "dev");
+  assert.equal(childWorkspacePayload.availableWorkspaces?.some((workspace) => workspace.id === "main"), true);
+  assert.equal(childWorkspacePayload.availableWorkspaces?.some((workspace) => workspace.id === "dev"), true);
   assert.equal(childInput?.tools.some((tool) => tool.name === "enterWorkspace"), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "askUser"), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "finishTask"), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "exitWorkspace"), true);
+  const childTraceForTools = repos.getTrace("conv-test", "creator", "creator");
+  const childWorkspaceSegment = childTraceForTools.contextSegments.find((segment) => {
+    if (segment.segmentType !== "workspace") return false;
+    const payload = JSON.parse(segment.content) as { currentWorkspace?: { id?: string } };
+    return payload.currentWorkspace?.id === "dev";
+  });
+  assert.equal(Boolean(childWorkspaceSegment), true);
+  const childLlmCall = childTraceForTools.llmCalls.find((call) => call.id === childWorkspaceSegment?.llmCallId);
+  const childPersistedTools = JSON.parse(childLlmCall?.toolsJson ?? "[]") as Array<{ name?: string }>;
+  assert.equal(childPersistedTools.some((tool) => tool.name === "enterWorkspace"), false);
+  assert.equal(childPersistedTools.some((tool) => tool.name === "askUser"), false);
+  assert.equal(childPersistedTools.some((tool) => tool.name === "finishTask"), false);
+  assert.equal(childPersistedTools.some((tool) => tool.name === "exitWorkspace"), true);
   const lastWorkspaceToolMessage = lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
   assert.equal(lastWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
   assert.equal(childWorkspaceToolMessage?.content?.includes("memoryPolicy"), true);
@@ -1883,6 +2216,11 @@ async function testRuntimeContextAndTools() {
   assert.equal(trace.llmCalls.every((call) => call.status === "completed"), true);
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"plannedWorkspace\":\"dev\"")), true);
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("\"ok\":true")), true);
+  assert.equal(JSON.stringify({
+    llmCalls: trace.llmCalls,
+    contextSegments: trace.contextSegments,
+    auditLogs: trace.auditLogs
+  }).includes("test-key"), false);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tool_result" && segment.content.includes("enterWorkspace")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"dev\"") && segment.content.includes("\"name\": \"searchFiles\"")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"main\"") && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
@@ -1894,11 +2232,24 @@ async function testRuntimeContextAndTools() {
   assert.equal(fileSession?.localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
   assert.equal(fileSession?.result.observations.some((item) => item.includes("direct response")), true);
   const actions = trace.auditLogs.map((log) => log.action);
+  const userMessageAudit = trace.auditLogs.find((log) => log.action === "user_message_received");
+  assert.ok(userMessageAudit);
+  assert.equal(userMessageAudit.actorId, "user");
+  assert.equal(userMessageAudit.resourceKind, "message");
+  assert.equal(userMessageAudit.conversationId, "conv-test");
+  assert.equal(userMessageAudit.metadataJson.includes("search files for runtime"), false);
+  assert.equal(JSON.parse(userMessageAudit.metadataJson).contentLength, "search files for runtime".length);
   assert.equal(actions.includes("hook.beforeAgentTurn"), true);
   assert.equal(actions.includes("hook.afterAgentTurn"), true);
   assert.equal(actions.includes("hook.beforeWorkspaceEnter"), true);
   assert.equal(actions.includes("workspace_exit_required"), true);
   assert.equal(actions.includes("hook.afterWorkspaceExit"), true);
+  const afterAgentTurnAudit = trace.auditLogs.find((log) => log.action === "hook.afterAgentTurn");
+  assert.ok(afterAgentTurnAudit);
+  const afterAgentTurnMetadata = JSON.parse(afterAgentTurnAudit.metadataJson) as { tokenUsage?: Record<string, unknown> };
+  assert.equal(afterAgentTurnMetadata.tokenUsage?.prompt_tokens, 123);
+  assert.equal(afterAgentTurnMetadata.tokenUsage?.completion_tokens, 45);
+  assert.equal(afterAgentTurnMetadata.tokenUsage?.total_tokens, 168);
 }
 
 async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
@@ -2011,6 +2362,36 @@ async function testMemoryRecallAuditLogsZeroHits() {
   assert.equal(metadata.rawHitCount, 0);
   assert.equal(metadata.injectedHitCount, 0);
   assert.deepEqual(metadata.injectedPartitionCounts, { impression: 0, event: 0, resultEvent: 0, processEvent: 0, skill: 0 });
+}
+
+async function testAuditLogsStayOutOfModelContext() {
+  const repos = createRepos();
+  repos.ensureConversation("conv-audit-not-context", "default-agent", "audit-context-user");
+  repos.audit("audit-context-user", "system", "audit_only_secret_marker", "conversation", "conv-audit-not-context", {
+    conversationId: "conv-audit-not-context",
+    workspaceId: "main",
+    secretMarker: "AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT"
+  });
+
+  const fake = new FakeLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "audit-context-user",
+    userRole: "creator",
+    conversationId: "conv-audit-not-context",
+    message: "plain audit boundary request",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+
+  const trace = repos.getTrace("conv-audit-not-context", "creator", "creator");
+  assert.equal(trace.auditLogs.some((log) => log.action === "audit_only_secret_marker"), true);
+  assert.equal(JSON.stringify(fake.lastInput?.messages ?? []).includes("AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT"), false);
+  assert.equal(trace.contextSegments.some((segment) => segment.content.includes("AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT")), false);
 }
 
 async function testAttentionBudgetTrimsHistoryButKeepsJson() {
@@ -2443,9 +2824,11 @@ async function testMalformedWorkspaceExitDoesNotCommitSession() {
   assert.equal(output.activeWorkspaceId, "dev");
   assert.equal(output.assistantMessage.length > 0, true);
   const trace = repos.getTrace("conv-workspace-bad-exit", "creator", "creator");
-  const exitCall = trace.toolCalls.find((call) => call.toolName === "exitWorkspace");
-  assert.equal(exitCall?.status, "failed");
-  assert.equal(exitCall?.resultJson.includes("WorkspaceResult.status"), true);
+  const exitCalls = trace.toolCalls.filter((call) => call.toolName === "exitWorkspace");
+  assert.equal(exitCalls.length, 2);
+  assert.equal(exitCalls.every((call) => call.status === "failed"), true);
+  assert.equal(exitCalls.some((call) => call.resultJson.includes("WorkspaceResult.status")), true);
+  assert.equal(exitCalls.some((call) => call.resultJson.includes("WorkspaceResult.artifacts")), true);
   const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.completedAt, undefined);
   assert.equal(fileSession?.status, "running");
@@ -2764,10 +3147,12 @@ async function testEventMemoryIsHookGenerated() {
   assert.equal(events.length >= 2, true);
   assert.equal(events.every((memory) => metadataOf(memory).source === "afterConversationWindow"), true);
   assert.equal(events.every((memory) => metadataOf(memory).conversationId === "conv-event-hook-contract"), true);
+  assert.equal(events.every((memory) => typeof metadataOf(memory).taskId === "string" && metadataOf(memory).taskId.startsWith("conversation-window:")), true);
   assert.equal(events.every((memory) => Array.isArray(metadataOf(memory).sourceRefs)), true);
   assert.equal(events.every((memory) => JSON.stringify(metadataOf(memory)).includes("\"table\":\"messages\"")), true);
-  assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), "windowMessages")), true);
-  assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), "toolCalls")), true);
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), key)), true);
+  }
   const processEvents = events.filter((memory) => metadataOf(memory).eventKind === "process");
   assert.equal(processEvents.length > 0, true);
   assert.equal(processEvents.every((memory) => memory.detail.length <= 900), true);
@@ -2801,21 +3186,40 @@ async function testEventMemoryIsHookGenerated() {
   assert.equal(repos.listMemories({ memoryType: "event", userId: "event-contract-user", workspaceId: "main" }).some((memory) => memory.title === "Tool event"), false);
 
   const memoryService = new MemoryService(repos);
-  assert.throws(() => memoryService.createMemoryRecord({
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.throws(() => memoryService.createMemoryRecord({
+      actorId: "creator",
+      actorRole: "creator",
+      memory: {
+        memoryType: "event",
+        userId: "event-contract-user",
+        workspaceId: "main",
+        title: `Raw payload event ${key}`,
+        summary: "Should be rejected.",
+        detail: "Memory metadata should reference raw tables instead of copying raw data.",
+        metadataJson: JSON.stringify({
+          source: "manualMemoryApi",
+          conversationId: "conv-event-hook-contract",
+          taskId: `task-manual-raw-payload-${key}`,
+          eventKind: "manual",
+          [key]: [{ id: "raw-source-payload" }]
+        })
+      }
+    }), /raw source payloads/);
+  }
+  assert.throws(() => memoryService.updateMemoryRecord({
     actorId: "creator",
     actorRole: "creator",
-    memory: {
-      memoryType: "event",
-      userId: "event-contract-user",
-      workspaceId: "main",
-      title: "Raw payload event",
-      summary: "Should be rejected.",
-      detail: "Memory metadata should reference raw tables instead of copying raw data.",
+    memoryId: events[0]!.id,
+    patch: {
       metadataJson: JSON.stringify({
         source: "manualMemoryApi",
         conversationId: "conv-event-hook-contract",
+        taskId: "task-update-raw-payload",
         eventKind: "manual",
-        windowMessages: [{ role: "user", content: "raw" }]
+        nested: {
+          responseJson: { raw: true }
+        }
       })
     }
   }), /raw source payloads/);
@@ -2870,6 +3274,38 @@ async function testSkillMemoryToolQualityGate() {
   assert.equal(metadata.taskId, validFileSession?.taskId);
   const validTrace = repos.getTrace("conv-skill-quality-valid", "creator", "creator");
   assert.equal(validTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "completed"), true);
+
+  const forgedTraceSkillWriter = new MainToWorkspaceToolRequestLLMClient("dev", "writeSkillMemory", {
+    title: "Forged trace skill",
+    summary: "The model must not choose runtime trace ids for shared skill evidence.",
+    detail: "Runtime should reject code-bound trace fields in tool arguments.",
+    desensitized: true,
+    procedure: ["Reject model-supplied active workspace, session, or task trace identifiers."],
+    appliesWhen: ["A model attempts to provide runtime trace ids while writing a skill."],
+    avoidWhen: ["Trace ids are supplied by runtime code-bound state."],
+    evidenceEventIds: [event.id],
+    activeWorkspaceId: "main",
+    workspaceSessionId: "forged-session",
+    taskId: "forged-task",
+    confidence: 0.82
+  });
+  const forgedTraceRuntime = new AgentRuntime(repos, forgedTraceSkillWriter);
+  await forgedTraceRuntime.run({
+    agentId: "default-agent",
+    userId: "skill-quality-user",
+    userRole: "creator",
+    conversationId: "conv-skill-quality-forged-trace",
+    message: "memory write forged trace skill",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(forgedTraceSkillWriter.lastToolResult.includes("activeWorkspaceId"), true);
+  assert.equal(repos.listMemories({ memoryType: "skill", workspaceId: "dev" }).some((memory) => memory.title === "Forged trace skill"), false);
+  const forgedTrace = repos.getTrace("conv-skill-quality-forged-trace", "creator", "creator");
+  assert.equal(forgedTrace.toolCalls.some((call) => call.toolName === "writeSkillMemory" && call.status === "failed" && call.resultJson.includes("Runtime memory scope is code-bound")), true);
 
   const privateSkillWriter = new MainToWorkspaceToolRequestLLMClient("dev", "writeSkillMemory", {
     title: "Private path skill",
@@ -3126,7 +3562,11 @@ async function testConversationWindowEventExtractionUsesAbsoluteWindows() {
   });
 
   assert.equal(writes.some((memory) => memory.relationId === "event:long-window-user:main:conv-long-memory-window:window:26:result"), true);
-  const resultEvent = repos.getMemoryByRelation("event", "event:long-window-user:main:conv-long-memory-window:window:26:result");
+  const resultEvent = repos.getMemoryByRelation(
+    "event",
+    "event:long-window-user:main:conv-long-memory-window:window:26:result",
+    { userId: "long-window-user", workspaceId: "main" }
+  );
   assert.equal(Boolean(resultEvent), true);
   assert.equal(resultEvent!.summary.includes("long-window assistant 520"), true);
   assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
@@ -3655,8 +4095,18 @@ async function testToolPolicyGates() {
   assert.equal(wrongWorkspaceTrace.toolCalls.length, 1);
   assert.equal(wrongWorkspaceTrace.toolCalls[0].toolName, "runCommand");
   assert.equal(wrongWorkspaceTrace.toolCalls[0].status, "blocked");
-  assert.equal(wrongWorkspaceTrace.auditLogs.some((log) => log.action === "hook.beforeToolCall"), true);
-  assert.equal(wrongWorkspaceTrace.auditLogs.some((log) => log.action === "hook.afterToolCall"), true);
+  const pendingToolAudit = wrongWorkspaceTrace.auditLogs.find((log) => log.action === "hook.beforeToolCall" && log.resourceId === wrongWorkspaceTrace.toolCalls[0].id);
+  assert.ok(pendingToolAudit);
+  const pendingToolAuditMetadata = JSON.parse(pendingToolAudit.metadataJson) as { toolName?: string; status?: string; toolCallId?: string };
+  assert.equal(pendingToolAuditMetadata.toolName, "runCommand");
+  assert.equal(pendingToolAuditMetadata.status, "pending");
+  assert.equal(pendingToolAuditMetadata.toolCallId, wrongWorkspaceTrace.toolCalls[0].id);
+  const blockedToolAudit = wrongWorkspaceTrace.auditLogs.find((log) => log.action === "hook.afterToolCall" && log.resourceId === wrongWorkspaceTrace.toolCalls[0].id);
+  assert.ok(blockedToolAudit);
+  const blockedToolAuditMetadata = JSON.parse(blockedToolAudit.metadataJson) as { toolName?: string; status?: string; taskId?: string };
+  assert.equal(blockedToolAuditMetadata.toolName, "runCommand");
+  assert.equal(blockedToolAuditMetadata.status, "blocked");
+  assert.equal(typeof blockedToolAuditMetadata.taskId, "string");
 
   const highRisk = new MainToCliToolRequestLLMClient("runCommand", { command: "npm test" });
   updateWorkspaceGate(repos, "dev", { requiresApproval: 0, riskLevel: "medium" });
@@ -3794,7 +4244,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Own direct event",
       summary: "The current user inspected files.",
       detail: "This record should be visible to the same user.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", taskId: "task-direct-own-event", eventKind: "manual" })
     }
   });
   assert.throws(() => service.createMemoryRecord({
@@ -3807,7 +4257,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Forged trace event",
       summary: "This event tries to attach to another user's conversation trace.",
       detail: "The write should be rejected before audit pollution.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-victim-memory-metadata", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-victim-memory-metadata", taskId: "task-forged-trace-event", eventKind: "manual" })
     }
   }), /different user|writing actor/);
   const victimTrace = repos.getTrace("conv-victim-memory-metadata", "victim-api-user", "user");
@@ -3847,7 +4297,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Other direct event",
       summary: "Another user inspected files.",
       detail: "This record must not be visible to ordinary-api-user.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-other-direct-event", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-other-direct-event", taskId: "task-other-direct-event", eventKind: "manual" })
     }
   });
   assert.throws(() => service.updateMemoryRecord({
@@ -3962,7 +4412,7 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       title: "Own CLI event",
       summary: "The current user ran a CLI check.",
       detail: "This event belongs to a different workspace than the file skill.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "manual" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", taskId: "task-direct-cli-event", eventKind: "manual" })
     }
   });
   const evidenceSkillMetadata = (eventIds: string[], conversationId = "conv-direct-skill-evidence") => JSON.stringify({
@@ -4073,10 +4523,23 @@ async function testDirectMemoryApiUsesPolicyLayer() {
       memoryType: "event",
       userId: "ordinary-api-user",
       workspaceId: "dev",
+      title: "Event without task id",
+      summary: "Event memory must include task evidence.",
+      detail: "This should be rejected because event metadata needs a task id.",
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "manual" })
+    }
+  }), /metadata\.taskId/);
+  assert.throws(() => service.createMemoryRecord({
+    actorId: "ordinary-api-user",
+    actorRole: "user",
+    memory: {
+      memoryType: "event",
+      userId: "ordinary-api-user",
+      workspaceId: "dev",
       title: "Event with bad kind",
       summary: "Event memory must include a recognized kind.",
       detail: "This should be rejected because eventKind is not part of the event contract.",
-      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", eventKind: "note" })
+      metadataJson: JSON.stringify({ source: "directApiTest", conversationId: "conv-direct-skill-evidence", taskId: "task-direct-bad-kind", eventKind: "note" })
     }
   }), /metadata\.eventKind/);
   assert.throws(() => service.createMemoryRecord({
@@ -4177,6 +4640,39 @@ async function testDirectMemoryApiUsesPolicyLayer() {
   });
   assert.equal(creatorList.some((memory) => memory.id === otherEvent.id), true);
   assert.equal(creatorList.some((memory) => memory.id === agentSelf.id), true);
+
+  service.deleteMemoryRecord({
+    actorId: "creator",
+    actorRole: "creator",
+    memoryId: evidenceBackedSkill.id,
+    deleteReason: "retire shared skill fixture"
+  });
+  assert.equal(repos.getMemoryIncludingDeleted(evidenceBackedSkill.id).deletedBy, "creator");
+  assert.equal(repos.getMemoryIncludingDeleted(evidenceBackedSkill.id).deleteReason, "retire shared skill fixture");
+  assert.equal(service.listMemoryRecords({
+    actorId: "creator",
+    actorRole: "creator",
+    filters: { memoryType: "skill", workspaceId: "dev" }
+  }).some((memory) => memory.id === evidenceBackedSkill.id), false);
+  assert.equal(repos.recallMemories({
+    userId: "ordinary-api-user",
+    workspaceId: "dev",
+    query: "Evidence-backed direct skill"
+  }).some((memory) => memory.id === evidenceBackedSkill.id), false);
+  const deletedSkillRead = service.executeMemoryTool({
+    run: {
+      agentId: "default-agent",
+      userId: "ordinary-api-user",
+      userRole: "user",
+      conversationId: "conv-direct-skill-evidence",
+      message: "read deleted skill"
+    },
+    activeWorkspaceId: "dev",
+    toolName: "readSkill",
+    argumentsJson: JSON.stringify({ skillId: evidenceBackedSkill.id })
+  });
+  assert.equal(deletedSkillRead.ok, false);
+  assert.equal(JSON.stringify(deletedSkillRead.result).includes("not found"), true);
 }
 
 async function testSearchMemoryToolUsesPolicyLayer() {
@@ -4271,6 +4767,21 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   assert.equal(userMemories.some((memory) => memory.id === otherEvent.id), false);
   assert.equal(userMemories.some((memory) => memory.id === agentSelf.id), false);
   assert.equal(JSON.stringify(userMemories).includes("stable identity detail"), false);
+  assert.equal(JSON.stringify(userMemories).includes("Visible to the owning user."), false);
+  const ownEventProjection = userMemories.find((memory) => memory.id === ownEvent.id) as unknown as Record<string, unknown>;
+  const ownImpressionProjection = userMemories.find((memory) => memory.id === ownImpression.id) as unknown as Record<string, unknown>;
+  const sharedSkillProjection = userMemories.find((memory) => memory.id === sharedSkill.id) as unknown as Record<string, unknown>;
+  for (const projection of [ownEventProjection, ownImpressionProjection, sharedSkillProjection]) {
+    assert.equal(projection.disclosure, "summary_only");
+    assert.equal(projection.detailAvailable, true);
+    assert.equal(projection.detailInjected, false);
+    assert.equal(Boolean(projection.detail), false);
+    assert.equal(Boolean(projection.detailSnippet), false);
+  }
+  assert.equal(ownEventProjection.readTool, "readMemory");
+  assert.equal(ownImpressionProjection.readTool, "readMemory");
+  assert.equal(sharedSkillProjection.readTool, "readSkill");
+  assert.equal(String(ownEventProjection.readInstruction ?? "").includes("readMemory"), true);
   assert.equal(JSON.stringify(userMemories).includes("readMemory"), true);
   const dottedUserResult = service.executeMemoryTool({
     run: {
@@ -4458,6 +4969,8 @@ async function testToolBindingsAndMcpReadiness() {
   for (const field of ["status", "summary", "artifacts", "observations", "errors", "suggestedNextSteps"]) {
     assert.equal(exitWorkspaceSchema.required?.includes(field), true);
   }
+  const searchFilesSchema = JSON.parse(searchFiles?.parametersJson ?? "{}") as { required?: string[] };
+  assert.equal(searchFilesSchema.required?.includes("reason"), true);
   const searchMemorySchema = JSON.parse(searchMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
   assert.equal(searchMemorySchema.required?.includes("reason"), true);
   assert.equal(Boolean(searchMemorySchema.properties?.memoryType), true);
@@ -4626,6 +5139,43 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(echoClient.lastToolResult.includes("echo:hello"), true);
   const echoTrace = repos.getTrace("conv-tool-binding-mcp-echo", "creator", "creator");
   assert.equal(echoTrace.toolCalls.some((call) => call.toolName === "echo" && call.status === "completed"), true);
+
+  const placeholderTool = repos.upsertWorkspaceTool({
+    id: "tool-placeholder-probe",
+    workspaceId: "dev",
+    name: "placeholderProbe",
+    description: "Registered but intentionally unbound test tool.",
+    parametersJson: JSON.stringify({
+      type: "object",
+      properties: {
+        reason: { type: "string" }
+      },
+      required: ["reason"]
+    }),
+    riskLevel: "low",
+    bindingType: "placeholder",
+    bindingJson: "{}",
+    actorId: "creator",
+    actorRole: "creator"
+  });
+  assert.equal(placeholderTool.bindingType, "placeholder");
+  const placeholderClient = new MainToWorkspaceToolRequestLLMClient("dev", "placeholderProbe", { reason: "验证 placeholder 不会静默执行" });
+  const placeholderRuntime = new AgentRuntime(repos, placeholderClient);
+  await placeholderRuntime.run({
+    agentId: "default-agent",
+    userId: "tool-binding-user",
+    userRole: "creator",
+    conversationId: "conv-tool-binding-placeholder",
+    message: "call a placeholder tool",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(placeholderClient.lastToolResult.includes("not bound to a runtime or MCP executor"), true);
+  const placeholderTrace = repos.getTrace("conv-tool-binding-placeholder", "creator", "creator");
+  assert.equal(placeholderTrace.toolCalls.some((call) => call.toolName === "placeholderProbe" && call.status === "failed"), true);
 
   const enterWorkspace = new SingleToolRequestLLMClient("enterWorkspace", { workspaceId: "dev", objective: "search runtime files" });
   const enterRuntime = new AgentRuntime(repos, enterWorkspace);
@@ -5081,6 +5631,7 @@ async function testWorkspaceBoundary() {
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "memory"), false);
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "file" || workspace.id === "cli"), false);
   assert.equal(["askUser", "enterWorkspace", "finishTask"].every((tool) => mainTools.includes(tool)), true);
+  assert.equal(mainTools.includes("exitWorkspace"), false);
   assert.equal(memoryTools.every((tool) => mainTools.includes(tool)), true);
   assert.equal(memoryTools.every((tool) => devTools.includes(tool)), true);
   assert.equal(["writeEventMemory", "updateMemory", "deleteMemory"].some((tool) => mainTools.includes(tool) || devTools.includes(tool)), false);
@@ -5218,13 +5769,33 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
     apiKey: "test-key",
     model: "gpt-5-mini",
     messages: [{ role: "user", content: "hello" }],
-    tools: []
+    tools: [{
+      id: "tool-test-openai",
+      name: "testTool",
+      description: "Test OpenAI-compatible tool schema.",
+      parametersJson: JSON.stringify({
+        type: "object",
+        properties: {
+          reason: { type: "string" }
+        },
+        required: ["reason"]
+      }),
+      bindingType: "runtime",
+      bindingJson: "{}",
+      riskLevel: "low",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }]
   };
 
   try {
     let completeAttempts = 0;
-    globalThis.fetch = (async () => {
+    let completeRequestBody: any;
+    let completeAuthorization = "";
+    globalThis.fetch = (async (_url: any, init?: any) => {
       completeAttempts += 1;
+      completeRequestBody = JSON.parse(String(init?.body ?? "{}"));
+      completeAuthorization = String(init?.headers?.Authorization ?? "");
       if (completeAttempts < 5) {
         return new Response(JSON.stringify({ error: { message: "temporary overload" } }), { status: 500 });
       }
@@ -5235,10 +5806,18 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
     const completeOutput = await client.complete(input);
     assert.equal(completeAttempts, 5);
     assert.equal(completeOutput.message.content, "retried ok");
+    assert.equal(completeAuthorization, "Bearer test-key");
+    assert.equal(completeRequestBody.apiKey, undefined);
+    assert.equal(completeRequestBody.stream, undefined);
+    assert.equal(completeRequestBody.tools[0].type, "function");
+    assert.equal(completeRequestBody.tools[0].function.name, "testTool");
+    assert.equal(completeRequestBody.tools[0].function.parameters.required[0], "reason");
 
     let streamAttempts = 0;
-    globalThis.fetch = (async () => {
+    let streamRequestBody: any;
+    globalThis.fetch = (async (_url: any, init?: any) => {
       streamAttempts += 1;
+      streamRequestBody = JSON.parse(String(init?.body ?? "{}"));
       if (streamAttempts === 1) {
         return new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 });
       }
@@ -5253,6 +5832,9 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
     }
     assert.equal(streamAttempts, 2);
     assert.equal(streamed, "ok");
+    assert.equal(streamRequestBody.stream, true);
+    assert.equal(streamRequestBody.apiKey, undefined);
+    assert.equal(streamRequestBody.tools[0].function.name, "testTool");
 
     globalThis.fetch = (async () => {
       const body = gzipSync(Buffer.from(JSON.stringify({ error: { message: "bad request detail" } }), "utf8"));
@@ -5295,16 +5877,19 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
 }
 
 async function main() {
+  await testWebUiMasterPlanContracts();
   await testDatabaseAndMemory();
   await testOpenAIClientRetriesAndDecodesErrors();
   await testAgentUpdateRequiresCreatorRole();
   await testHttpActorParsingRequiresExplicitIdentity();
+  await testSensitiveHttpEndpointsRequireExplicitActor();
   await testTraceAndToolLogsAreUserScoped();
   await testLlmLogsAreUserScoped();
   await testApprovalListIsUserScoped();
   await testRuntimeContextAndTools();
   await testLlmMemoryContextUsesWorkspaceSessionRecall();
   await testMemoryRecallAuditLogsZeroHits();
+  await testAuditLogsStayOutOfModelContext();
   await testAttentionBudgetTrimsHistoryButKeepsJson();
   await testAgentSelfImpressionRecallIsAgentScoped();
   await testWorkspaceExitReturnsToMain();
