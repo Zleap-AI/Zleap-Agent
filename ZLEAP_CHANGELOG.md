@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:49 +08:00
+
+目的：
+- 对齐 `docs/03-memory-model.md` 中 FTS + relation/version 召回必须按完整 scope 分区判断的要求。
+
+变更：
+- `getMemoryByRelation` 不再允许省略 scope，避免 repository 层退回到全局 `memoryType + relationId` 查询。
+- 更新直接 relation lookup 测试，所有正常查询都显式传入 `userId`、`agentId`、`workspaceId` 分区 scope。
+- 补充无 scope 调用会被拒绝的断言，并保留已有跨 user/workspace/type 同名 relation、FTS 安全 token 和 soft delete 回落验证。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 B5 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:46 +08:00
 
 目的：

@@ -861,26 +861,21 @@ export class Repositories {
     return this.getMemory(id);
   }
 
-  getMemoryByRelation(memoryType: string, relationId: string, scope?: { userId?: string | null; agentId?: string | null; workspaceId?: string | null }): MemoryRow | undefined {
-    if (scope) {
-      return this.db.prepare(`
-        SELECT * FROM memories
-        WHERE memoryType = ?
-          AND relationId = ?
-          AND deletedAt IS NULL
-          AND COALESCE(userId, '') = COALESCE(?, '')
-          AND COALESCE(agentId, '') = COALESCE(?, '')
-          AND COALESCE(workspaceId, '') = COALESCE(?, '')
-        ORDER BY version DESC
-        LIMIT 1
-      `).get(memoryType, relationId, scope.userId ?? null, scope.agentId ?? null, scope.workspaceId ?? null) as MemoryRow | undefined;
+  getMemoryByRelation(memoryType: string, relationId: string, scope: { userId?: string | null; agentId?: string | null; workspaceId?: string | null }): MemoryRow | undefined {
+    if (!scope) {
+      throw new Error("Memory relation lookup requires explicit userId/agentId/workspaceId scope.");
     }
     return this.db.prepare(`
       SELECT * FROM memories
-      WHERE memoryType = ? AND relationId = ? AND deletedAt IS NULL
+      WHERE memoryType = ?
+        AND relationId = ?
+        AND deletedAt IS NULL
+        AND COALESCE(userId, '') = COALESCE(?, '')
+        AND COALESCE(agentId, '') = COALESCE(?, '')
+        AND COALESCE(workspaceId, '') = COALESCE(?, '')
       ORDER BY version DESC
       LIMIT 1
-    `).get(memoryType, relationId) as MemoryRow | undefined;
+    `).get(memoryType, relationId, scope.userId ?? null, scope.agentId ?? null, scope.workspaceId ?? null) as MemoryRow | undefined;
   }
 
   getMemory(id: string): MemoryRow {

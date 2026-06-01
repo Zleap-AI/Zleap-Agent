@@ -1484,6 +1484,10 @@ async function testDatabaseAndMemory() {
   assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "user-a", workspaceId: "other-workspace" })?.id, otherWorkspaceCollision.id);
   assert.equal(repos.getMemoryByRelation("skill", "rel-collision", { workspaceId: "dev" })?.id, otherTypeCollision.id);
   assert.equal(repos.getMemoryByRelation("event", "rel-collision", { userId: "missing-user", workspaceId: "dev" }), undefined);
+  assert.throws(
+    () => (repos.getMemoryByRelation as unknown as (memoryType: string, relationId: string) => unknown)("event", "rel-collision"),
+    /explicit userId\/agentId\/workspaceId scope/
+  );
 
   repos.deleteMemory(latestEvent.id, "creator", "creator", "superseded event cleanup");
   const afterSoftDelete = repos.recallMemories({ userId: "user-a", workspaceId: "dev", query: "ripgrep search" });
@@ -1495,7 +1499,7 @@ async function testDatabaseAndMemory() {
   assert.equal(Boolean(deletedLatest.deletedAt), true);
   assert.equal(deletedLatest.deletedBy, "creator");
   assert.equal(deletedLatest.deleteReason, "superseded event cleanup");
-  assert.equal(repos.getMemoryByRelation("event", "rel-test")?.id, oldEvent.id);
+  assert.equal(repos.getMemoryByRelation("event", "rel-test", { userId: "user-a", workspaceId: "dev" })?.id, oldEvent.id);
 
   for (let index = 0; index < 25; index += 1) {
     repos.createMemory({
@@ -3340,7 +3344,11 @@ async function testConversationWindowEventExtractionUsesAbsoluteWindows() {
   });
 
   assert.equal(writes.some((memory) => memory.relationId === "event:long-window-user:main:conv-long-memory-window:window:26:result"), true);
-  const resultEvent = repos.getMemoryByRelation("event", "event:long-window-user:main:conv-long-memory-window:window:26:result");
+  const resultEvent = repos.getMemoryByRelation(
+    "event",
+    "event:long-window-user:main:conv-long-memory-window:window:26:result",
+    { userId: "long-window-user", workspaceId: "main" }
+  );
   assert.equal(Boolean(resultEvent), true);
   assert.equal(resultEvent!.summary.includes("long-window assistant 520"), true);
   assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
