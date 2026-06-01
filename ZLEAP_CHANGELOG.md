@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:02 +08:00
+
+目的：
+- 完成 MCP server-first 和 placeholder 工具执行边界验证。
+
+变更：
+- 补强 `testBuiltInToolsAreSeededAndWorkspaceScoped`：注册一个 workspace placeholder 工具，确认 runtime 返回 structured failed result，而不是静默执行。
+- 确认现有 stdio MCP fixture 覆盖 server 保存、工具发现、选中导入、MCP binding metadata 和 runtime `callTool` 执行。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 E1 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:59 +08:00
 
 目的：

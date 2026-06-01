@@ -4997,6 +4997,43 @@ async function testToolBindingsAndMcpReadiness() {
   const echoTrace = repos.getTrace("conv-tool-binding-mcp-echo", "creator", "creator");
   assert.equal(echoTrace.toolCalls.some((call) => call.toolName === "echo" && call.status === "completed"), true);
 
+  const placeholderTool = repos.upsertWorkspaceTool({
+    id: "tool-placeholder-probe",
+    workspaceId: "dev",
+    name: "placeholderProbe",
+    description: "Registered but intentionally unbound test tool.",
+    parametersJson: JSON.stringify({
+      type: "object",
+      properties: {
+        reason: { type: "string" }
+      },
+      required: ["reason"]
+    }),
+    riskLevel: "low",
+    bindingType: "placeholder",
+    bindingJson: "{}",
+    actorId: "creator",
+    actorRole: "creator"
+  });
+  assert.equal(placeholderTool.bindingType, "placeholder");
+  const placeholderClient = new MainToWorkspaceToolRequestLLMClient("dev", "placeholderProbe", { reason: "验证 placeholder 不会静默执行" });
+  const placeholderRuntime = new AgentRuntime(repos, placeholderClient);
+  await placeholderRuntime.run({
+    agentId: "default-agent",
+    userId: "tool-binding-user",
+    userRole: "creator",
+    conversationId: "conv-tool-binding-placeholder",
+    message: "call a placeholder tool",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(placeholderClient.lastToolResult.includes("not bound to a runtime or MCP executor"), true);
+  const placeholderTrace = repos.getTrace("conv-tool-binding-placeholder", "creator", "creator");
+  assert.equal(placeholderTrace.toolCalls.some((call) => call.toolName === "placeholderProbe" && call.status === "failed"), true);
+
   const enterWorkspace = new SingleToolRequestLLMClient("enterWorkspace", { workspaceId: "dev", objective: "search runtime files" });
   const enterRuntime = new AgentRuntime(repos, enterWorkspace);
   await enterRuntime.run({
