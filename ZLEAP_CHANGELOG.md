@@ -2,6 +2,31 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 18:00 +08:00
+
+目的：
+- 构建新的用户级聊天 UI，让默认 `/` 面向真实用户使用，并保留旧调试台在 `/dev`。
+- 把近期用户反馈形成明确产品规格：运行过程、搜索结果、`askUser` 选项、MCP Server 和工作空间工具都要以用户友好的方式展示。
+
+变更：
+- 新增 `docs/08-user-ui-guide.md`：记录用户级 UI 的路由、信息架构、视觉规格、组件行为、数据接口、响应式要求、旧 UI 保留策略和验收标准；补充运行过程在助手消息上方、完成后折叠、历史 trace 可恢复、搜索结果详情、`askUser` 选项自动发送、MCP Server 外层隐藏远程地址等规则。
+- 更新 `src/types.ts`、`src/db/repositories.ts`、`src/server/http.ts`、`src/server/index.ts`：增加会话摘要/消息类型和会话列表、消息读取、标题更新等 API，支持新 UI 从数据库恢复会话与消息。
+- 更新 `src/web/main.tsx` 和 `src/web/styles.css`：新增 ChatGPT 风格用户 UI，包括左侧会话栏、主聊天区、底部 composer、设置弹窗、Agent 管理、工作空间管理、MCP Server 配置、非内置工具列表、记忆管理和开发者模式入口；旧 UI 迁移为 `/dev` 调试台。
+- 更新新 UI 运行过程：普通模式显示轻量过程面板，放在对应助手消息上方，宽度与助手消息对齐，运行中展开、完成后折叠，历史会话从 trace 重建；完成步骤不再显示绿色跳动点。
+- 更新搜索和工具展示：搜索结果解析为标题、摘要、链接和结果数量；长 query、URL、错误信息不造成横向滚动；开发者详情避免直接展示原始 JSON。
+- 更新 `askUser` 交互：从工具参数/结果解析 `question` 和 `choices`，渲染为可点击选项按钮；点击选项后自动作为用户回复发送。
+- 更新 `src/tests/run-tests.ts`：补充新 API 和 UI contract 的回归断言。
+
+验证：
+- `npm run typecheck` 通过。
+- `npm run build` 通过。
+- `npm run test` 通过。
+- 已在 `http://localhost:4174/` 通过浏览器检查 MCP Server 外层不显示远程地址、运行过程位置和宽度、搜索详情、`askUser` 选项按钮、无横向溢出。
+
+Git：
+- 本次主提交：`ce67a72` Build user chat UI。
+- Draft PR：`https://github.com/Zleap-AI/Zleap-Agent/pull/1`。
+
 ## 2026-06-01 12:04 +08:00
 
 目的：
