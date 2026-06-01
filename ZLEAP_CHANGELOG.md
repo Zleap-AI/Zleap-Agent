@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-02 00:43 +08:00
+
+目的：
+- 修复 sidebar 透明关闭区域在鼠标 hover 到右侧时被全局按钮 hover 样式染成不透明的问题。
+
+变更：
+- 更新 `src/web/styles.css`：为 `.sidebar-scrim` 和 `.settings-backdrop` 增加 hover / focus / active 透明覆盖，避免被 `.user-shell button:hover` 染色。
+- 更新 `src/tests/run-tests.ts`：增加样式契约断言，确保透明关闭层有专门的 hover 覆盖规则。
+- 更新 `docs/08-user-ui-guide.md`：明确透明关闭区域在默认、hover、focus 和 active 状态下都必须保持透明。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：鼠标移到 sidebar 右侧透明关闭区域后，`.sidebar-scrim` 背景仍为 `rgba(0, 0, 0, 0)`。
+
+Git：
+- 本次提交：保持透明关闭层 hover 状态透明。
+
 ## 2026-06-02 00:31 +08:00
 
 目的：

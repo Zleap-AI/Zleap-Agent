@@ -203,6 +203,17 @@ button:disabled {
   background: transparent;
 }
 
+.user-shell .sidebar-scrim:hover:not(:disabled),
+.user-shell .sidebar-scrim:focus-visible,
+.user-shell .sidebar-scrim:active,
+.user-shell .settings-backdrop:hover:not(:disabled),
+.user-shell .settings-backdrop:focus-visible,
+.user-shell .settings-backdrop:active {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
 .user-shell.sidebar-drawer-open .sidebar-scrim {
   left: 280px;
 }

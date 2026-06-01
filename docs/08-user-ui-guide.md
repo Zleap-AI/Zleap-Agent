@@ -722,6 +722,7 @@ zleap.user.ui.state.v1
 - Sidebar 默认展开，即使 localStorage 里保存过折叠状态也不应让宽屏第一屏默认收起。
 - 用户仍可通过折叠按钮临时收起 sidebar；当窗口从窄屏切回宽屏时，sidebar 应恢复展开。
 - 折叠后临时打开 sidebar 时，sidebar 应覆盖在主区之上；右侧点击关闭区域必须完全透明，不得把主聊天区变成灰色或空白遮罩。
+- 透明关闭区域在默认、hover、focus 和 active 状态下都必须保持透明，不能被全局按钮 hover 样式染色。
 - 折叠后临时打开 sidebar 时，右侧点击关闭区域必须从 sidebar 右边缘开始，不能覆盖 sidebar 本身；打开触发按钮在抽屉打开期间应隐藏，避免和抽屉内容重叠。
 - 宽屏折叠后临时打开 sidebar 时，主聊天区必须仍位于 sidebar 右侧的主列，不能被重新排到第 1 列后藏在 sidebar 下面。
 - 主聊天区占剩余空间。

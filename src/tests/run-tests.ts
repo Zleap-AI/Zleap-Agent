@@ -74,6 +74,8 @@ async function testWebUiMasterPlanContracts() {
   assert.equal(webSource.includes("<option value=\"gpt-4.1\">gpt-4.1</option>"), false);
   assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;"), true);
   assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;\n  inset: 0;\n  z-index: 35;\n  border: 0;\n  border-radius: 0;\n  padding: 0;\n  background: transparent;\n}"), true);
+  assert.equal(webCssSource.includes(".user-shell .sidebar-scrim:hover:not(:disabled),"), true);
+  assert.equal(webCssSource.includes(".user-shell .settings-backdrop:hover:not(:disabled),"), true);
   assert.equal(webCssSource.includes(".user-shell.sidebar-drawer-open .sidebar-scrim {\n  left: 280px;\n}"), true);
   assert.equal(webCssSource.includes(".user-shell.sidebar-drawer-open .sidebar-scrim {\n    left: min(84vw, 320px);\n  }"), true);
   assert.equal(webCssSource.includes(".user-shell.sidebar-collapsed.sidebar-drawer-open .user-chat {\n    grid-column: 2;\n  }"), true);
