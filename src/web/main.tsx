@@ -1354,6 +1354,7 @@ function UserChatApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [processItemsByMessageId, setProcessItemsByMessageId] = useState<Record<string, UserRunProcess[]>>({});
   const [processPanelOpenByMessageId, setProcessPanelOpenByMessageId] = useState<Record<string, boolean>>({});
+  const [processDetailOpenByItemId, setProcessDetailOpenByItemId] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState("");
@@ -1470,6 +1471,7 @@ function UserChatApp() {
       setMessages([]);
       setProcessItemsByMessageId({});
       setProcessPanelOpenByMessageId({});
+      setProcessDetailOpenByItemId({});
     }
     return data.conversations;
   }
@@ -1502,9 +1504,11 @@ function UserChatApp() {
       const groups = userProcessGroupsFromTrace(trace, messageItems, `trace-${targetId}`);
       setProcessItemsByMessageId(groups);
       setProcessPanelOpenByMessageId(Object.fromEntries(Object.keys(groups).map((messageId) => [messageId, keepOpen])));
+      setProcessDetailOpenByItemId({});
     } catch {
       setProcessItemsByMessageId({});
       setProcessPanelOpenByMessageId({});
+      setProcessDetailOpenByItemId({});
     }
   }
 
@@ -1515,6 +1519,7 @@ function UserChatApp() {
     setMessages([]);
     setProcessItemsByMessageId({});
     setProcessPanelOpenByMessageId({});
+    setProcessDetailOpenByItemId({});
     setComposerToolsOpen(false);
     setMessage("");
     setError("");
@@ -2070,6 +2075,8 @@ function UserChatApp() {
             type="button"
             aria-expanded={open}
             onClick={() => {
+              const itemIds = new Set(processItems.map((item) => item.id));
+              setProcessDetailOpenByItemId((details) => Object.fromEntries(Object.entries(details).filter(([itemId]) => !itemIds.has(itemId))));
               setProcessPanelOpenByMessageId((groups) => ({ ...groups, [messageId]: !open }));
             }}
           >
@@ -2080,21 +2087,27 @@ function UserChatApp() {
           {open && <div className="tool-activity-list">
             {processItems.map((item) => {
               const itemActive = isProcessActive(item, processItems, active);
+              const detailOpen = Boolean(processDetailOpenByItemId[item.id]);
               return (
-                <section key={item.id} className={`tool-activity ${itemActive ? "active" : "done"}`}>
-                  <div className="tool-activity-summary">
+                <section key={item.id} className={`tool-activity ${itemActive ? "active" : "done"} ${detailOpen ? "open" : ""}`}>
+                  <button
+                    className="tool-activity-summary"
+                    type="button"
+                    aria-expanded={detailOpen}
+                    onClick={() => setProcessDetailOpenByItemId((details) => ({ ...details, [item.id]: !detailOpen }))}
+                  >
                     <span className="tool-activity-dot" />
                     <span>{userProcessActivityLabel(item)}</span>
-                    <small>{item.workspaceId}</small>
-                  </div>
-                  <div className="tool-activity-detail">
+                    <small>{detailOpen ? "收起详情" : "查看详情"}</small>
+                  </button>
+                  {detailOpen && <div className="tool-activity-detail">
                     {readableProcessDetails(item).map((detail, index) => (
                       <div key={`${item.id}-${index}`}>
                         <strong>{detail.url ? <a href={detail.url} target="_blank" rel="noreferrer">{detail.label}</a> : detail.label}</strong>
                         <span>{detail.value}</span>
                       </div>
                     ))}
-                  </div>
+                  </div>}
                 </section>
               );
             })}

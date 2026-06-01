@@ -708,6 +708,16 @@ button:disabled {
 
 .tool-activity-summary {
   padding: 7px 9px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-activity-summary:hover,
+.tool-activity.open > .tool-activity-summary {
+  background: rgba(236, 236, 234, 0.58);
 }
 
 .tool-activity-dot {

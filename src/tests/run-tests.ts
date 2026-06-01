@@ -58,6 +58,9 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("const [agents, setAgents] = useState<AgentConfig[]>([])");
   expectWeb("const chatHeaderSubtitle = messages.length > 0 ? currentConversation?.title ?? \"新对话\" : \"新对话\"");
   expectWeb("void refreshConversations(conversationId, true)");
+  expectWeb("const [processDetailOpenByItemId, setProcessDetailOpenByItemId] = useState<Record<string, boolean>>({})");
+  expectWeb("aria-expanded={detailOpen}");
+  expectWeb("{detailOpen && <div className=\"tool-activity-detail\">");
   expectWeb("当前智能体");
   expectWeb("新建智能体");
   expectWeb("defaultModel: model || sourceAgent.defaultModel");
