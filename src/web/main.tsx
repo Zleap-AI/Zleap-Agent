@@ -1932,7 +1932,7 @@ function UserChatApp() {
     setError("");
     setRetryMessage("");
     setProcessItemsByMessageId((groups) => ({ ...groups, [assistantMessageId]: [] }));
-    setProcessPanelOpenByMessageId((groups) => ({ ...groups, [assistantMessageId]: true }));
+    setProcessPanelOpenByMessageId((groups) => ({ ...groups, [assistantMessageId]: false }));
     setComposerToolsOpen(false);
     setMessage("");
     setMessages((items) => [
@@ -2059,7 +2059,7 @@ function UserChatApp() {
   function renderProcessPanel(messageId: string, processItems: UserRunProcess[]) {
     if (processItems.length === 0) return null;
     const active = processItems.some((item) => isProcessActive(item, processItems, loading));
-    const open = active || Boolean(processPanelOpenByMessageId[messageId]);
+    const open = Boolean(processPanelOpenByMessageId[messageId]);
     return (
       <section className="tool-process-row" aria-label="Agent 运行进展">
         <div className="assistant-avatar process-avatar">Z</div>
@@ -2069,14 +2069,12 @@ function UserChatApp() {
             type="button"
             aria-expanded={open}
             onClick={() => {
-              if (!active) {
-                setProcessPanelOpenByMessageId((groups) => ({ ...groups, [messageId]: !open }));
-              }
+              setProcessPanelOpenByMessageId((groups) => ({ ...groups, [messageId]: !open }));
             }}
           >
             <span className={`tool-activity-dot ${active ? "active" : "done"}`} />
             <span>{processPanelSummary(processItems, active)}</span>
-            <small>{active ? "运行中" : "点击查看详情"}</small>
+            <small>{open ? "收起详情" : active ? "运行中" : "点击查看详情"}</small>
           </button>
           {open && <div className="tool-activity-list">
             {processItems.map((item) => {
