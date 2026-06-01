@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 20:52 +08:00
+
+目的：
+- 修正上一版把 Zleap 文件工具默认目录放到项目内 `.codex` 的误解；`.codex` 只是 Codex 自身临时目录示例，不应作为 Zleap 运行时文件工作区。
+
+变更：
+- 更新 `src/core/builtin-tools.ts`：默认文件工作区改为系统临时目录下的 `<tmp>/zleap-agent/conversations/<conversationId>-<hash>/`，仍支持 `ZLEAP_FILE_WORKSPACE_ROOT` 覆盖。
+- 更新 `src/db/seed.ts`、`docs/02-workspace-runtime.md`、`docs/07-context-and-prompt-contracts.md`、`docs/08-user-ui-guide.md` 和 `ZLEAP_MASTER_PLAN.md`：所有当前规格改为 tmp 目录规则，并明确不使用项目内 `.codex`。
+- 更新 `.gitignore`：移除 `.codex/` 忽略规则，补充 `.DS_Store` 忽略。
+- 更新 `src/tests/run-tests.ts`：断言文件工具根目录位于系统 tmp 下，并且工具结果不包含 `.codex` 路径。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run build`、`npm run test`，均通过。
+- 已确认项目根目录下不再存在 `.codex`，测试生成的会话工作目录位于系统 tmp 下的 `zleap-agent/conversations/`。
+
+Git：
+- 本次提交：将文件工作区默认位置从项目内目录改到系统 tmp。
+
 ## 2026-06-01 18:33 +08:00
 
 目的：

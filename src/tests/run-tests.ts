@@ -1,5 +1,6 @@
 ﻿import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import type { AddressInfo } from "node:net";
@@ -5157,7 +5158,8 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(builtinWriteFileTool.lastToolResult.includes("\"created\":true"), true);
   assert.equal(await pathExists(path.join(scratchDir, "zleap-tool-scratch", "read-write-test.txt")), true);
   assert.equal(await pathExists(path.join(oldProjectScratchDir, "read-write-test.txt")), false);
-  assert.equal(builtinWriteFileTool.lastToolResult.includes(".codex"), true);
+  assert.equal(scratchDir.startsWith(path.join(os.tmpdir(), "zleap-agent", "conversations")), true);
+  assert.equal(builtinWriteFileTool.lastToolResult.includes(".codex"), false);
 
   const builtinReadFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "readFile", {
     reason: "读取刚写入的测试文件确认专用文件工具可用",

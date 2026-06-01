@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { ToolExecutionResult } from "./tool-registry";
 
@@ -207,7 +208,7 @@ export async function executeWriteFile(argumentsJson: string, context: BuiltinTo
 }
 
 export function conversationWorkspaceRoot(conversationId: string): string {
-  const base = process.env.ZLEAP_FILE_WORKSPACE_ROOT ?? path.join(".codex", "conversations");
+  const base = process.env.ZLEAP_FILE_WORKSPACE_ROOT ?? path.join(os.tmpdir(), "zleap-agent", "conversations");
   return path.join(path.resolve(process.cwd(), base), safeConversationPathSegment(conversationId));
 }
 
