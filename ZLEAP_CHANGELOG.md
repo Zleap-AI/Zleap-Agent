@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-02 01:08 +08:00
+
+目的：
+- 将 sidebar 固定状态按钮从文字“固/浮”改为图标，降低界面里的文字噪音。
+
+变更：
+- 更新 `src/web/main.tsx`：新增 `SidebarStateIcon` 内联 SVG；固定状态使用 pin 图标，未固定/浮层状态使用浮动窗口图标。
+- 更新 `src/web/styles.css`：新增 `.sidebar-pin-icon` 线性图标样式。
+- 更新 `src/tests/run-tests.ts`：增加契约断言，确保使用图标组件并禁止回退到“固/浮”文字。
+- 更新 `docs/08-user-ui-guide.md`：明确 sidebar 状态按钮必须使用图标，不使用文字或方向箭头。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run test`、`npm run build`，均通过。
+- 已在浏览器检查 `http://localhost:4174/`：固定状态和未固定状态按钮文本均为空，均显示 1 个 `.sidebar-pin-icon` SVG；`aria-label` / `title` 保留“点击固定 / 点击取消固定”语义。
+
+Git：
+- 本次提交：用图标替换 sidebar 固定状态文字。
+
 ## 2026-06-02 00:55 +08:00
 
 目的：

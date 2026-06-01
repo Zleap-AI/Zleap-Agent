@@ -1136,6 +1136,24 @@ function workspaceProcessWindows(items: UserRunProcess[]): WorkspaceProcessWindo
   return windows.filter((workspaceWindow) => workspaceWindow.items.length > 0);
 }
 
+function SidebarStateIcon({ pinned }: { pinned: boolean }) {
+  if (pinned) {
+    return (
+      <svg className="sidebar-pin-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+        <path d="M8 4h8l-.8 6 3.3 3.3V15h-5.3v6h-2.4v-6H5.5v-1.7L8.8 10 8 4Z" />
+        <path d="M9.2 10h5.6" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="sidebar-pin-icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <rect x="4.5" y="7.5" width="11" height="11" rx="2" />
+      <path d="M10 4.5h7.5a2 2 0 0 1 2 2V14" />
+      <path d="M13.5 4.5h4a2 2 0 0 1 2 2v4" />
+    </svg>
+  );
+}
+
 function userProcessActivityLabel(item: UserRunProcess): string {
   const processItem = item.items?.[0];
   const toolName = processToolName(item);
@@ -2247,7 +2265,7 @@ function UserChatApp() {
             title={sidebarPinLabel}
             onClick={toggleSidebarPinned}
           >
-            {sidebarCollapsed ? "浮" : "固"}
+            <SidebarStateIcon pinned={!sidebarCollapsed} />
           </button>
         </div>
         <label className="conversation-search">

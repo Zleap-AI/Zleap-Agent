@@ -68,9 +68,11 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("className=\"tool-workspace-window\"");
   expectWeb("${mobileSidebarOpen ? \"sidebar-drawer-open\" : \"\"}");
   expectWeb("const sidebarPinLabel = sidebarCollapsed ? \"侧边栏未固定，点击固定\" : \"侧边栏已固定，点击取消固定\"");
+  expectWeb("function SidebarStateIcon({ pinned }: { pinned: boolean })");
   expectWeb("function toggleSidebarPinned()");
   expectWeb("sidebar-pin-button ${sidebarCollapsed ? \"unpinned\" : \"pinned\"}");
-  expectWeb("{sidebarCollapsed ? \"浮\" : \"固\"}");
+  expectWeb("<SidebarStateIcon pinned={!sidebarCollapsed} />");
+  assert.equal(webSource.includes("{sidebarCollapsed ? \"浮\" : \"固\"}"), false);
   expectWeb("aria-expanded={detailOpen}");
   expectWeb("{detailOpen && <div className=\"tool-activity-detail\">");
   expectWeb("className=\"model-chip\"");
@@ -79,6 +81,7 @@ async function testWebUiMasterPlanContracts() {
   assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;"), true);
   assert.equal(webCssSource.includes(".sidebar-pin-button.pinned"), true);
   assert.equal(webCssSource.includes(".sidebar-pin-button.unpinned"), true);
+  assert.equal(webCssSource.includes(".sidebar-pin-icon"), true);
   assert.equal(webCssSource.includes(".sidebar-scrim {\n  position: fixed;\n  inset: 0;\n  z-index: 35;\n  border: 0;\n  border-radius: 0;\n  padding: 0;\n  background: transparent;\n}"), true);
   assert.equal(webCssSource.includes(".user-shell .sidebar-scrim:hover:not(:disabled),"), true);
   assert.equal(webCssSource.includes(".user-shell .settings-backdrop:hover:not(:disabled),"), true);
