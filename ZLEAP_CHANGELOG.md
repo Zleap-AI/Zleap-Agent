@@ -2,6 +2,26 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 09:19 +08:00
+
+目的：
+- 对齐 `docs/05-hooks-and-lifecycle.md` 中 `afterAgentTurn` 记录 token 使用情况的要求。
+
+变更：
+- 新增 `llmTokenUsage`，从 provider raw response 的 `usage` 字段提取 token 使用情况。
+- `hook.afterAgentTurn` 审计 metadata 记录 `tokenUsage`，与 `llm_calls.responseJson` raw 记录形成明确生命周期证据。
+- 补强 `testRuntimeContextAndTools`，用带 `prompt_tokens` / `completion_tokens` / `total_tokens` 的 LLM fixture 验证 afterAgentTurn audit。
+- 更新 `IMPLEMENTATION_AUDIT.md`，新增 H2 验证记录。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 09:14 +08:00
 
 目的：

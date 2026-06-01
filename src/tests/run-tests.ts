@@ -126,7 +126,14 @@ class MainToFileLLMClient implements LLMClient {
         role: "assistant",
         content: "fake response"
       },
-      raw: { ok: true }
+      raw: {
+        ok: true,
+        usage: {
+          prompt_tokens: 123,
+          completion_tokens: 45,
+          total_tokens: 168
+        }
+      }
     };
   }
 }
@@ -2203,6 +2210,12 @@ async function testRuntimeContextAndTools() {
   assert.equal(actions.includes("hook.beforeWorkspaceEnter"), true);
   assert.equal(actions.includes("workspace_exit_required"), true);
   assert.equal(actions.includes("hook.afterWorkspaceExit"), true);
+  const afterAgentTurnAudit = trace.auditLogs.find((log) => log.action === "hook.afterAgentTurn");
+  assert.ok(afterAgentTurnAudit);
+  const afterAgentTurnMetadata = JSON.parse(afterAgentTurnAudit.metadataJson) as { tokenUsage?: Record<string, unknown> };
+  assert.equal(afterAgentTurnMetadata.tokenUsage?.prompt_tokens, 123);
+  assert.equal(afterAgentTurnMetadata.tokenUsage?.completion_tokens, 45);
+  assert.equal(afterAgentTurnMetadata.tokenUsage?.total_tokens, 168);
 }
 
 async function testLlmMemoryContextUsesWorkspaceSessionRecall() {

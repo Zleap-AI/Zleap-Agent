@@ -119,6 +119,13 @@ function llmResponseSnapshot(completion: ChatCompletionOutput, extra: Record<str
   };
 }
 
+function llmTokenUsage(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const usage = (raw as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return undefined;
+  return usage as Record<string, unknown>;
+}
+
 export class AgentRuntime {
   private readonly promptAssembler = new PromptAssembler();
   private readonly workspaceRuntime: WorkspaceRuntime;
@@ -215,6 +222,7 @@ export class AgentRuntime {
         conversationId: input.conversationId,
         workspaceId: prepared.activeWorkspaceId,
         llmCallId: prepared.llmCallId,
+        tokenUsage: llmTokenUsage(completion.raw),
         memoryWriteCount: memoryWrites.length
       }
     });
