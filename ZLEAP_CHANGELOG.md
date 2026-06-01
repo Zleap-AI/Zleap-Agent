@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:43 +08:00
+
+目的：
+- 完成 `docs/04-multi-tenant-isolation.md` 中审计日志覆盖和“audit 不注入模型上下文”的当前实现验证。
+
+变更：
+- 补强 `testToolPolicyGates`：确认 tool 调用 audit 可通过 `resourceId` 对应具体 `tool_calls.id`，metadata 包含 `toolName`、`status` 和 `taskId`。
+- 新增 `testAuditLogsStayOutOfModelContext`：预置 audit-only marker，确认 trace audit 可见，但不会出现在 LLM messages 或 context segments 中。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 C4 审计日志覆盖标记为已验证，并记录用户消息、workspace、tool、memory、skill、权限拒绝、creator 操作和 audit/context 隔离证据。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:40 +08:00
 
 目的：

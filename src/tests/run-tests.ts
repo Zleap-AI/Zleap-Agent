@@ -2195,6 +2195,36 @@ async function testMemoryRecallAuditLogsZeroHits() {
   assert.deepEqual(metadata.injectedPartitionCounts, { impression: 0, event: 0, resultEvent: 0, processEvent: 0, skill: 0 });
 }
 
+async function testAuditLogsStayOutOfModelContext() {
+  const repos = createRepos();
+  repos.ensureConversation("conv-audit-not-context", "default-agent", "audit-context-user");
+  repos.audit("audit-context-user", "system", "audit_only_secret_marker", "conversation", "conv-audit-not-context", {
+    conversationId: "conv-audit-not-context",
+    workspaceId: "main",
+    secretMarker: "AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT"
+  });
+
+  const fake = new FakeLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "audit-context-user",
+    userRole: "creator",
+    conversationId: "conv-audit-not-context",
+    message: "plain audit boundary request",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+
+  const trace = repos.getTrace("conv-audit-not-context", "creator", "creator");
+  assert.equal(trace.auditLogs.some((log) => log.action === "audit_only_secret_marker"), true);
+  assert.equal(JSON.stringify(fake.lastInput?.messages ?? []).includes("AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT"), false);
+  assert.equal(trace.contextSegments.some((segment) => segment.content.includes("AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT")), false);
+}
+
 async function testAttentionBudgetTrimsHistoryButKeepsJson() {
   const repos = createRepos();
   const conversationId = "conv-attention-budget";
@@ -3839,8 +3869,13 @@ async function testToolPolicyGates() {
   assert.equal(wrongWorkspaceTrace.toolCalls.length, 1);
   assert.equal(wrongWorkspaceTrace.toolCalls[0].toolName, "runCommand");
   assert.equal(wrongWorkspaceTrace.toolCalls[0].status, "blocked");
-  assert.equal(wrongWorkspaceTrace.auditLogs.some((log) => log.action === "hook.beforeToolCall"), true);
-  assert.equal(wrongWorkspaceTrace.auditLogs.some((log) => log.action === "hook.afterToolCall"), true);
+  const blockedToolAudit = wrongWorkspaceTrace.auditLogs.find((log) => log.action === "hook.afterToolCall" && log.resourceId === wrongWorkspaceTrace.toolCalls[0].id);
+  assert.ok(blockedToolAudit);
+  const blockedToolAuditMetadata = JSON.parse(blockedToolAudit.metadataJson) as { toolName?: string; status?: string; taskId?: string };
+  assert.equal(blockedToolAuditMetadata.toolName, "runCommand");
+  assert.equal(blockedToolAuditMetadata.status, "blocked");
+  assert.equal(typeof blockedToolAuditMetadata.taskId, "string");
+  assert.equal(wrongWorkspaceTrace.auditLogs.some((log) => log.action === "hook.beforeToolCall" && log.metadataJson.includes("runCommand")), true);
 
   const highRisk = new MainToCliToolRequestLLMClient("runCommand", { command: "npm test" });
   updateWorkspaceGate(repos, "dev", { requiresApproval: 0, riskLevel: "medium" });
@@ -5519,6 +5554,7 @@ async function main() {
   await testRuntimeContextAndTools();
   await testLlmMemoryContextUsesWorkspaceSessionRecall();
   await testMemoryRecallAuditLogsZeroHits();
+  await testAuditLogsStayOutOfModelContext();
   await testAttentionBudgetTrimsHistoryButKeepsJson();
   await testAgentSelfImpressionRecallIsAgentScoped();
   await testWorkspaceExitReturnsToMain();
