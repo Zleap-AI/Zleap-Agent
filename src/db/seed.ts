@@ -73,7 +73,7 @@ const toolSchemas = {
     type: "object",
     properties: {
       reason: { type: "string", description: "为什么需要读取这个文件；必须和当前任务直接相关。" },
-      path: { type: "string", description: "仓库根目录内的相对路径。" },
+      path: { type: "string", description: "当前会话专属文件工作目录内的相对路径。" },
       startLine: { type: "number", description: "可选，1-based 起始行。" },
       maxLines: { type: "number", description: "可选，最多读取行数，默认 200，最大 500。" }
     },
@@ -84,7 +84,7 @@ const toolSchemas = {
     type: "object",
     properties: {
       reason: { type: "string", description: "为什么需要写入这个文件；必须说明写入目标和预期效果。" },
-      path: { type: "string", description: "仓库根目录内的相对路径。" },
+      path: { type: "string", description: "当前会话专属文件工作目录内的相对路径。" },
       content: { type: "string", description: "完整 UTF-8 文件内容；这是覆盖写入，不是追加或局部替换。" },
       createDirs: { type: "boolean", description: "目录不存在时是否自动创建父目录。" }
     },
@@ -96,7 +96,7 @@ const toolSchemas = {
     properties: {
       reason: { type: "string", description: "为什么必须运行命令；必须说明预期验证或产出，避免无目的环境探测。" },
       command: { type: "string", description: "要执行的最小必要命令。不要用它替代 readFile/writeFile/searchFiles。" },
-      cwd: { type: "string", description: "可选，仓库根目录内的相对工作目录。" },
+      cwd: { type: "string", description: "可选，当前会话专属文件工作目录内的相对工作目录。" },
       timeoutMs: { type: "number", description: "可选，超时时间，最大 120000。" }
     },
     required: ["reason", "command"],
@@ -274,14 +274,14 @@ export function seedDefaults(db: Database.Database): void {
   `);
 
   insertWorkspace.run("main", "主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。多阶段任务要按能力切片调度，例如搜索完成后回到 main，再进入开发/文件工作空间生成网页或写文件。", "只使用编排工具。", "low", now, now);
-  insertWorkspace.run("dev", "开发工作空间", "统一处理项目文件搜索、文件读写、代码检查和命令行执行。", "处理需要本地项目上下文的任务，可以搜索文件、读取文件、写入文件，并在必要时运行命令。不要为了普通文件读写滥用命令行；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", "medium", now, now);
+  insertWorkspace.run("dev", "开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是当前会话的专属工作目录，目录名形如 .codex/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", "medium", now, now);
 
   const updateWorkspace = db.prepare(`
     UPDATE workspaces SET name = ?, description = ?, instructions = ?, toolInstructions = ?, updatedAt = ?
     WHERE id = ?
   `);
   updateWorkspace.run("主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。多阶段任务要按能力切片调度，例如搜索完成后回到 main，再进入开发/文件工作空间生成网页或写文件。", "只使用编排工具。", now, "main");
-  updateWorkspace.run("开发工作空间", "统一处理项目文件搜索、文件读写、代码检查和命令行执行。", "处理需要本地项目上下文的任务，可以搜索文件、读取文件、写入文件，并在必要时运行命令。不要为了普通文件读写滥用命令行；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", now, "dev");
+  updateWorkspace.run("开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是当前会话的专属工作目录，目录名形如 .codex/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", now, "dev");
   db.prepare("DELETE FROM workspace_tools WHERE workspaceId = 'memory'").run();
   db.prepare("DELETE FROM workspaces WHERE id = 'memory'").run();
   db.prepare("UPDATE memories SET workspaceId = 'dev', updatedAt = ? WHERE workspaceId IN ('file', 'cli')").run(now);
@@ -337,9 +337,9 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-exit-workspace", "exitWorkspace", "用结构化 WorkspaceResult 退出当前子 workspace，并返回 main workspace。", JSON.stringify(toolSchemas.exitWorkspace), "low", now, now);
   insertTool.run("tool-ask-user", "askUser", "Ask the user for missing information before continuing orchestration.", JSON.stringify(toolSchemas.askUser), "low", now, now);
   insertTool.run("tool-finish-task", "finishTask", "Mark the main workspace task as ready for final user-facing response.", JSON.stringify(toolSchemas.finishTask), "low", now, now);
-  insertTool.run("tool-search-files", "searchFiles", "搜索项目文件名和文本内容。", JSON.stringify(toolSchemas.searchFiles), "medium", now, now);
-  insertTool.run("tool-read-file", "readFile", "读取仓库内文件内容，适合在搜索后查看具体文件。", JSON.stringify(toolSchemas.readFile), "low", now, now);
-  insertTool.run("tool-write-file", "writeFile", "覆盖写入仓库内 UTF-8 文件，适合创建或替换完整文件内容。", JSON.stringify(toolSchemas.writeFile), "medium", now, now);
+  insertTool.run("tool-search-files", "searchFiles", "搜索当前会话专属文件工作目录内的文件名和文本内容。", JSON.stringify(toolSchemas.searchFiles), "medium", now, now);
+  insertTool.run("tool-read-file", "readFile", "读取当前会话专属文件工作目录内的文件内容，适合在搜索后查看具体文件。", JSON.stringify(toolSchemas.readFile), "low", now, now);
+  insertTool.run("tool-write-file", "writeFile", "覆盖写入当前会话专属文件工作目录内的 UTF-8 文件，适合创建或替换完整文件内容。", JSON.stringify(toolSchemas.writeFile), "medium", now, now);
   insertTool.run("tool-run-command", "runCommand", "运行经过允许的命令行命令。", JSON.stringify(toolSchemas.runCommand), "high", now, now);
   insertTool.run("tool-search-memory", "searchMemory", "低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
   insertTool.run("tool-read-memory", "readMemory", "按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户追问详细说说、主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", JSON.stringify(toolSchemas.readMemory), "low", now, now);
@@ -353,9 +353,9 @@ export function seedDefaults(db: Database.Database): void {
   updateTool.run("用结构化 WorkspaceResult 退出当前子 workspace，并返回 main workspace。", now, "tool-exit-workspace");
   updateTool.run("Ask the user for missing information before continuing orchestration.", now, "tool-ask-user");
   updateTool.run("Mark the main workspace task as ready for final user-facing response.", now, "tool-finish-task");
-  updateTool.run("搜索项目文件名和文本内容。用于定位候选文件或关键词证据，不用于读取完整文件。调用时必须填写 reason，说明要验证什么。", now, "tool-search-files");
-  updateTool.run("读取仓库内文件内容。优先在 searchFiles 定位后使用；不要用 runCommand/cat 代替。调用时必须填写 reason。", now, "tool-read-file");
-  updateTool.run("覆盖写入仓库内 UTF-8 文件。适合创建或替换完整文件内容；不要用 runCommand/echo/python heredoc 代替普通文件写入。调用时必须填写 reason。", now, "tool-write-file");
+  updateTool.run("搜索当前会话专属文件工作目录内的文件名和文本内容。用于定位候选文件或关键词证据，不用于读取完整文件。调用时必须填写 reason，说明要验证什么。", now, "tool-search-files");
+  updateTool.run("读取当前会话专属文件工作目录内的文件内容。优先在 searchFiles 定位后使用；不要用 runCommand/cat 代替。调用时必须填写 reason。", now, "tool-read-file");
+  updateTool.run("覆盖写入当前会话专属文件工作目录内的 UTF-8 文件。适合创建或替换完整文件内容；不要用 runCommand/echo/python heredoc 代替普通文件写入。调用时必须填写 reason。", now, "tool-write-file");
   updateTool.run("运行最小必要命令。只用于测试、构建、脚本、诊断或用户明确要求终端操作；不要用它替代 searchFiles/readFile/writeFile，也不要无目的查询系统配置。调用时必须填写 reason、说明预期产出。", now, "tool-run-command");
   updateTool.run("低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", now, "tool-search-memory");
   updateTool.run("按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户追问详细说说、主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", now, "tool-read-memory");

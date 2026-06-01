@@ -1,6 +1,7 @@
 node_modules/
 dist/
 data/
+.codex/
 server*.log
 .env
 .env.*

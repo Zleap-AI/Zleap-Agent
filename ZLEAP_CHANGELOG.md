@@ -2,6 +2,24 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 18:33 +08:00
+
+目的：
+- 修正内置文件工具默认操作当前项目根目录的问题，避免用户级 Agent 在项目源码目录里创建或修改任务文件。
+
+变更：
+- 更新 `src/core/builtin-tools.ts` 和 `src/core/tool-registry.ts`：`searchFiles`、`readFile`、`writeFile`、`runCommand` 现在以当前会话专属工作目录为根，默认目录名形如 `.codex/conversations/<conversationId>-<hash>/`；服务部署方可用 `ZLEAP_FILE_WORKSPACE_ROOT` 指向自选基础目录。
+- 更新 `src/db/seed.ts`：工具 schema、工具描述和 dev workspace 指令从“仓库根目录/项目文件”改为“当前会话专属文件工作目录”。
+- 更新 `.gitignore`：忽略 `.codex/`，避免会话工作文件进入 Git 状态。
+- 更新 `src/tests/run-tests.ts`：覆盖 `writeFile/readFile` 在会话专属目录内读写，并断言不会写到项目根目录。
+- 更新 `docs/01-agent-philosophy.md`、`docs/02-workspace-runtime.md`、`docs/07-context-and-prompt-contracts.md`、`docs/08-user-ui-guide.md` 和 `ZLEAP_MASTER_PLAN.md`：同步文件工具工作目录规则。
+
+验证：
+- 已执行 `npm run typecheck`、`npm run build`、`npm run test`，均通过。
+
+Git：
+- 本次提交：将内置文件工具迁移到会话专属工作目录。
+
 ## 2026-06-01 18:17 +08:00
 
 目的：

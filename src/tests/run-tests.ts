@@ -8,6 +8,7 @@ import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
 import { Repositories, mcpServerToBindingJson } from "../db/repositories";
 import { AgentRuntime } from "../core/agent-runtime";
+import { conversationWorkspaceRoot } from "../core/builtin-tools";
 import { MemoryService } from "../core/memory-service";
 import { WorkspaceRuntime } from "../core/workspace-runtime";
 import { McpToolExecutor } from "../core/mcp-executor";
@@ -16,6 +17,10 @@ import { createZleapServer } from "../server/index";
 import type { ChatCompletionInput, ChatCompletionOutput, LLMClient, LLMStreamEvent } from "../core/llm-client";
 import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "../core/llm-client";
 import type { ContextSegment, MemoryRow } from "../types";
+
+async function pathExists(filePath: string): Promise<boolean> {
+  return fs.stat(filePath).then(() => true, () => false);
+}
 
 class FakeLLMClient implements LLMClient {
   lastInput: ChatCompletionInput | undefined;
@@ -5125,8 +5130,11 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
   assert.equal(fileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status completed")), true);
 
-  const scratchDir = path.resolve("zleap-tool-scratch");
+  const fileToolConversationId = "conv-tool-binding-file-workspace";
+  const scratchDir = conversationWorkspaceRoot(fileToolConversationId);
+  const oldProjectScratchDir = path.resolve("zleap-tool-scratch");
   await fs.rm(scratchDir, { recursive: true, force: true });
+  await fs.rm(oldProjectScratchDir, { recursive: true, force: true });
   const builtinWriteFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "writeFile", {
     reason: "创建一个可被 readFile 验证的测试文件",
     path: "zleap-tool-scratch/read-write-test.txt",
@@ -5138,7 +5146,7 @@ async function testToolBindingsAndMcpReadiness() {
     agentId: "default-agent",
     userId: "tool-binding-user",
     userRole: "creator",
-    conversationId: "conv-tool-binding-write-file-runtime",
+    conversationId: fileToolConversationId,
     message: "write a test file",
     llm: {
       baseUrl: "https://api.302ai.com",
@@ -5147,6 +5155,9 @@ async function testToolBindingsAndMcpReadiness() {
     }
   });
   assert.equal(builtinWriteFileTool.lastToolResult.includes("\"created\":true"), true);
+  assert.equal(await pathExists(path.join(scratchDir, "zleap-tool-scratch", "read-write-test.txt")), true);
+  assert.equal(await pathExists(path.join(oldProjectScratchDir, "read-write-test.txt")), false);
+  assert.equal(builtinWriteFileTool.lastToolResult.includes(".codex"), true);
 
   const builtinReadFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "readFile", {
     reason: "读取刚写入的测试文件确认专用文件工具可用",
@@ -5157,7 +5168,7 @@ async function testToolBindingsAndMcpReadiness() {
     agentId: "default-agent",
     userId: "tool-binding-user",
     userRole: "creator",
-    conversationId: "conv-tool-binding-read-file-runtime",
+    conversationId: fileToolConversationId,
     message: "read the test file",
     llm: {
       baseUrl: "https://api.302ai.com",
@@ -5167,6 +5178,7 @@ async function testToolBindingsAndMcpReadiness() {
   });
   assert.equal(builtinReadFileTool.lastToolResult.includes("zleap file tool ok"), true);
   await fs.rm(scratchDir, { recursive: true, force: true });
+  await fs.rm(oldProjectScratchDir, { recursive: true, force: true });
 
   const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("dev", "runCommand", { reason: "验证命令工具只承担终端执行任务", command: "node -e \"console.log('zleap-cli-ok')\"" });
   const cliRuntime = new AgentRuntime(repos, builtinCliTool);

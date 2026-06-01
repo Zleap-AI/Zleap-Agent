@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import crypto from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ToolExecutionResult } from "./tool-registry";
@@ -10,13 +11,17 @@ const maxReadFileBytes = 512 * 1024;
 const defaultCommandTimeoutMs = 30_000;
 const maxCommandTimeoutMs = 120_000;
 
-export async function executeSearchFiles(argumentsJson: string): Promise<ToolExecutionResult> {
+type BuiltinToolContext = {
+  conversationId: string;
+};
+
+export async function executeSearchFiles(argumentsJson: string, context: BuiltinToolContext): Promise<ToolExecutionResult> {
   const args = safeJson(argumentsJson) as { query?: unknown };
   const query = typeof args.query === "string" ? args.query.trim() : "";
   if (!query) {
     return { ok: false, status: "failed", result: { error: "searchFiles requires query." } };
   }
-  const root = process.cwd();
+  const root = await ensureConversationWorkspaceRoot(context.conversationId);
   const lowerQuery = query.toLowerCase();
   const results: Array<{ path: string; matchType: "name" | "content"; preview?: string }> = [];
 
@@ -55,19 +60,20 @@ export async function executeSearchFiles(argumentsJson: string): Promise<ToolExe
     result: {
       query,
       root,
+      conversationId: context.conversationId,
       count: results.length,
       results
     }
   };
 }
 
-export async function executeRunCommand(argumentsJson: string): Promise<ToolExecutionResult> {
+export async function executeRunCommand(argumentsJson: string, context: BuiltinToolContext): Promise<ToolExecutionResult> {
   const args = safeJson(argumentsJson) as { command?: unknown; cwd?: unknown; timeoutMs?: unknown; reason?: unknown };
   const command = typeof args.command === "string" ? args.command.trim() : "";
   if (!command) {
     return { ok: false, status: "failed", result: { error: "runCommand requires command." } };
   }
-  const root = process.cwd();
+  const root = await ensureConversationWorkspaceRoot(context.conversationId);
   const cwdResult = resolveWorkspacePath(root, typeof args.cwd === "string" ? args.cwd : ".");
   if (!cwdResult.ok) {
     return { ok: false, status: "failed", result: { error: cwdResult.error } };
@@ -83,6 +89,8 @@ export async function executeRunCommand(argumentsJson: string): Promise<ToolExec
       command,
       reason: typeof args.reason === "string" ? args.reason : undefined,
       cwd: cwdResult.relativePath || ".",
+      root,
+      conversationId: context.conversationId,
       startedAt,
       completedAt: new Date().toISOString(),
       timeoutMs,
@@ -91,13 +99,13 @@ export async function executeRunCommand(argumentsJson: string): Promise<ToolExec
   };
 }
 
-export async function executeReadFile(argumentsJson: string): Promise<ToolExecutionResult> {
+export async function executeReadFile(argumentsJson: string, context: BuiltinToolContext): Promise<ToolExecutionResult> {
   const args = safeJson(argumentsJson) as { path?: unknown; startLine?: unknown; maxLines?: unknown; reason?: unknown };
   const requestedPath = typeof args.path === "string" ? args.path.trim() : "";
   if (!requestedPath) {
     return { ok: false, status: "failed", result: { error: "readFile requires path." } };
   }
-  const root = process.cwd();
+  const root = await ensureConversationWorkspaceRoot(context.conversationId);
   const resolved = resolveWorkspacePath(root, requestedPath);
   if (!resolved.ok) {
     return { ok: false, status: "failed", result: { error: resolved.error } };
@@ -136,6 +144,8 @@ export async function executeReadFile(argumentsJson: string): Promise<ToolExecut
       result: {
         path: resolved.relativePath,
         reason: typeof args.reason === "string" ? args.reason : undefined,
+        root,
+        conversationId: context.conversationId,
         bytes: stat.size,
         startLine,
         endLine: lineEnd,
@@ -153,7 +163,7 @@ export async function executeReadFile(argumentsJson: string): Promise<ToolExecut
   }
 }
 
-export async function executeWriteFile(argumentsJson: string): Promise<ToolExecutionResult> {
+export async function executeWriteFile(argumentsJson: string, context: BuiltinToolContext): Promise<ToolExecutionResult> {
   const args = safeJson(argumentsJson) as { path?: unknown; content?: unknown; createDirs?: unknown; reason?: unknown };
   const requestedPath = typeof args.path === "string" ? args.path.trim() : "";
   if (!requestedPath) {
@@ -162,7 +172,7 @@ export async function executeWriteFile(argumentsJson: string): Promise<ToolExecu
   if (typeof args.content !== "string") {
     return { ok: false, status: "failed", result: { error: "writeFile requires string content.", path: requestedPath } };
   }
-  const root = process.cwd();
+  const root = await ensureConversationWorkspaceRoot(context.conversationId);
   const resolved = resolveWorkspacePath(root, requestedPath);
   if (!resolved.ok) {
     return { ok: false, status: "failed", result: { error: resolved.error } };
@@ -180,6 +190,8 @@ export async function executeWriteFile(argumentsJson: string): Promise<ToolExecu
       result: {
         path: resolved.relativePath,
         reason: typeof args.reason === "string" ? args.reason : undefined,
+        root,
+        conversationId: context.conversationId,
         bytes: Buffer.byteLength(args.content, "utf8"),
         created: !before,
         updated: Boolean(before)
@@ -192,6 +204,26 @@ export async function executeWriteFile(argumentsJson: string): Promise<ToolExecu
       result: { error: error instanceof Error ? error.message : String(error), path: resolved.relativePath }
     };
   }
+}
+
+export function conversationWorkspaceRoot(conversationId: string): string {
+  const base = process.env.ZLEAP_FILE_WORKSPACE_ROOT ?? path.join(".codex", "conversations");
+  return path.join(path.resolve(process.cwd(), base), safeConversationPathSegment(conversationId));
+}
+
+async function ensureConversationWorkspaceRoot(conversationId: string): Promise<string> {
+  const root = conversationWorkspaceRoot(conversationId);
+  await fs.mkdir(root, { recursive: true });
+  return root;
+}
+
+function safeConversationPathSegment(conversationId: string): string {
+  const hash = crypto.createHash("sha256").update(conversationId).digest("hex").slice(0, 8);
+  const cleaned = (conversationId.trim() || "conversation")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^\.+/, "_")
+    .slice(0, 80) || "conversation";
+  return `${cleaned}-${hash}`;
 }
 
 async function findContentMatch(filePath: string, lowerQuery: string): Promise<string | undefined> {

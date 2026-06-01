@@ -154,28 +154,28 @@ export class ToolRegistry {
       if (activeWorkspaceId !== "dev") {
         return { ok: false, status: "failed", result: { error: "searchFiles can only be called from dev workspace." } };
       }
-      return executeSearchFiles(argumentsJson);
+      return executeSearchFiles(argumentsJson, { conversationId: run.conversationId });
     }
 
     if (toolName === "runCommand") {
       if (activeWorkspaceId !== "dev") {
         return { ok: false, status: "failed", result: { error: "runCommand can only be called from dev workspace." } };
       }
-      return executeRunCommand(argumentsJson);
+      return executeRunCommand(argumentsJson, { conversationId: run.conversationId });
     }
 
     if (toolName === "readFile") {
       if (activeWorkspaceId !== "dev") {
         return { ok: false, status: "failed", result: { error: "readFile can only be called from dev workspace." } };
       }
-      return executeReadFile(argumentsJson);
+      return executeReadFile(argumentsJson, { conversationId: run.conversationId });
     }
 
     if (toolName === "writeFile") {
       if (activeWorkspaceId !== "dev") {
         return { ok: false, status: "failed", result: { error: "writeFile can only be called from dev workspace." } };
       }
-      return executeWriteFile(argumentsJson);
+      return executeWriteFile(argumentsJson, { conversationId: run.conversationId });
     }
 
     if (this.runtimeMemoryToolNames.has(toolName)) {
