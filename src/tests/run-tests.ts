@@ -1819,7 +1819,30 @@ async function testRuntimeContextAndTools() {
   assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), false);
   const childWorkspaceToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
   assert.equal(childWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
+  const childWorkspacePayload = JSON.parse(childWorkspaceToolMessage?.content ?? "{}") as {
+    currentWorkspace?: { id?: string };
+    availableWorkspaces?: Array<{ id?: string }>;
+  };
+  assert.equal(childWorkspacePayload.currentWorkspace?.id, "dev");
+  assert.equal(childWorkspacePayload.availableWorkspaces?.some((workspace) => workspace.id === "main"), true);
+  assert.equal(childWorkspacePayload.availableWorkspaces?.some((workspace) => workspace.id === "dev"), true);
   assert.equal(childInput?.tools.some((tool) => tool.name === "enterWorkspace"), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "askUser"), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "finishTask"), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "exitWorkspace"), true);
+  const childTraceForTools = repos.getTrace("conv-test", "creator", "creator");
+  const childWorkspaceSegment = childTraceForTools.contextSegments.find((segment) => {
+    if (segment.segmentType !== "workspace") return false;
+    const payload = JSON.parse(segment.content) as { currentWorkspace?: { id?: string } };
+    return payload.currentWorkspace?.id === "dev";
+  });
+  assert.equal(Boolean(childWorkspaceSegment), true);
+  const childLlmCall = childTraceForTools.llmCalls.find((call) => call.id === childWorkspaceSegment?.llmCallId);
+  const childPersistedTools = JSON.parse(childLlmCall?.toolsJson ?? "[]") as Array<{ name?: string }>;
+  assert.equal(childPersistedTools.some((tool) => tool.name === "enterWorkspace"), false);
+  assert.equal(childPersistedTools.some((tool) => tool.name === "askUser"), false);
+  assert.equal(childPersistedTools.some((tool) => tool.name === "finishTask"), false);
+  assert.equal(childPersistedTools.some((tool) => tool.name === "exitWorkspace"), true);
   const lastWorkspaceToolMessage = lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
   assert.equal(lastWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
   assert.equal(childWorkspaceToolMessage?.content?.includes("memoryPolicy"), true);
@@ -5081,6 +5104,7 @@ async function testWorkspaceBoundary() {
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "memory"), false);
   assert.equal(repos.listWorkspaces().some((workspace) => workspace.id === "file" || workspace.id === "cli"), false);
   assert.equal(["askUser", "enterWorkspace", "finishTask"].every((tool) => mainTools.includes(tool)), true);
+  assert.equal(mainTools.includes("exitWorkspace"), false);
   assert.equal(memoryTools.every((tool) => mainTools.includes(tool)), true);
   assert.equal(memoryTools.every((tool) => devTools.includes(tool)), true);
   assert.equal(["writeEventMemory", "updateMemory", "deleteMemory"].some((tool) => mainTools.includes(tool) || devTools.includes(tool)), false);

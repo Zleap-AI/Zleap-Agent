@@ -2,6 +2,23 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:20 +08:00
+
+目的：
+- 启动长期 docs 实现对齐审计，建立可追踪进度，并先补强 workspace 工具边界的测试证据。
+
+变更：
+- 新增 `IMPLEMENTATION_AUDIT.md`，记录文档范围、功能域清单、验证状态、历史记录来源和后续待办。
+- 在 `testRuntimeContextAndTools` 中补充 child workspace manifest 可见性与 provider `toolsJson` 可调用工具边界断言。
+- 在 `testWorkspaceBoundary` 中补充 main workspace 不暴露 `exitWorkspace` 的断言。
+- 检索父级/桌面 markdown 记录，确认当前相关历史记录主要是 `ZLEAP_CHANGELOG.md`。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 07:15 +08:00
 
 目的：
