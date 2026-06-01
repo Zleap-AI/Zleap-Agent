@@ -179,6 +179,20 @@ export function createZleapServer(deps: ZleapServerDeps): http.Server {
         return;
       }
 
+      if (url.pathname === "/api/conversations" && request.method === "GET") {
+        const actor = parseActorFromSearchParams(url.searchParams, "Conversation list API");
+        sendJson(response, 200, {
+          conversations: repos.listConversations({
+            actorId: actor.actorId,
+            actorRole: actor.actorRole,
+            agentId: url.searchParams.get("agentId") || undefined,
+            userId: url.searchParams.get("userId") || undefined,
+            limit: Number(url.searchParams.get("limit") ?? 50)
+          })
+        });
+        return;
+      }
+
       const agentMatch = url.pathname.match(/^\/api\/agents\/([^/]+)$/);
       if (agentMatch && request.method === "GET") {
         sendJson(response, 200, repos.getAgent(agentMatch[1]));
@@ -393,7 +407,31 @@ export function createZleapServer(deps: ZleapServerDeps): http.Server {
         sendJson(response, 200, repos.getTrace(traceMatch[1], actor.actorId, actor.actorRole));
         return;
       }
+      const conversationMessagesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/);
+      if (conversationMessagesMatch && request.method === "GET") {
+        const actor = parseActorFromSearchParams(url.searchParams, "Conversation messages API");
+        sendJson(response, 200, {
+          messages: repos.listConversationMessages(
+            decodeURIComponent(conversationMessagesMatch[1]),
+            actor.actorId,
+            actor.actorRole,
+            Number(url.searchParams.get("limit") ?? 200)
+          )
+        });
+        return;
+      }
       const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
+      if (conversationMatch && request.method === "PATCH") {
+        const body = await readJson<{ title?: string; actorId?: string; actorRole?: "user" | "creator" }>(request);
+        const actor = parseActor(body, "Conversation rename API");
+        sendJson(response, 200, repos.updateConversationTitle(
+          decodeURIComponent(conversationMatch[1]),
+          body.title ?? "",
+          actor.actorId,
+          actor.actorRole
+        ));
+        return;
+      }
       if (conversationMatch && request.method === "DELETE") {
         const body = await readJson<{ actorId?: string; actorRole?: "user" | "creator"; deleteReason?: string }>(request);
         const actor = parseActor(body, "Conversation delete API");
@@ -404,6 +442,10 @@ export function createZleapServer(deps: ZleapServerDeps): http.Server {
 
       const served = await staticHandler(response, url.pathname);
       if (served) return;
+      if (request.method === "GET" && !url.pathname.startsWith("/api/")) {
+        const servedRoot = await staticHandler(response, "/");
+        if (servedRoot) return;
+      }
       sendJson(response, 404, { error: "Not found" });
     } catch (error) {
       sendError(response, error);

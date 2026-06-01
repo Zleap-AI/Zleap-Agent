@@ -361,6 +361,19 @@ export type StoredMessage = {
   createdAt: string;
 };
 
+export type StoredChatMessage = StoredMessage;
+
+export type ConversationSummary = {
+  id: string;
+  agentId: string;
+  userId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  lastMessagePreview?: string;
+};
+
 export type ToolCallLog = {
   id: string;
   conversationId: string;

@@ -1452,6 +1452,18 @@ async function testDatabaseAndMemory() {
   assert.throws(() => repos.ensureConversation("conv-empty-user", "default-agent", ""));
   repos.ensureConversation("conv-owner", "default-agent", "user-a");
   repos.addMessage("conv-owner", "user", "owner message");
+  const ownerConversations = repos.listConversations({ actorId: "user-a", actorRole: "user", agentId: "default-agent" });
+  assert.equal(ownerConversations.length, 1);
+  assert.equal(ownerConversations[0].id, "conv-owner");
+  assert.equal(ownerConversations[0].title, "owner message");
+  assert.equal(ownerConversations[0].messageCount, 1);
+  assert.equal(ownerConversations[0].lastMessagePreview, "owner message");
+  assert.equal(repos.listConversations({ actorId: "other-user", actorRole: "user" }).length, 0);
+  assert.equal(repos.listConversationMessages("conv-owner", "user-a", "user").length, 1);
+  assert.throws(() => repos.listConversationMessages("conv-owner", "other-user", "user"), /owner/);
+  const renamedConversation = repos.updateConversationTitle("conv-owner", "  Renamed   conversation  ", "user-a", "user");
+  assert.equal(renamedConversation.title, "Renamed conversation");
+  assert.throws(() => repos.updateConversationTitle("conv-owner", "bad", "other-user", "user"), /owner/);
   const tableList = repos.listDatabaseTables("creator");
   const tableNames = new Set(tableList.map((table) => table.name));
   for (const expectedTable of [

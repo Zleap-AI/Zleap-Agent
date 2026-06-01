@@ -3,6 +3,7 @@ import type {
   AgentConfig,
   ApprovalRequest,
   AuditLog,
+  ConversationSummary,
   ContextSegment,
   DatabaseTableRows,
   DatabaseTableSummary,
@@ -85,6 +86,15 @@ function buildFtsQuery(value: string): string {
     .slice(0, 8)
     .map((term) => `"${term.replace(/"/g, "\"\"")}"`)
     .join(" OR ");
+}
+
+function conversationTitleFromMessage(conversationId: string, content: string): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  return (normalized || conversationId).slice(0, 48);
+}
+
+function conversationPreview(content: string): string {
+  return content.replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 const defaultMemoryPolicy: WorkspaceMemoryPolicy = {
@@ -318,16 +328,120 @@ export class Repositories {
     `).run(conversationId, agentId, userId, conversationId, now, now);
   }
 
-  getConversation(conversationId: string): { id: string; agentId: string; userId: string } | undefined {
-    return this.db.prepare("SELECT id, agentId, userId FROM conversations WHERE id = ?").get(conversationId) as { id: string; agentId: string; userId: string } | undefined;
+  getConversation(conversationId: string): { id: string; agentId: string; userId: string; title: string; createdAt: string; updatedAt: string } | undefined {
+    return this.db.prepare("SELECT id, agentId, userId, title, createdAt, updatedAt FROM conversations WHERE id = ?").get(conversationId) as { id: string; agentId: string; userId: string; title: string; createdAt: string; updatedAt: string } | undefined;
+  }
+
+  private conversationSummaryForId(conversationId: string): ConversationSummary {
+    const row = this.db.prepare(`
+      SELECT
+        conversations.id,
+        conversations.agentId,
+        conversations.userId,
+        conversations.title,
+        conversations.createdAt,
+        conversations.updatedAt,
+        COUNT(messages.id) AS messageCount,
+        (
+          SELECT content FROM messages latest
+          WHERE latest.conversationId = conversations.id
+          ORDER BY latest.createdAt DESC, latest.rowid DESC
+          LIMIT 1
+        ) AS lastMessagePreview
+      FROM conversations
+      LEFT JOIN messages ON messages.conversationId = conversations.id
+      WHERE conversations.id = ?
+      GROUP BY conversations.id
+    `).get(conversationId) as (Omit<ConversationSummary, "messageCount"> & { messageCount: number; lastMessagePreview?: string | null }) | undefined;
+    if (!row) throw new Error("Conversation not found.");
+    return {
+      ...row,
+      messageCount: Number(row.messageCount),
+      lastMessagePreview: row.lastMessagePreview ? conversationPreview(row.lastMessagePreview) : undefined
+    };
+  }
+
+  listConversations(filters: { actorId: string; actorRole: UserRole; agentId?: string; userId?: string; limit?: number }): ConversationSummary[] {
+    if (!filters.actorId.trim()) throw new Error("Conversation list requires explicit actorId.");
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (filters.actorRole !== "creator") {
+      clauses.push("conversations.userId = ?");
+      params.push(filters.actorId);
+    } else if (filters.userId?.trim()) {
+      clauses.push("conversations.userId = ?");
+      params.push(filters.userId.trim());
+    }
+    if (filters.agentId?.trim()) {
+      clauses.push("conversations.agentId = ?");
+      params.push(filters.agentId.trim());
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limit = Math.max(1, Math.min(200, Math.floor(filters.limit ?? 50)));
+    const rows = this.db.prepare(`
+      SELECT
+        conversations.id,
+        conversations.agentId,
+        conversations.userId,
+        conversations.title,
+        conversations.createdAt,
+        conversations.updatedAt,
+        COUNT(messages.id) AS messageCount,
+        (
+          SELECT content FROM messages latest
+          WHERE latest.conversationId = conversations.id
+          ORDER BY latest.createdAt DESC, latest.rowid DESC
+          LIMIT 1
+        ) AS lastMessagePreview
+      FROM conversations
+      LEFT JOIN messages ON messages.conversationId = conversations.id
+      ${where}
+      GROUP BY conversations.id
+      ORDER BY conversations.updatedAt DESC, conversations.createdAt DESC
+      LIMIT ?
+    `).all(...params, limit) as Array<Omit<ConversationSummary, "messageCount"> & { messageCount: number; lastMessagePreview?: string | null }>;
+    return rows.map((row) => ({
+      ...row,
+      messageCount: Number(row.messageCount),
+      lastMessagePreview: row.lastMessagePreview ? conversationPreview(row.lastMessagePreview) : undefined
+    }));
+  }
+
+  listConversationMessages(conversationId: string, actorId: string, actorRole: UserRole, limit = 200): StoredMessage[] {
+    const conversation = this.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversation not found.");
+    if (actorRole !== "creator" && conversation.userId !== actorId) {
+      throw new Error("Conversation messages can only be read by their owner or a creator.");
+    }
+    return this.listMessagesDetailed(conversationId, Math.max(1, Math.min(500, Math.floor(limit))));
+  }
+
+  updateConversationTitle(conversationId: string, title: string, actorId: string, actorRole: UserRole): ConversationSummary {
+    const conversation = this.getConversation(conversationId);
+    if (!conversation) throw new Error("Conversation not found.");
+    if (actorRole !== "creator" && conversation.userId !== actorId) {
+      throw new Error("Conversation can only be renamed by its owner or a creator.");
+    }
+    const normalized = title.replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!normalized) throw new Error("Conversation title is required.");
+    this.db.prepare("UPDATE conversations SET title = ?, updatedAt = ? WHERE id = ?").run(normalized, nowIso(), conversationId);
+    return this.conversationSummaryForId(conversationId);
   }
 
   addMessage(conversationId: string, role: string, content: string, raw: unknown = {}): string {
     const id = createId("msg");
+    const now = nowIso();
     this.db.prepare(`
       INSERT INTO messages (id, conversationId, role, content, rawJson, createdAt)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(id, conversationId, role, content, JSON.stringify(raw), nowIso());
+    `).run(id, conversationId, role, content, JSON.stringify(raw), now);
+    const conversation = this.getConversation(conversationId);
+    if (conversation) {
+      const nextTitle = role === "user" && conversation.title === conversation.id
+        ? conversationTitleFromMessage(conversationId, content)
+        : conversation.title;
+      this.db.prepare("UPDATE conversations SET title = ?, updatedAt = ? WHERE id = ?").run(nextTitle, now, conversationId);
+    }
     return id;
   }
 

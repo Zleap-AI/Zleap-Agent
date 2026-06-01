@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ContextSegment, DatabaseTableRows, DatabaseTableSummary, LLMCallSnapshot, McpServerDefinition, MemoryRow, RuntimeConfigItem, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ConversationSummary, ContextSegment, DatabaseTableRows, DatabaseTableSummary, LLMCallSnapshot, McpServerDefinition, MemoryRow, RuntimeConfigItem, StoredMessage, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
 import "./styles.css";
 
 type Tab = "chat" | "workspace" | "memory" | "logs" | "tables" | "config" | "concept";
@@ -33,6 +33,7 @@ type ConversationTrace = {
 };
 
 const CACHE_KEY = "zleap.web.state.v2";
+const USER_UI_CACHE_KEY = "zleap.user.ui.state.v1";
 const DEFAULT_BASE_URL = "https://api.302ai.com";
 const OLD_SYSTEM_PROMPT_MARKER = "你是运行在 Zleap runtime 内的 agent";
 const OLD_PERSONALITY_PROMPT_MARKER = "workspace 选择和 context 组织";
@@ -62,6 +63,60 @@ type CachedState = {
   selectedLlmCallId?: string;
   agentDraft?: Partial<AgentConfig>;
 };
+
+type UserUiCachedState = {
+  selectedAgentId?: string;
+  userId?: string;
+  userRole?: "user" | "creator";
+  conversationId?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  developerMode?: boolean;
+  sidebarCollapsed?: boolean;
+};
+
+type UserRunProcess = {
+  id: string;
+  runId: string;
+  workspaceId: string;
+  eventKind: string;
+  title: string;
+  text: string;
+  status?: string;
+  toolNames?: string[];
+  items?: WorkspaceProcessItem[];
+  createdAt?: string;
+};
+
+type SearchResultPreview = {
+  title: string;
+  url?: string;
+  snippet?: string;
+  date?: string;
+  source?: string;
+};
+
+type SearchResultSummary = {
+  total?: number;
+  error?: string;
+  items: SearchResultPreview[];
+};
+
+type ProcessReadableDetail = {
+  label: string;
+  value: string;
+  url?: string;
+};
+
+type AskUserPrompt = {
+  id: string;
+  question: string;
+  choices: string[];
+  reason?: string;
+};
+
+type SettingsSection = "basic" | "agents" | "workspaces" | "memory" | "advanced";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -201,20 +256,139 @@ function extractToolReason(argumentsJson: string | undefined): string | undefine
   }
 }
 
+function parseJsonString(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function searchResultFromRecord(record: Record<string, unknown>): SearchResultPreview | null {
+  const title = typeof record.title === "string" ? record.title.trim() : "";
+  const urlValue = record.link ?? record.url ?? record.href;
+  const url = typeof urlValue === "string" ? urlValue.trim() : "";
+  const snippetValue = record.snippet ?? record.summary ?? record.description ?? record.content;
+  const snippet = typeof snippetValue === "string" ? snippetValue.trim() : "";
+  if (!title && !url && !snippet) return null;
+  const date = typeof record.date === "string" ? record.date : typeof record.publishedAt === "string" ? record.publishedAt : undefined;
+  const source = Array.isArray(record.authors) && record.authors.length > 0
+    ? record.authors.map((item) => String(item)).join(", ")
+    : typeof record.source === "string"
+      ? record.source
+      : undefined;
+  return {
+    title: title || url || trimOneLine(snippet, 80) || "搜索结果",
+    url: url || undefined,
+    snippet: snippet || undefined,
+    date,
+    source
+  };
+}
+
+function collectSearchResults(value: unknown, output: SearchResultSummary, depth = 0): void {
+  if (depth > 8 || value === undefined || value === null) return;
+  if (typeof value === "string") {
+    const parsed = parseJsonString(value);
+    if (parsed !== value) collectSearchResults(parsed, output, depth + 1);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectSearchResults(item, output, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.total === "number") output.total = record.total;
+  if (typeof record.errMsg === "string") output.error = record.errMsg;
+  if (typeof record.error === "string") output.error = record.error;
+
+  const candidate = searchResultFromRecord(record);
+  if (candidate && (candidate.url || candidate.snippet)) {
+    output.items.push(candidate);
+    return;
+  }
+
+  const arrayKeys = ["webpages", "webPages", "results", "items", "data", "documents"];
+  for (const key of arrayKeys) {
+    const item = record[key];
+    if (Array.isArray(item)) collectSearchResults(item, output, depth + 1);
+  }
+
+  const nestedKeys = ["result", "structuredContent", "content", "text", "body", "payload"];
+  for (const key of nestedKeys) {
+    const item = record[key];
+    if (item !== undefined) collectSearchResults(item, output, depth + 1);
+  }
+}
+
+function searchResultSummaryFromJson(resultJson: string | undefined): SearchResultSummary {
+  const summary: SearchResultSummary = { items: [] };
+  if (!resultJson) return summary;
+  collectSearchResults(parseJsonString(resultJson), summary);
+  const unique = new Map<string, SearchResultPreview>();
+  for (const item of summary.items) {
+    const key = item.url || item.title;
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  summary.items = [...unique.values()];
+  return summary;
+}
+
+function formatSearchResultSummary(resultJson: string | undefined): string {
+  const summary = searchResultSummaryFromJson(resultJson);
+  if (summary.items.length > 0) {
+    const titles = summary.items.slice(0, 3).map((item) => item.title).join("；");
+    const total = summary.total ?? summary.items.length;
+    return `搜索到 ${total} 条结果：${titles}`;
+  }
+  if (summary.error) return `搜索失败：${summary.error}`;
+  return "";
+}
+
+function looksLikeSearchPayload(record: Record<string, unknown>): boolean {
+  return Boolean(
+    Array.isArray(record.webpages)
+    || Array.isArray(record.webPages)
+    || record.searchParameters
+    || (typeof record.toolName === "string" && isSearchLikeTool(record.toolName))
+    || (typeof record.mcpToolName === "string" && isSearchLikeTool(record.mcpToolName))
+  );
+}
+
 function extractResultText(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    const parsed = parseJsonString(value);
+    return parsed === value ? value : extractResultText(parsed);
+  }
   if (Array.isArray(value)) {
     const first = value[0];
     return value.length === 0 ? "空结果" : `${value.length} 条结果：${extractResultText(first)}`;
   }
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
+    if (looksLikeSearchPayload(record)) {
+      const searchSummary: SearchResultSummary = { items: [] };
+      collectSearchResults(record, searchSummary);
+      if (searchSummary.items.length > 0) {
+        const titles = searchSummary.items.slice(0, 3).map((item) => item.title).join("；");
+        return `搜索到 ${searchSummary.total ?? searchSummary.items.length} 条结果：${titles}`;
+      }
+      if (searchSummary.error) return `错误：${searchSummary.error}`;
+    }
+    if (record.result !== undefined) return extractResultText(record.result);
+    if (record.structuredContent !== undefined) return extractResultText(record.structuredContent);
+    if (record.content !== undefined) return extractResultText(record.content);
     const preferredKeys = ["error", "stdout", "output", "summary", "answer", "text", "content", "snippet", "description", "title", "url"];
     for (const key of preferredKeys) {
       const item = record[key];
       if (typeof item === "string" && item.trim()) return item;
     }
-    for (const item of Object.values(record)) {
+    for (const [key, item] of Object.entries(record)) {
+      if (["toolName", "mcpToolName", "mcpServerId"].includes(key)) continue;
       const extracted = extractResultText(item);
       if (extracted && extracted !== "{}") return extracted;
     }
@@ -234,7 +408,9 @@ function summarizeResultPreview(resultJson: string | undefined): string {
 
 function processItemFromToolLog(log: ToolCallLog, eventKind?: string): WorkspaceProcessItem {
   const argumentSummary = summarizeArgumentsPreview(log.argumentsJson);
-  const resultSummary = summarizeResultPreview(log.resultJson);
+  const resultSummary = isSearchLikeTool(log.toolName)
+    ? formatSearchResultSummary(log.resultJson) || summarizeResultPreview(log.resultJson)
+    : summarizeResultPreview(log.resultJson);
   return {
     toolName: log.toolName,
     reason: extractToolReason(log.argumentsJson),
@@ -546,6 +722,18 @@ function createMcpServerDraft(workspaceId: string): McpServerDefinition {
   };
 }
 
+function mcpServerSummary(server: McpServerDefinition): string {
+  if (server.transport === "streamable-http") return "远程 MCP Server";
+  let args = "";
+  try {
+    const parsed = JSON.parse(server.argsJson || "[]") as unknown;
+    if (Array.isArray(parsed)) args = parsed.map(String).join(" ");
+  } catch {
+    args = server.argsJson;
+  }
+  return [server.command, args].filter(Boolean).join(" ") || "未填写启动命令";
+}
+
 function createToolDraft(workspaceId: string): Partial<ToolDefinition> {
   return {
     id: `tool-${workspaceId}-${Date.now()}`,
@@ -609,6 +797,14 @@ function loadCache(): CachedState {
   }
 }
 
+function loadUserUiCache(): UserUiCachedState {
+  try {
+    return JSON.parse(localStorage.getItem(USER_UI_CACHE_KEY) ?? "{}") as UserUiCachedState;
+  } catch {
+    return {};
+  }
+}
+
 function normalizeCachedBaseUrl(value: string | undefined): string | undefined {
   if (!value) return value;
   const trimmed = value
@@ -643,6 +839,12 @@ function saveCache(patch: CachedState): void {
   const next = { ...loadCache(), ...patch };
   next.baseUrl = normalizeCachedBaseUrl(next.baseUrl);
   localStorage.setItem(CACHE_KEY, JSON.stringify(next));
+}
+
+function saveUserUiCache(patch: UserUiCachedState): void {
+  const next = { ...loadUserUiCache(), ...patch };
+  next.baseUrl = normalizeCachedBaseUrl(next.baseUrl);
+  localStorage.setItem(USER_UI_CACHE_KEY, JSON.stringify(next));
 }
 
 function clampContextPanelWidth(value: number): number {
@@ -818,7 +1020,1479 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-function App() {
+function storedMessageToChatMessage(message: StoredMessage): ChatMessage {
+  return {
+    id: message.id,
+    role: message.role === "user" ? "用户" : message.role === "assistant" ? "助手" : message.role,
+    content: message.content
+  };
+}
+
+function formatConversationTime(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function isSearchLikeTool(name: string): boolean {
+  return /search|web|google|metaso|bing|查找|搜索/i.test(name);
+}
+
+function userProcessActivityLabel(item: UserRunProcess): string {
+  const processItem = item.items?.[0];
+  const toolName = processItem?.toolName ?? item.toolNames?.[0] ?? "";
+  const argumentPreview = summarizeArgumentsPreview(processItem?.argumentsJson);
+  const searchSummary = processItem && isSearchLikeTool(toolName) ? formatSearchResultSummary(processItem.resultJson) : "";
+  const resultPreview = searchSummary || summarizeResultPreview(processItem?.resultJson);
+  if (item.eventKind === "entered") return `进入 ${item.workspaceId} 工作空间`;
+  if (item.eventKind === "exit") return `${item.workspaceId} 工作空间完成`;
+  if (item.eventKind === "tool_call") {
+    if (toolName && isSearchLikeTool(toolName)) return argumentPreview ? `正在搜索：${argumentPreview}` : "正在搜索";
+    if (toolName) return argumentPreview ? `正在使用 ${toolName}：${argumentPreview}` : `正在使用 ${toolName}`;
+    return item.title || "正在调用工具";
+  }
+  if (item.eventKind === "tool_result") {
+    if (toolName && isSearchLikeTool(toolName)) return resultPreview ? `搜索到结果：${resultPreview}` : "已收到搜索结果";
+    if (toolName) return resultPreview ? `${toolName} 返回：${resultPreview}` : `${toolName} 已返回结果`;
+    return item.title || "已收到工具结果";
+  }
+  return item.text.trim() || item.title || `${item.workspaceId} 正在处理`;
+}
+
+function readableProcessDetails(item: UserRunProcess): ProcessReadableDetail[] {
+  const details: ProcessReadableDetail[] = [];
+  if (item.status) details.push({ label: "状态", value: workspaceStatusLabel(item.status as WorkspaceSession["status"]) });
+  if (item.text.trim()) details.push({ label: "说明", value: trimOneLine(item.text, 260) });
+  for (const processItem of item.items ?? []) {
+    const argumentPreview = summarizeArgumentsPreview(processItem.argumentsJson);
+    const action = processItem.status ? `${processItem.toolName} · ${toolCallStatusLabel(processItem.status as ToolCallLog["status"])}` : processItem.toolName;
+    const searchSummary = isSearchLikeTool(processItem.toolName) ? searchResultSummaryFromJson(processItem.resultJson) : { items: [] };
+    if (searchSummary.items.length > 0) {
+      details.push({ label: action, value: `搜索到 ${searchSummary.total ?? searchSummary.items.length} 条结果` });
+      for (const result of searchSummary.items.slice(0, 5)) {
+        const meta = [result.source, result.date].filter(Boolean).join(" · ");
+        details.push({
+          label: result.title,
+          value: [meta, result.snippet ? trimOneLine(result.snippet, 260) : ""].filter(Boolean).join("\n"),
+          url: result.url
+        });
+      }
+      continue;
+    }
+    const resultPreview = searchSummary.error ? `搜索失败：${searchSummary.error}` : summarizeResultPreview(processItem.resultJson);
+    const summary = [
+      processItem.reason ? `理由：${trimOneLine(processItem.reason, 140)}` : "",
+      argumentPreview ? `正在处理：${argumentPreview}` : "",
+      resultPreview ? `结果：${resultPreview}` : "",
+      processItem.summary && processItem.summary !== argumentPreview && processItem.summary !== resultPreview ? processItem.summary : ""
+    ].filter(Boolean).join("；");
+    details.push({ label: action, value: summary || "已执行" });
+  }
+  if (details.length === 0) details.push({ label: "进展", value: userProcessActivityLabel(item) });
+  return details;
+}
+
+function developerProcessDetails(item: UserRunProcess): ProcessReadableDetail[] {
+  return readableProcessDetails(item);
+}
+
+function userProcessesFromTrace(trace: ConversationTrace, runId: string): UserRunProcess[] {
+  return (trace.toolCalls ?? [])
+    .slice()
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map((log) => ({
+      id: `trace-${log.id}`,
+      runId,
+      workspaceId: log.workspaceId,
+      eventKind: "tool_result",
+      title: `${log.toolName} 工具结果`,
+      text: "",
+      status: log.status,
+      toolNames: [log.toolName],
+      items: [processItemFromToolLog(log, "tool_result")],
+      createdAt: log.createdAt
+    }));
+}
+
+function askUserPayloadFromValue(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "string") {
+    const parsed = parseJsonString(value);
+    return parsed === value ? undefined : askUserPayloadFromValue(parsed);
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = askUserPayloadFromValue(item);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!isJsonRecord(value)) return undefined;
+  if (typeof value.question === "string" && Array.isArray(value.choices)) return value;
+  for (const key of ["result", "structuredContent", "payload", "content", "text"]) {
+    const found = askUserPayloadFromValue(value[key]);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function askUserPromptFromProcess(item: UserRunProcess): AskUserPrompt | null {
+  const processItem = item.items?.find((entry) => entry.toolName === "askUser");
+  if (!processItem) return null;
+  const payload = askUserPayloadFromValue(processItem.resultJson) ?? askUserPayloadFromValue(processItem.argumentsJson);
+  if (!payload) return null;
+  const question = typeof payload.question === "string" ? payload.question.trim() : "";
+  const choices = Array.isArray(payload.choices)
+    ? payload.choices.map((choice) => typeof choice === "string" ? choice.trim() : trimOneLine(JSON.stringify(choice), 180)).filter(Boolean)
+    : [];
+  if (!question || choices.length === 0) return null;
+  return {
+    id: item.id,
+    question,
+    choices,
+    reason: typeof payload.reason === "string" ? payload.reason.trim() : undefined
+  };
+}
+
+function latestAskUserPrompt(items: UserRunProcess[], messages: ChatMessage[], loading: boolean): AskUserPrompt | null {
+  if (loading || messages.at(-1)?.role === "用户") return null;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const prompt = askUserPromptFromProcess(items[index]);
+    if (prompt) return prompt;
+  }
+  return null;
+}
+
+function askQuestionAlreadyVisible(messages: ChatMessage[], prompt: AskUserPrompt | null): boolean {
+  if (!prompt) return false;
+  const last = messages.at(-1);
+  if (last?.role !== "助手") return false;
+  const visible = last.content.replace(/\s+/g, "");
+  const question = prompt.question.replace(/\s+/g, "");
+  return question.length > 0 && visible.includes(question.slice(0, Math.min(24, question.length)));
+}
+
+function isProcessTerminalStatus(status: string | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "blocked" || status === "needs_user_input" || status === "needs_approval";
+}
+
+function isProcessActive(item: UserRunProcess, allItems: UserRunProcess[], loading: boolean): boolean {
+  if (!loading) return false;
+  if (isProcessTerminalStatus(item.status)) return false;
+  if (item.eventKind === "tool_result" || item.eventKind === "exit") return false;
+  if (item.eventKind === "tool_call") {
+    const toolNames = new Set(item.toolNames ?? item.items?.map((processItem) => processItem.toolName) ?? []);
+    return !allItems.some((candidate) => candidate !== item
+      && candidate.runId === item.runId
+      && candidate.eventKind === "tool_result"
+      && (candidate.toolNames ?? candidate.items?.map((processItem) => processItem.toolName) ?? []).some((toolName) => toolNames.has(toolName)));
+  }
+  if (item.eventKind === "entered") {
+    return !allItems.some((candidate) => candidate !== item
+      && candidate.runId === item.runId
+      && candidate.workspaceId === item.workspaceId
+      && candidate.eventKind === "exit");
+  }
+  return true;
+}
+
+function processPanelSummary(items: UserRunProcess[], loading: boolean): string {
+  if (items.length === 0) return "运行过程";
+  const active = items.find((item) => isProcessActive(item, items, loading));
+  if (active) return userProcessActivityLabel(active);
+  const searchCount = items.filter((item) => (item.toolNames ?? []).some(isSearchLikeTool)).length;
+  if (searchCount > 0) return `运行过程 · ${searchCount} 次搜索 / ${items.length} 个步骤`;
+  return `运行过程 · ${items.length} 个步骤`;
+}
+
+function memoryTypeLabel(value: string | undefined): string {
+  if (value === "impression") return "关于我";
+  if (value === "event") return "项目 / 事件";
+  if (value === "skill") return "可复用经验";
+  return value || "记忆";
+}
+
+function workspaceRiskText(value: WorkspaceDefinition["riskLevel"]): string {
+  if (value === "low") return "普通";
+  if (value === "medium") return "谨慎";
+  return "高风险";
+}
+
+function newWorkspaceDraftForUser(userId: string): WorkspaceDefinition {
+  const now = new Date().toISOString();
+  return {
+    id: `workspace-${Date.now()}`,
+    name: "新的工作空间",
+    description: "",
+    capabilitiesJson: "[]",
+    inputKindsJson: JSON.stringify(DEFAULT_WORKSPACE_INPUT_KINDS),
+    outputKindsJson: JSON.stringify(DEFAULT_WORKSPACE_OUTPUT_KINDS),
+    requiresApproval: 0,
+    instructions: "",
+    toolInstructions: "",
+    memoryPolicyJson: JSON.stringify({
+      eventRecallEnabled: true,
+      skillRecallEnabled: true,
+      eventWriteEnabled: true,
+      skillWriteEnabled: true,
+      maxEventMemories: 4,
+      maxSkillMemories: 4
+    }),
+    riskLevel: "low",
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
+    manifest: {
+      id: "",
+      name: "新的工作空间",
+      description: "",
+      capabilities: [],
+      inputKinds: DEFAULT_WORKSPACE_INPUT_KINDS,
+      outputKinds: DEFAULT_WORKSPACE_OUTPUT_KINDS,
+      riskLevel: "low",
+      requiresApproval: false
+    },
+    memoryPolicy: {
+      eventRecallEnabled: true,
+      skillRecallEnabled: true,
+      eventWriteEnabled: true,
+      skillWriteEnabled: true,
+      maxEventMemories: 4,
+      maxSkillMemories: 4
+    },
+    tools: []
+  };
+}
+
+function newUserMemoryDraft(type: MemoryRow["memoryType"], userId: string, agentId: string, workspaceId = ""): Partial<MemoryRow> {
+  return {
+    memoryType: type,
+    title: "",
+    summary: "",
+    detail: "",
+    userId: type === "skill" ? undefined : userId,
+    agentId,
+    workspaceId: type === "skill" ? workspaceId || undefined : undefined,
+    version: 1,
+    metadataJson: "{}"
+  };
+}
+
+function UserChatApp() {
+  const cached = loadUserUiCache();
+  const [agents, setAgents] = useState<AgentConfig[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState(cached.selectedAgentId ?? "default-agent");
+  const [agent, setAgent] = useState<AgentConfig | null>(null);
+  const [userId, setUserId] = useState(cached.userId ?? "user");
+  const [userRole, setUserRole] = useState<"user" | "creator">(cached.userRole ?? "user");
+  const [conversationId, setConversationId] = useState(cached.conversationId ?? `conv-${Date.now()}`);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversationFilter, setConversationFilter] = useState("");
+  const [baseUrl, setBaseUrl] = useState(normalizeCachedBaseUrl(cached.baseUrl) ?? DEFAULT_BASE_URL);
+  const [model, setModel] = useState(cached.model ?? "gpt-5-mini");
+  const [apiKey, setApiKey] = useState(cached.apiKey ?? "");
+  const [developerMode, setDeveloperMode] = useState(Boolean(cached.developerMode));
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(Boolean(cached.sidebarCollapsed));
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("basic");
+  const [settingsNotice, setSettingsNotice] = useState("");
+  const [powerBusy, setPowerBusy] = useState(false);
+  const [agentDraft, setAgentDraft] = useState<Partial<AgentConfig>>({});
+  const [workspaces, setWorkspaces] = useState<WorkspaceDefinition[]>([]);
+  const [workspaceDraft, setWorkspaceDraft] = useState<WorkspaceDefinition | null>(null);
+  const [workspaceMcpServers, setWorkspaceMcpServers] = useState<McpServerDefinition[]>([]);
+  const [workspaceMcpDraft, setWorkspaceMcpDraft] = useState<McpServerDefinition | null>(null);
+  const [workspaceDiscoveredTools, setWorkspaceDiscoveredTools] = useState<Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>([]);
+  const [selectedWorkspaceDiscoveredTools, setSelectedWorkspaceDiscoveredTools] = useState<Set<string>>(new Set());
+  const [memories, setMemories] = useState<MemoryRow[]>([]);
+  const [memoryQuery, setMemoryQuery] = useState("");
+  const [memoryTypeFilter, setMemoryTypeFilter] = useState("");
+  const [memoryEditing, setMemoryEditing] = useState<Partial<MemoryRow> | null>(null);
+  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [processItems, setProcessItems] = useState<UserRunProcess[]>([]);
+  const [processPanelOpen, setProcessPanelOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [error, setError] = useState("");
+  const [retryMessage, setRetryMessage] = useState("");
+  const [menuConversationId, setMenuConversationId] = useState("");
+  const [renamingConversationId, setRenamingConversationId] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+  const currentRunControllerRef = useRef<AbortController | null>(null);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+
+  const currentConversation = conversations.find((item) => item.id === conversationId);
+  const filteredConversations = conversations.filter((item) => {
+    const query = conversationFilter.trim().toLowerCase();
+    if (!query) return true;
+    return `${item.title} ${item.lastMessagePreview ?? ""} ${item.id}`.toLowerCase().includes(query);
+  });
+
+  useEffect(() => {
+    api<{ agents: AgentConfig[] }>("/api/agents")
+      .then(({ agents: loadedAgents }) => {
+        setAgents(loadedAgents);
+        const loaded = loadedAgents.find((item) => item.id === selectedAgentId)
+          ?? loadedAgents.find((item) => item.id === "default-agent")
+          ?? loadedAgents[0];
+        if (!loaded) throw new Error("没有可用智能体。");
+        setSelectedAgentId(loaded.id);
+        setAgent(loaded);
+        setBaseUrl((current) => normalizeCachedBaseUrl(cached.baseUrl) ?? normalizeCachedBaseUrl(loaded.defaultBaseUrl) ?? current);
+        setModel(cached.model ?? loaded.defaultModel);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, []);
+
+  useEffect(() => {
+    saveUserUiCache({
+      selectedAgentId,
+      userId,
+      userRole,
+      conversationId,
+      baseUrl,
+      model,
+      apiKey,
+      developerMode,
+      sidebarCollapsed
+    });
+  }, [selectedAgentId, userId, userRole, conversationId, baseUrl, model, apiKey, developerMode, sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!selectedAgentId) return;
+    void refreshConversations(conversationId, false);
+  }, [selectedAgentId, userId, userRole]);
+
+  useEffect(() => {
+    if (agent) setAgentDraft(agent);
+  }, [agent?.id]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    setSettingsNotice("");
+    if (settingsSection === "workspaces") void loadUserWorkspaces();
+    if (settingsSection === "memory") void loadUserMemories();
+  }, [settingsOpen, settingsSection]);
+
+  useEffect(() => {
+    if (!settingsOpen || settingsSection !== "workspaces" || !workspaceDraft?.id) return;
+    if (!workspaces.some((workspace) => workspace.id === workspaceDraft.id)) {
+      setWorkspaceMcpServers([]);
+      setWorkspaceMcpDraft(null);
+      setWorkspaceDiscoveredTools([]);
+      setSelectedWorkspaceDiscoveredTools(new Set());
+      return;
+    }
+    void loadUserMcpServers(workspaceDraft.id);
+    setWorkspaceDiscoveredTools([]);
+    setSelectedWorkspaceDiscoveredTools(new Set());
+  }, [settingsOpen, settingsSection, workspaceDraft?.id]);
+
+  useEffect(() => {
+    messageListRef.current?.scrollTo({ top: messageListRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length, messages.at(-1)?.content, developerMode, processItems.length]);
+
+  async function refreshConversations(preferredId = conversationId, shouldLoadMessages = true): Promise<ConversationSummary[]> {
+    const params = new URLSearchParams({
+      actorId: userId,
+      actorRole: userRole,
+      limit: "80"
+    });
+    if (selectedAgentId) params.set("agentId", selectedAgentId);
+    const data = await api<{ conversations: ConversationSummary[] }>(`/api/conversations?${params.toString()}`);
+    setConversations(data.conversations);
+    const preferred = data.conversations.find((item) => item.id === preferredId);
+    const nextId = preferred?.id ?? data.conversations[0]?.id ?? preferredId ?? `conv-${Date.now()}`;
+    if (nextId && nextId !== conversationId) setConversationId(nextId);
+    if (shouldLoadMessages && data.conversations.some((item) => item.id === nextId)) {
+      await loadConversationMessages(nextId);
+    } else if (!data.conversations.length && !messages.length) {
+      setMessages([]);
+      setProcessItems([]);
+      setProcessPanelOpen(false);
+    }
+    return data.conversations;
+  }
+
+  async function loadConversationMessages(targetId: string): Promise<void> {
+    if (!targetId) return;
+    setLoadingMessages(true);
+    setError("");
+    try {
+      const params = new URLSearchParams({ actorId: userId, actorRole: userRole, limit: "240" });
+      const data = await api<{ messages: StoredMessage[] }>(`/api/conversations/${encodeURIComponent(targetId)}/messages?${params.toString()}`);
+      setConversationId(targetId);
+      setMessages(data.messages.map(storedMessageToChatMessage));
+      await loadConversationProcesses(targetId, false);
+      setRetryMessage("");
+      setMobileSidebarOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingMessages(false);
+    }
+  }
+
+  async function loadConversationProcesses(targetId: string, keepOpen: boolean): Promise<void> {
+    if (!targetId) return;
+    try {
+      const params = new URLSearchParams({ actorId: userId, actorRole: userRole });
+      const trace = await api<ConversationTrace>(`/api/conversations/${encodeURIComponent(targetId)}/trace?${params.toString()}`);
+      setProcessItems(userProcessesFromTrace(trace, `trace-${targetId}`));
+      setProcessPanelOpen(keepOpen);
+    } catch {
+      setProcessItems([]);
+      setProcessPanelOpen(false);
+    }
+  }
+
+  function createConversation() {
+    currentRunControllerRef.current?.abort();
+    const nextId = `conv-${Date.now()}`;
+    setConversationId(nextId);
+    setMessages([]);
+    setProcessItems([]);
+    setProcessPanelOpen(false);
+    setMessage("");
+    setError("");
+    setRetryMessage("");
+    setMobileSidebarOpen(false);
+  }
+
+  async function deleteConversation(targetId: string) {
+    await api(`/api/conversations/${encodeURIComponent(targetId)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ actorId: userId, actorRole: userRole, deleteReason: "用户在新 UI 删除会话" })
+    });
+    const nextItems = await refreshConversations("", false);
+    const next = nextItems.find((item) => item.id !== targetId) ?? nextItems[0];
+    if (next) {
+      await loadConversationMessages(next.id);
+    } else {
+      createConversation();
+    }
+  }
+
+  async function renameConversation(targetId: string) {
+    const title = renameDraft.trim();
+    if (!title) return;
+    const saved = await api<ConversationSummary>(`/api/conversations/${encodeURIComponent(targetId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title, actorId: userId, actorRole: userRole })
+    });
+    setConversations((items) => items.map((item) => item.id === saved.id ? saved : item));
+    setRenamingConversationId("");
+    setRenameDraft("");
+    setMenuConversationId("");
+  }
+
+  async function copyConversationId(targetId: string) {
+    await navigator.clipboard?.writeText(targetId).catch(() => undefined);
+    setMenuConversationId("");
+  }
+
+  function openDev(targetId = conversationId) {
+    window.location.href = `/dev?conversationId=${encodeURIComponent(targetId)}`;
+  }
+
+  function selectAgent(agentId: string) {
+    const next = agents.find((item) => item.id === agentId);
+    if (!next) return;
+    setSelectedAgentId(next.id);
+    setAgent(next);
+    setBaseUrl(normalizeCachedBaseUrl(next.defaultBaseUrl) ?? DEFAULT_BASE_URL);
+    setModel(next.defaultModel);
+    createConversation();
+  }
+
+  async function createUserAgent() {
+    const source = agent ?? agents[0];
+    if (!source) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      const created = await api<AgentConfig>("/api/agents", {
+        method: "POST",
+        body: JSON.stringify({
+          id: `agent-${Date.now()}`,
+          name: `我的 Agent ${agents.length + 1}`,
+          systemPrompt: agentDraft.systemPrompt || source.systemPrompt,
+          personalityPrompt: agentDraft.personalityPrompt || source.personalityPrompt,
+          defaultModel: model || source.defaultModel,
+          defaultBaseUrl: normalizeCachedBaseUrl(baseUrl) ?? source.defaultBaseUrl,
+          actorId: userId,
+          actorRole: userRole
+        })
+      });
+      setAgents((items) => [...items, created]);
+      setSelectedAgentId(created.id);
+      setAgent(created);
+      setAgentDraft(created);
+      setSettingsNotice("已创建新的 Agent。");
+    } catch (err) {
+      setSettingsNotice(`创建失败：${memoryErrorText(err)}。如果你不是创建者身份，请在高级设置中切换后再试。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function saveUserAgent() {
+    if (!agent || !agentDraft.name || !agentDraft.defaultModel || !agentDraft.defaultBaseUrl) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      const saved = await api<AgentConfig>(`/api/agents/${encodeURIComponent(agent.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          ...agent,
+          ...agentDraft,
+          id: agent.id,
+          actorId: userId,
+          actorRole: userRole
+        })
+      });
+      setAgent(saved);
+      setAgentDraft(saved);
+      setAgents((items) => items.map((item) => item.id === saved.id ? saved : item));
+      setBaseUrl(normalizeCachedBaseUrl(saved.defaultBaseUrl) ?? DEFAULT_BASE_URL);
+      setModel(saved.defaultModel);
+      setSettingsNotice("Agent 已保存。");
+    } catch (err) {
+      setSettingsNotice(`保存失败：${memoryErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function loadUserWorkspaces() {
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      const data = await api<{ workspaces: WorkspaceDefinition[]; tools: ToolDefinition[] }>("/api/workspaces");
+      setWorkspaces(data.workspaces);
+      if (data.workspaces.length === 0) {
+        setWorkspaceMcpServers([]);
+        setWorkspaceMcpDraft(null);
+        setWorkspaceDiscoveredTools([]);
+        setSelectedWorkspaceDiscoveredTools(new Set());
+      }
+      setWorkspaceDraft((current) => {
+        if (current && data.workspaces.some((item) => item.id === current.id)) {
+          return data.workspaces.find((item) => item.id === current.id) ?? current;
+        }
+        return data.workspaces[0] ?? null;
+      });
+    } catch (err) {
+      setSettingsNotice(`工作空间加载失败：${memoryErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function saveUserWorkspace() {
+    if (!workspaceDraft?.id || !workspaceDraft.name.trim()) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      const exists = workspaces.some((workspace) => workspace.id === workspaceDraft.id);
+      const normalized = normalizeWorkspaceForSave(workspaceDraft);
+      const saved = await api<WorkspaceDefinition>(
+        exists ? `/api/workspaces/${encodeURIComponent(workspaceDraft.id)}` : "/api/workspaces",
+        {
+          method: exists ? "PUT" : "POST",
+          body: JSON.stringify({
+            ...normalized,
+            toolIds: normalized.tools.map((tool) => tool.id),
+            actorId: userId,
+            actorRole: userRole
+          })
+        }
+      );
+      setWorkspaceDraft(saved);
+      await loadUserWorkspaces();
+      setSettingsNotice("工作空间已保存。");
+    } catch (err) {
+      setSettingsNotice(`保存失败：${memoryErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function loadUserMcpServers(workspaceId: string) {
+    const params = new URLSearchParams({ actorId: userId, actorRole: userRole });
+    try {
+      const data = await api<{ mcpServers: McpServerDefinition[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers?${params.toString()}`);
+      setWorkspaceMcpServers(data.mcpServers);
+      setWorkspaceMcpDraft((current) => {
+        if (current && current.workspaceId === workspaceId) {
+          return data.mcpServers.find((server) => server.id === current.id) ?? current;
+        }
+        return null;
+      });
+    } catch (err) {
+      setSettingsNotice(`MCP Server 加载失败：${mcpUserErrorText(err)}。`);
+    }
+  }
+
+  async function saveUserMcpServer(): Promise<McpServerDefinition | null> {
+    if (!workspaceDraft || !workspaceMcpDraft) return null;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      JSON.parse(workspaceMcpDraft.argsJson || "[]");
+      JSON.parse(workspaceMcpDraft.envJson || "{}");
+      JSON.parse(workspaceMcpDraft.headersJson || "{}");
+      const exists = workspaceMcpServers.some((server) => server.id === workspaceMcpDraft.id);
+      const saved = await api<McpServerDefinition>(
+        exists
+          ? `/api/workspaces/${encodeURIComponent(workspaceDraft.id)}/mcp-servers/${encodeURIComponent(workspaceMcpDraft.id)}`
+          : `/api/workspaces/${encodeURIComponent(workspaceDraft.id)}/mcp-servers`,
+        {
+          method: exists ? "PUT" : "POST",
+          body: JSON.stringify({
+            ...workspaceMcpDraft,
+            workspaceId: workspaceDraft.id,
+            actorId: userId,
+            actorRole: userRole
+          })
+        }
+      );
+      setWorkspaceMcpDraft(saved);
+      await loadUserMcpServers(workspaceDraft.id);
+      setSettingsNotice("MCP Server 已保存。");
+      return saved;
+    } catch (err) {
+      setSettingsNotice(`MCP Server 保存失败：${mcpUserErrorText(err)}。`);
+      return null;
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function deleteUserMcpServer(server: McpServerDefinition) {
+    if (!workspaceDraft) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      await api(`/api/workspaces/${encodeURIComponent(workspaceDraft.id)}/mcp-servers/${encodeURIComponent(server.id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          actorId: userId,
+          actorRole: userRole,
+          deleteReason: "用户在新 UI 删除 MCP Server"
+        })
+      });
+      setWorkspaceDiscoveredTools([]);
+      setSelectedWorkspaceDiscoveredTools(new Set());
+      await loadUserWorkspaces();
+      await loadUserMcpServers(workspaceDraft.id);
+      setSettingsNotice("MCP Server 已删除，相关工具也已移除。");
+    } catch (err) {
+      setSettingsNotice(`MCP Server 删除失败：${mcpUserErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function discoverUserMcpTools() {
+    if (!workspaceDraft || !workspaceMcpDraft) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    setWorkspaceDiscoveredTools([]);
+    setSelectedWorkspaceDiscoveredTools(new Set());
+    try {
+      const server = await saveUserMcpServer();
+      if (!server) return;
+      const data = await api<{ tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> }>(
+        `/api/workspaces/${encodeURIComponent(workspaceDraft.id)}/mcp-servers/${encodeURIComponent(server.id)}/discover`,
+        {
+          method: "POST",
+          body: JSON.stringify({ actorId: userId, actorRole: userRole })
+        }
+      );
+      setWorkspaceDiscoveredTools(data.tools);
+      setSelectedWorkspaceDiscoveredTools(new Set(data.tools.map((tool) => tool.name)));
+      setSettingsNotice(data.tools.length > 0 ? `检测到 ${data.tools.length} 个工具。` : "没有检测到可挂载工具。");
+    } catch (err) {
+      setSettingsNotice(`工具检测失败：${mcpUserErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function importUserMcpTools() {
+    if (!workspaceDraft || !workspaceMcpDraft) return;
+    const tools = workspaceDiscoveredTools.filter((tool) => selectedWorkspaceDiscoveredTools.has(tool.name));
+    if (tools.length === 0) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      await api<{ tools: ToolDefinition[] }>(
+        `/api/workspaces/${encodeURIComponent(workspaceDraft.id)}/mcp-servers/${encodeURIComponent(workspaceMcpDraft.id)}/import-tools`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            tools,
+            actorId: userId,
+            actorRole: userRole
+          })
+        }
+      );
+      setWorkspaceDiscoveredTools([]);
+      setSelectedWorkspaceDiscoveredTools(new Set());
+      await loadUserWorkspaces();
+      setSettingsNotice(`已挂载 ${tools.length} 个工具。`);
+    } catch (err) {
+      setSettingsNotice(`工具挂载失败：${mcpUserErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function deleteUserWorkspaceTool(tool: ToolDefinition) {
+    if (!workspaceDraft || isSystemTool(tool)) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      await api(`/api/workspaces/${encodeURIComponent(workspaceDraft.id)}/tools/${encodeURIComponent(tool.id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          actorId: userId,
+          actorRole: userRole,
+          deleteReason: "用户在新 UI 删除工作空间工具"
+        })
+      });
+      await loadUserWorkspaces();
+      setSettingsNotice("工具已移除。");
+    } catch (err) {
+      setSettingsNotice(`工具删除失败：${mcpUserErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function loadUserMemories() {
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      const params = new URLSearchParams({ actorId: userId, actorRole: userRole });
+      if (memoryQuery.trim()) params.set("query", memoryQuery.trim());
+      if (memoryTypeFilter) params.set("memoryType", memoryTypeFilter);
+      if (selectedAgentId) params.set("agentId", selectedAgentId);
+      const data = await api<{ memories: MemoryRow[] }>(`/api/memories?${params.toString()}`);
+      setMemories(data.memories);
+    } catch (err) {
+      setSettingsNotice(`记忆加载失败：${memoryErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function saveUserMemory() {
+    if (!memoryEditing?.memoryType || !memoryEditing.title || !memoryEditing.summary || !memoryEditing.detail) return;
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      const body = {
+        memoryType: memoryEditing.memoryType,
+        title: memoryEditing.title,
+        summary: memoryEditing.summary,
+        detail: memoryEditing.detail,
+        userId: memoryEditing.memoryType === "skill" ? undefined : (memoryEditing.userId || userId),
+        agentId: memoryEditing.agentId || selectedAgentId,
+        workspaceId: memoryEditing.workspaceId || undefined,
+        actorId: userId,
+        actorRole: userRole
+      };
+      if (memoryEditing.id) {
+        await api(`/api/memories/${encodeURIComponent(memoryEditing.id)}`, {
+          method: "PUT",
+          body: JSON.stringify(body)
+        });
+      } else {
+        await api("/api/memories", {
+          method: "POST",
+          body: JSON.stringify(body)
+        });
+      }
+      setMemoryEditing(null);
+      await loadUserMemories();
+      setSettingsNotice("记忆已保存。");
+    } catch (err) {
+      setSettingsNotice(`保存失败：${memoryErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  async function deleteUserMemory(id: string) {
+    setPowerBusy(true);
+    setSettingsNotice("");
+    try {
+      await api(`/api/memories/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        body: JSON.stringify({ actorId: userId, actorRole: userRole, deleteReason: "用户在新 UI 删除记忆" })
+      });
+      if (memoryEditing?.id === id) setMemoryEditing(null);
+      await loadUserMemories();
+      setSettingsNotice("记忆已删除。");
+    } catch (err) {
+      setSettingsNotice(`删除失败：${memoryErrorText(err)}。`);
+    } finally {
+      setPowerBusy(false);
+    }
+  }
+
+  function removeFailedRetryPair(items: ChatMessage[], requestText: string): ChatMessage[] {
+    const last = items.at(-1);
+    if (!last?.failed || last.requestText !== requestText) return items;
+    const withoutError = items.slice(0, -1);
+    const previous = withoutError.at(-1);
+    if (previous?.role === "用户" && previous.content === requestText) return withoutError.slice(0, -1);
+    return withoutError;
+  }
+
+  async function sendMessage(retryText?: string) {
+    const cleanMessage = typeof retryText === "string" ? retryText : message;
+    if (loading || !cleanMessage.trim() || !agent) return;
+    const runId = createLocalId("run");
+    const userMessageId = createLocalId("user-msg");
+    const assistantMessageId = createLocalId("assistant-msg");
+    const controller = new AbortController();
+    currentRunControllerRef.current = controller;
+    setLoading(true);
+    setError("");
+    setRetryMessage("");
+    setProcessPanelOpen(true);
+    setMessage("");
+    setMessages((items) => [
+      ...removeFailedRetryPair(items, cleanMessage),
+      { id: userMessageId, runId, role: "用户", content: cleanMessage },
+      { id: assistantMessageId, runId, role: "助手", content: "", streaming: true }
+    ]);
+
+    const effectiveBaseUrl = normalizeCachedBaseUrl(baseUrl) ?? DEFAULT_BASE_URL;
+    if (effectiveBaseUrl !== baseUrl) setBaseUrl(effectiveBaseUrl);
+
+    try {
+      const response = await fetch("/api/agent/run/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: agent.id,
+          userId,
+          userRole,
+          conversationId,
+          message: cleanMessage,
+          llm: { baseUrl: effectiveBaseUrl, model, apiKey: apiKey || undefined }
+        }),
+        signal: controller.signal
+      });
+      if (!response.ok || !response.body) throw new Error(`请求失败：${response.status}`);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let assistantText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (controller.signal.aborted) throw new Error("运行已停止。");
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+
+        for (const event of events) {
+          const line = event.split("\n").find((item) => item.startsWith("data:"));
+          if (!line) continue;
+          const payload = JSON.parse(line.slice(5).trim()) as any;
+          if (payload.type === "delta") {
+            assistantText += payload.text;
+            setMessages((items) => items.map((item) => item.id === assistantMessageId ? { ...item, content: assistantText, streaming: true } : item));
+          }
+          if (payload.type === "workspace") {
+            setProcessItems((items) => [
+              ...items,
+              {
+                id: createLocalId("process"),
+                runId,
+                workspaceId: payload.workspaceId,
+                eventKind: payload.eventKind,
+                title: payload.title,
+                text: payload.text,
+                status: payload.status,
+                toolNames: payload.toolNames,
+                items: payload.items,
+                createdAt: new Date().toISOString()
+              }
+            ]);
+          }
+          if (payload.type === "done") {
+            setMessages((items) => items.map((item) => item.id === assistantMessageId ? { ...item, content: payload.output.assistantMessage, streaming: false } : item));
+            await refreshConversations(payload.output.conversationId, false);
+            await loadConversationProcesses(payload.output.conversationId, false);
+          }
+          if (payload.type === "error") throw new Error(payload.error);
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) {
+        setMessages((items) => items.map((item) => item.id === assistantMessageId
+          ? { ...item, content: item.content || "已停止运行。", streaming: false }
+          : item.streaming ? { ...item, streaming: false } : item));
+        setProcessPanelOpen(false);
+        setError("");
+        return;
+      }
+      const messageText = err instanceof Error ? err.message : String(err);
+      setError(messageText);
+      setRetryMessage(cleanMessage);
+      setProcessPanelOpen(false);
+      setMessages((items) => items.filter((item) => item.runId !== runId));
+    } finally {
+      if (currentRunControllerRef.current === controller) currentRunControllerRef.current = null;
+      setLoading(false);
+    }
+  }
+
+  function stopCurrentRun() {
+    currentRunControllerRef.current?.abort();
+  }
+
+  function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    if (event.shiftKey || event.ctrlKey) return;
+    event.preventDefault();
+    void sendMessage();
+  }
+
+  const workspaceCustomTools = workspaceDraft?.tools.filter((tool) => !isSystemTool(tool)) ?? [];
+  const workspaceHasUnsavedDraft = Boolean(workspaceDraft && !workspaces.some((workspace) => workspace.id === workspaceDraft.id));
+  const pendingAskUser = latestAskUserPrompt(processItems, messages, loading);
+  const pendingAskQuestionVisible = askQuestionAlreadyVisible(messages, pendingAskUser);
+  const processAnchorMessageId = messages.slice().reverse().find((item) => item.role !== "用户")?.id ?? "";
+
+  function renderProcessPanel() {
+    if (processItems.length === 0) return null;
+    return (
+      <section className="tool-process-row" aria-label="Agent 运行进展">
+        <div className="assistant-avatar process-avatar">Z</div>
+        <details
+          className="tool-process-panel"
+          open={loading || processPanelOpen}
+          onToggle={(event) => {
+            if (!loading) setProcessPanelOpen(event.currentTarget.open);
+          }}
+        >
+          <summary>
+            <span className={`tool-activity-dot ${processItems.some((item) => isProcessActive(item, processItems, loading)) ? "active" : "done"}`} />
+            <span>{processPanelSummary(processItems, loading)}</span>
+            <small>{loading ? "运行中" : "点击查看详情"}</small>
+          </summary>
+          <div className="tool-activity-list">
+            {processItems.map((item) => {
+              const active = isProcessActive(item, processItems, loading);
+              return (
+                <details key={item.id} className={`tool-activity ${active ? "active" : "done"}`}>
+                  <summary>
+                    <span className="tool-activity-dot" />
+                    <span>{userProcessActivityLabel(item)}</span>
+                    <small>{item.workspaceId}</small>
+                  </summary>
+                  <div className="tool-activity-detail">
+                    {readableProcessDetails(item).map((detail, index) => (
+                      <div key={`${item.id}-${index}`}>
+                        <strong>{detail.url ? <a href={detail.url} target="_blank" rel="noreferrer">{detail.label}</a> : detail.label}</strong>
+                        <span>{detail.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        </details>
+      </section>
+    );
+  }
+
+  return (
+    <main className={`user-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <button className="mobile-sidebar-button" type="button" aria-label="打开会话栏" onClick={() => setMobileSidebarOpen(true)}>☰</button>
+      {mobileSidebarOpen && <button className="sidebar-scrim" aria-label="关闭会话栏" onClick={() => setMobileSidebarOpen(false)} />}
+      <aside className={`user-sidebar ${mobileSidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-head">
+          <button className="new-chat-button" type="button" onClick={createConversation}>+ 新对话</button>
+          <button className="icon-button" type="button" aria-label="折叠侧边栏" onClick={() => setSidebarCollapsed((value) => !value)}>‹</button>
+        </div>
+        <label className="conversation-search">
+          <input value={conversationFilter} onChange={(event) => setConversationFilter(event.target.value)} placeholder="搜索会话" />
+        </label>
+        <div className="conversation-list">
+          {filteredConversations.map((conversation) => (
+            <article
+              key={conversation.id}
+              className={`conversation-item ${conversation.id === conversationId ? "active" : ""} ${menuConversationId === conversation.id ? "menu-open" : ""}`}
+              onClick={() => void loadConversationMessages(conversation.id)}
+            >
+              {renamingConversationId === conversation.id ? (
+                <form className="rename-form" onSubmit={(event) => {
+                  event.preventDefault();
+                  void renameConversation(conversation.id);
+                }}>
+                  <input value={renameDraft} onChange={(event) => setRenameDraft(event.target.value)} autoFocus />
+                  <button type="submit">保存</button>
+                </form>
+              ) : (
+                <>
+                  <div className="conversation-copy">
+                    <strong>{conversation.title}</strong>
+                    <span>{conversation.lastMessagePreview || "新的会话"}</span>
+                    <small>{formatConversationTime(conversation.updatedAt)}</small>
+                  </div>
+                  <button className="conversation-menu-button" type="button" aria-label="会话菜单" onClick={(event) => {
+                    event.stopPropagation();
+                    setMenuConversationId((current) => current === conversation.id ? "" : conversation.id);
+                  }}>...</button>
+                  {menuConversationId === conversation.id && (
+                    <div className="conversation-menu" onClick={(event) => event.stopPropagation()}>
+                      <button onClick={() => {
+                        setRenamingConversationId(conversation.id);
+                        setRenameDraft(conversation.title);
+                        setMenuConversationId("");
+                      }}>重命名</button>
+                      <button onClick={() => void copyConversationId(conversation.id)}>复制 ID</button>
+                      <button onClick={() => openDev(conversation.id)}>开发者打开</button>
+                      <button className="danger-text" onClick={() => void deleteConversation(conversation.id)}>删除</button>
+                    </div>
+                  )}
+                </>
+              )}
+            </article>
+          ))}
+          {filteredConversations.length === 0 && <div className="sidebar-empty">开始一个新对话</div>}
+        </div>
+        <div className="sidebar-foot">
+          <button onClick={() => setSettingsOpen(true)}>设置</button>
+          <label className="developer-toggle">
+            <input type="checkbox" checked={developerMode} onChange={(event) => setDeveloperMode(event.target.checked)} />
+            <span>开发者模式</span>
+          </label>
+          {developerMode && <button onClick={() => openDev()}>打开调试台</button>}
+        </div>
+      </aside>
+
+      <section className="user-chat">
+        <header className="user-chat-header">
+          <div>
+            <strong>{agent?.name ?? "Zleap Agent"}</strong>
+            <span>{currentConversation?.title ?? "新对话"}</span>
+          </div>
+          <div className="chat-header-actions">
+            <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="模型">
+              <option value={model}>{model}</option>
+              <option value="gpt-5-mini">gpt-5-mini</option>
+              <option value="gpt-5">gpt-5</option>
+              <option value="gpt-4.1">gpt-4.1</option>
+            </select>
+            <button onClick={() => setSettingsOpen(true)}>设置</button>
+            {developerMode && <button onClick={() => openDev()}>/dev</button>}
+          </div>
+        </header>
+
+        <div className="user-message-list" ref={messageListRef}>
+          {loadingMessages && <div className="user-empty-state">正在载入会话...</div>}
+          {!loadingMessages && messages.length === 0 && (
+            <div className="user-empty-state">
+              <div className="empty-mark">Z</div>
+              <h1>今天想完成什么？</h1>
+              <p>直接描述目标，Zleap 会在背后选择合适的工作空间和工具。</p>
+            </div>
+          )}
+          {messages.map((item) => (
+            <React.Fragment key={item.id}>
+              {item.id === processAnchorMessageId && renderProcessPanel()}
+              <article className={`user-message ${item.role === "用户" ? "from-user" : "from-assistant"} ${item.streaming ? "streaming" : ""}`}>
+                {item.role !== "用户" && <div className="assistant-avatar">Z</div>}
+                <div className="user-message-bubble">
+                  {item.content ? <MarkdownMessage content={item.content} /> : <span className="typing-dots"><i /><i /><i /></span>}
+                </div>
+              </article>
+            </React.Fragment>
+          ))}
+          {!processAnchorMessageId && renderProcessPanel()}
+          {pendingAskUser && (
+            <section className="ask-user-panel" aria-label="需要你选择">
+              <div className="assistant-avatar">Z</div>
+              <div className="ask-user-card">
+                {!pendingAskQuestionVisible && <strong>{pendingAskUser.question}</strong>}
+                <div className="ask-user-options">
+                  {pendingAskUser.choices.map((choice, index) => (
+                    <button
+                      key={`${pendingAskUser.id}-${index}`}
+                      type="button"
+                      onClick={() => void sendMessage(choice)}
+                      disabled={loading || !agent}
+                    >
+                      {choice}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+          {developerMode && processItems.length > 0 && (
+            <section className="developer-process-list">
+              <h2>运行过程</h2>
+              {processItems.map((item) => (
+                <details key={item.id}>
+                  <summary>{userProcessActivityLabel(item)}<span>{item.workspaceId}</span></summary>
+                  <div className="developer-process-readable">
+                    {developerProcessDetails(item).map((detail, index) => (
+                      <div key={`${item.id}-${index}`}>
+                        <strong>{detail.url ? <a href={detail.url} target="_blank" rel="noreferrer">{detail.label}</a> : detail.label}</strong>
+                        <span>{detail.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </section>
+          )}
+        </div>
+
+        <footer className="user-composer-wrap">
+          {error && (
+            <div className="user-error">
+              <span>{error}</span>
+              {retryMessage && <button onClick={() => void sendMessage(retryMessage)} disabled={loading}>重试</button>}
+            </div>
+          )}
+          <div className="user-composer">
+            <button className="tool-menu-button" type="button" title="工具菜单">+</button>
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              placeholder="向 Zleap 发送消息"
+              rows={1}
+            />
+            {loading
+              ? <button className="send-button stop" onClick={stopCurrentRun}>停止</button>
+              : <button className="send-button" disabled={!message.trim() || !agent} onClick={() => void sendMessage()}>发送</button>}
+          </div>
+          <p className="composer-note">Enter 发送，Shift+Enter 换行。API Key 只保存在当前浏览器。</p>
+        </footer>
+      </section>
+
+      {settingsOpen && (
+        <div className="settings-layer" role="dialog" aria-modal="true" aria-label="设置">
+          <button className="settings-backdrop" aria-label="关闭设置" onClick={() => setSettingsOpen(false)} />
+          <section className="settings-modal">
+            <div className="settings-title">
+              <h2>设置</h2>
+              <button className="icon-button" onClick={() => setSettingsOpen(false)}>×</button>
+            </div>
+            <nav className="settings-tabs" aria-label="设置分区">
+              {([
+                ["basic", "基础"],
+                ["agents", "Agent"],
+                ["workspaces", "工作空间"],
+                ["memory", "记忆"],
+                ["advanced", "高级"]
+              ] as Array<[SettingsSection, string]>).map(([section, label]) => (
+                <button key={section} className={settingsSection === section ? "active" : ""} onClick={() => setSettingsSection(section)}>{label}</button>
+              ))}
+            </nav>
+            {settingsNotice && <div className="settings-notice">{settingsNotice}</div>}
+            {settingsSection === "basic" && (
+              <section className="settings-section">
+                <p>这里是日常对话需要的最小配置。更深入的 Agent、工作空间和记忆管理可以在上方切换。</p>
+                <label>Agent
+                  <select value={selectedAgentId} onChange={(event) => selectAgent(event.target.value)}>
+                    {agents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+                <label>Model<input value={model} onChange={(event) => setModel(event.target.value)} /></label>
+                <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} onBlur={() => setBaseUrl(normalizeCachedBaseUrl(baseUrl) ?? DEFAULT_BASE_URL)} /></label>
+                <label>API Key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="只保存在当前浏览器" /></label>
+              </section>
+            )}
+            {settingsSection === "agents" && (
+              <section className="settings-section">
+                <p>创建不同 Agent 来适配不同工作方式。这里用自然语言描述，不需要理解底层 prompt。</p>
+                <div className="power-toolbar">
+                  <select value={selectedAgentId} onChange={(event) => selectAgent(event.target.value)}>
+                    {agents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                  <button onClick={() => void createUserAgent()} disabled={powerBusy}>新建 Agent</button>
+                </div>
+                <label>名称<input value={agentDraft.name ?? ""} onChange={(event) => setAgentDraft({ ...agentDraft, name: event.target.value })} /></label>
+                <label>默认模型<input value={agentDraft.defaultModel ?? model} onChange={(event) => setAgentDraft({ ...agentDraft, defaultModel: event.target.value })} /></label>
+                <label>服务地址<input value={agentDraft.defaultBaseUrl ?? baseUrl} onChange={(event) => setAgentDraft({ ...agentDraft, defaultBaseUrl: event.target.value })} /></label>
+                <label>核心指令<textarea value={agentDraft.systemPrompt ?? ""} onChange={(event) => setAgentDraft({ ...agentDraft, systemPrompt: event.target.value })} placeholder="它负责什么、应该如何行动" /></label>
+                <label>表达风格<textarea value={agentDraft.personalityPrompt ?? ""} onChange={(event) => setAgentDraft({ ...agentDraft, personalityPrompt: event.target.value })} placeholder="语气、偏好、回答方式" /></label>
+                <div className="settings-actions inline">
+                  <button className="primary" onClick={() => void saveUserAgent()} disabled={powerBusy || !agent}>保存 Agent</button>
+                </div>
+              </section>
+            )}
+            {settingsSection === "workspaces" && (
+              <section className="settings-section">
+                <p>工作空间是 Agent 的专业场景。这里可以描述用途，也可以用 MCP Server 接入这个场景专用的外部工具；内置系统工具不会显示在列表里。</p>
+                <div className="power-split">
+                  <div className="power-list">
+                    <button className="power-list-item create" onClick={() => {
+                      setWorkspaceDraft(newWorkspaceDraftForUser(userId));
+                      setWorkspaceMcpServers([]);
+                      setWorkspaceMcpDraft(null);
+                      setWorkspaceDiscoveredTools([]);
+                      setSelectedWorkspaceDiscoveredTools(new Set());
+                    }}>+ 新工作空间</button>
+                    {workspaces.map((workspace) => (
+                      <button key={workspace.id} className={`power-list-item ${workspaceDraft?.id === workspace.id ? "active" : ""}`} onClick={() => {
+                        setWorkspaceDraft(workspace);
+                        setWorkspaceDiscoveredTools([]);
+                        setSelectedWorkspaceDiscoveredTools(new Set());
+                      }}>
+                        <strong>{workspace.name}</strong>
+                        <span>{workspace.description || workspace.id}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="power-editor">
+                    {workspaceDraft ? (
+                      <>
+                        <label>ID<input value={workspaceDraft.id} disabled={workspaces.some((item) => item.id === workspaceDraft.id)} onChange={(event) => setWorkspaceDraft({ ...workspaceDraft, id: event.target.value })} /></label>
+                        <label>名称<input value={workspaceDraft.name} onChange={(event) => setWorkspaceDraft({ ...workspaceDraft, name: event.target.value })} /></label>
+                        <label>用途说明<textarea value={workspaceDraft.description} onChange={(event) => setWorkspaceDraft({ ...workspaceDraft, description: event.target.value })} placeholder="这个工作空间适合处理什么任务" /></label>
+                        <label>能力清单<textarea value={stringifyListText(workspaceDraft.capabilitiesJson)} onChange={(event) => setWorkspaceDraft(updateWorkspaceListField(workspaceDraft, "capabilitiesJson", event.target.value))} placeholder="每行一条，例如：联网搜索资料" /></label>
+                        <label>风险等级
+                          <select value={workspaceDraft.riskLevel} onChange={(event) => setWorkspaceDraft({ ...workspaceDraft, riskLevel: event.target.value as WorkspaceDefinition["riskLevel"] })}>
+                            <option value="low">{workspaceRiskText("low")}</option>
+                            <option value="medium">{workspaceRiskText("medium")}</option>
+                            <option value="high">{workspaceRiskText("high")}</option>
+                          </select>
+                        </label>
+                        <label className="developer-toggle compact">
+                          <input type="checkbox" checked={Boolean(workspaceDraft.requiresApproval)} onChange={(event) => setWorkspaceDraft({ ...workspaceDraft, requiresApproval: event.target.checked ? 1 : 0 })} />
+                          <span>使用前需要我确认</span>
+                        </label>
+                        <div className="settings-actions inline">
+                          <button className="primary" onClick={() => void saveUserWorkspace()} disabled={powerBusy}>保存工作空间</button>
+                        </div>
+                        <section className="workspace-user-tools">
+                          <div className="user-section-heading">
+                            <div>
+                              <h3>MCP Server</h3>
+                              <p>给当前工作空间增加外部工具来源。保存工作空间后才能配置 Server。</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setWorkspaceMcpDraft(createMcpServerDraft(workspaceDraft.id))}
+                              disabled={workspaceHasUnsavedDraft || powerBusy}
+                            >添加 Server</button>
+                          </div>
+                          {workspaceHasUnsavedDraft ? (
+                            <div className="soft-empty">先保存工作空间，再配置 MCP Server。</div>
+                          ) : (
+                            <>
+                              <div className="workspace-tool-list compact">
+                                {workspaceMcpServers.map((server) => (
+                                  <article key={server.id} className="tool-card user-tool-card">
+                                    <div>
+                                      <strong>{server.name || server.id}</strong>
+                                      <span>{mcpServerSummary(server)}</span>
+                                    </div>
+                                    <small>{server.transport === "stdio" ? "本地命令" : "远程 Server"}</small>
+                                    <div className="tool-card-actions">
+                                      <button type="button" onClick={() => {
+                                        setWorkspaceMcpDraft(server);
+                                        setWorkspaceDiscoveredTools([]);
+                                        setSelectedWorkspaceDiscoveredTools(new Set());
+                                      }}>编辑</button>
+                                      <button type="button" onClick={() => void deleteUserMcpServer(server)} disabled={powerBusy}>删除</button>
+                                    </div>
+                                  </article>
+                                ))}
+                                {workspaceMcpServers.length === 0 && <div className="soft-empty">还没有 MCP Server。</div>}
+                              </div>
+                              {workspaceMcpDraft && (
+                                <div className="mcp-user-editor">
+                                  <div className="user-section-heading tight">
+                                    <h3>{workspaceMcpServers.some((server) => server.id === workspaceMcpDraft.id) ? "编辑 Server" : "添加 Server"}</h3>
+                                    <button type="button" onClick={() => setWorkspaceMcpDraft(null)}>收起</button>
+                                  </div>
+                                  <label>名称<input value={workspaceMcpDraft.name} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, name: event.target.value })} placeholder="例如：公司知识库" /></label>
+                                  <label>Server ID<input value={workspaceMcpDraft.id} disabled={workspaceMcpServers.some((server) => server.id === workspaceMcpDraft.id)} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, id: event.target.value })} /></label>
+                                  <label>连接方式
+                                    <select value={workspaceMcpDraft.transport} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, transport: event.target.value as McpServerDefinition["transport"] })}>
+                                      <option value="stdio">本地命令</option>
+                                      <option value="streamable-http">远程地址</option>
+                                    </select>
+                                  </label>
+                                  {workspaceMcpDraft.transport === "stdio" ? (
+                                    <>
+                                      <label>启动命令<input value={workspaceMcpDraft.command ?? ""} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, command: event.target.value })} placeholder="npx" /></label>
+                                      <label>参数<textarea value={workspaceMcpDraft.argsJson} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, argsJson: event.target.value })} placeholder='["-y", "server-name"]' /></label>
+                                      <label>工作目录<input value={workspaceMcpDraft.cwd ?? ""} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, cwd: event.target.value })} placeholder="." /></label>
+                                      <label>环境变量<textarea value={workspaceMcpDraft.envJson} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, envJson: event.target.value })} placeholder='{"TOKEN":"..."}' /></label>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <label>远程地址<input value={workspaceMcpDraft.url ?? ""} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, url: event.target.value })} placeholder="https://example.com/mcp" /></label>
+                                      <label>请求头<textarea value={workspaceMcpDraft.headersJson} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, headersJson: event.target.value })} placeholder='{"Authorization":"Bearer ..."}' /></label>
+                                    </>
+                                  )}
+                                  <label>超时毫秒<input type="number" value={workspaceMcpDraft.timeoutMs} onChange={(event) => setWorkspaceMcpDraft({ ...workspaceMcpDraft, timeoutMs: Number(event.target.value) })} /></label>
+                                  <div className="settings-actions inline">
+                                    <button className="primary" type="button" onClick={() => void saveUserMcpServer()} disabled={powerBusy}>保存 Server</button>
+                                    <button type="button" onClick={() => void discoverUserMcpTools()} disabled={powerBusy}>检测工具</button>
+                                    <button type="button" onClick={() => void importUserMcpTools()} disabled={powerBusy || selectedWorkspaceDiscoveredTools.size === 0}>挂载选中工具</button>
+                                  </div>
+                                  {workspaceDiscoveredTools.length > 0 && (
+                                    <div className="discovered-tools user-discovered-tools">
+                                      {workspaceDiscoveredTools.map((tool) => (
+                                        <label key={tool.name} className="check-row discovered-tool-row">
+                                          <input
+                                            type="checkbox"
+                                            checked={selectedWorkspaceDiscoveredTools.has(tool.name)}
+                                            onChange={(event) => {
+                                              const next = new Set(selectedWorkspaceDiscoveredTools);
+                                              if (event.target.checked) next.add(tool.name);
+                                              else next.delete(tool.name);
+                                              setSelectedWorkspaceDiscoveredTools(next);
+                                            }}
+                                          />
+                                          <span><strong>{tool.name}</strong><br />{tool.description || "没有说明"}</span>
+                                          <small>MCP</small>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </section>
+                        <section className="workspace-user-tools">
+                          <div className="user-section-heading">
+                            <div>
+                              <h3>专属工具</h3>
+                              <p>只显示这个工作空间额外挂载的工具，系统内置工具已隐藏。</p>
+                            </div>
+                          </div>
+                          <div className="workspace-tool-list compact">
+                            {workspaceCustomTools.map((tool) => (
+                              <article key={tool.id} className="tool-card user-tool-card">
+                                <div>
+                                  <strong>{tool.name}</strong>
+                                  <span>{tool.description || "没有说明"}</span>
+                                </div>
+                                <small>{riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)}</small>
+                                <div className="tool-card-actions">
+                                  <button type="button" onClick={() => void deleteUserWorkspaceTool(tool)} disabled={powerBusy}>删除</button>
+                                </div>
+                              </article>
+                            ))}
+                            {workspaceCustomTools.length === 0 && <div className="soft-empty">还没有专属工具。可以先添加 MCP Server，然后检测并挂载工具。</div>}
+                          </div>
+                        </section>
+                      </>
+                    ) : <div className="soft-empty">请选择或新建一个工作空间。</div>}
+                  </div>
+                </div>
+              </section>
+            )}
+            {settingsSection === "memory" && (
+              <section className="settings-section">
+                <p>这里展示 Agent 记住的内容。你可以补充事实、修正误解，或删除过期记忆。</p>
+                <div className="power-toolbar">
+                  <input placeholder="搜索记忆" value={memoryQuery} onChange={(event) => setMemoryQuery(event.target.value)} />
+                  <select value={memoryTypeFilter} onChange={(event) => setMemoryTypeFilter(event.target.value)}>
+                    <option value="">全部</option>
+                    <option value="impression">关于我</option>
+                    <option value="event">项目 / 事件</option>
+                    <option value="skill">可复用经验</option>
+                  </select>
+                  <button onClick={() => void loadUserMemories()} disabled={powerBusy}>筛选</button>
+                </div>
+                <div className="memory-actions">
+                  <button onClick={() => setMemoryEditing(newUserMemoryDraft("impression", userId, selectedAgentId))}>添加关于我</button>
+                  <button onClick={() => setMemoryEditing(newUserMemoryDraft("event", userId, selectedAgentId))}>添加项目 / 事件</button>
+                  <button onClick={() => setMemoryEditing(newUserMemoryDraft("skill", userId, selectedAgentId, workspaceDraft?.id))}>添加经验</button>
+                </div>
+                <div className="memory-manager">
+                  <div className="memory-card-list">
+                    {memories.map((memory) => (
+                      <article key={memory.id} className={`memory-card ${memoryEditing?.id === memory.id ? "active" : ""}`}>
+                        <button onClick={() => setMemoryEditing(memory)}>
+                          <small>{memoryTypeLabel(memory.memoryType)}</small>
+                          <strong>{memory.title}</strong>
+                          <span>{memory.summary}</span>
+                        </button>
+                        <button className="danger-text" onClick={() => void deleteUserMemory(memory.id)} disabled={powerBusy}>删除</button>
+                      </article>
+                    ))}
+                    {memories.length === 0 && <div className="soft-empty">还没有匹配的记忆。</div>}
+                  </div>
+                  <div className="power-editor">
+                    {memoryEditing ? (
+                      <>
+                        <label>类型
+                          <select value={memoryEditing.memoryType ?? "impression"} onChange={(event) => setMemoryEditing({ ...memoryEditing, memoryType: event.target.value as MemoryRow["memoryType"] })}>
+                            <option value="impression">关于我</option>
+                            <option value="event">项目 / 事件</option>
+                            <option value="skill">可复用经验</option>
+                          </select>
+                        </label>
+                        <label>标题<input value={memoryEditing.title ?? ""} onChange={(event) => setMemoryEditing({ ...memoryEditing, title: event.target.value })} /></label>
+                        <label>摘要<textarea value={memoryEditing.summary ?? ""} onChange={(event) => setMemoryEditing({ ...memoryEditing, summary: event.target.value })} /></label>
+                        <label>详情<textarea value={memoryEditing.detail ?? ""} onChange={(event) => setMemoryEditing({ ...memoryEditing, detail: event.target.value })} /></label>
+                        {memoryEditing.memoryType === "skill" && (
+                          <label>适用工作空间<input value={memoryEditing.workspaceId ?? ""} onChange={(event) => setMemoryEditing({ ...memoryEditing, workspaceId: event.target.value || undefined })} placeholder="例如 search 或 dev" /></label>
+                        )}
+                        <div className="settings-actions inline">
+                          <button className="primary" onClick={() => void saveUserMemory()} disabled={powerBusy}>保存记忆</button>
+                          <button onClick={() => setMemoryEditing(null)}>取消</button>
+                        </div>
+                      </>
+                    ) : <div className="soft-empty">选择一条记忆查看详情，或添加新的记忆。</div>}
+                  </div>
+                </div>
+              </section>
+            )}
+            {settingsSection === "advanced" && (
+              <section className="settings-section">
+                <p>这些设置用于本地调试或多身份测试。普通使用不需要修改。</p>
+                <label>userId<input value={userId} onChange={(event) => setUserId(event.target.value)} /></label>
+                <label>userRole
+                  <select value={userRole} onChange={(event) => setUserRole(event.target.value as "user" | "creator")}>
+                    <option value="user">user</option>
+                    <option value="creator">creator</option>
+                  </select>
+                </label>
+                <label>conversationId<input value={conversationId} readOnly /></label>
+              </section>
+            )}
+            <div className="settings-actions">
+              <button className="primary" onClick={() => setSettingsOpen(false)}>完成</button>
+            </div>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function LegacyDevApp() {
   const [tab, setTab] = useState<Tab>("chat");
   const renderTabPanel = (item: Tab, node: React.ReactNode) => (
     <div className={`tab-panel ${tab === item ? "active" : ""}`} aria-hidden={tab !== item}>
@@ -1300,12 +2974,13 @@ function ConceptIntroTab() {
 
 function ChatTab() {
   const cached = loadCache();
+  const queryConversationId = new URLSearchParams(window.location.search).get("conversationId") ?? "";
   const [agents, setAgents] = useState<AgentConfig[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState(cached.agentId ?? "default-agent");
   const [agent, setAgent] = useState<AgentConfig | null>(null);
   const [userId, setUserId] = useState(cached.userId ?? "user");
   const [userRole, setUserRole] = useState<"user" | "creator">(cached.userRole ?? "user");
-  const [conversationId, setConversationId] = useState(cached.conversationId ?? `conv-${Date.now()}`);
+  const [conversationId, setConversationId] = useState(queryConversationId || cached.conversationId || `conv-${Date.now()}`);
   const [baseUrl, setBaseUrl] = useState(normalizeCachedBaseUrl(cached.baseUrl) ?? DEFAULT_BASE_URL);
   const [model, setModel] = useState(cached.model ?? "gpt-5-mini");
   const [apiKey, setApiKey] = useState(cached.apiKey ?? "");
@@ -3504,6 +5179,18 @@ function memoryErrorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function mcpUserErrorText(error: unknown) {
+  const message = memoryErrorText(error);
+  if (message.includes("requires creator role")) return "需要创建者身份才能调整工作空间工具，请在高级设置中切换身份后重试";
+  if (message.includes("argsJson")) return "参数必须是 JSON 数组，例如 [\"-y\", \"server-name\"]";
+  if (message.includes("envJson")) return "环境变量必须是 JSON 对象，例如 {\"TOKEN\":\"...\"}";
+  if (message.includes("headersJson")) return "请求头必须是 JSON 对象，例如 {\"Authorization\":\"Bearer ...\"}";
+  if (message.includes("Local stdio MCP server requires command")) return "本地 MCP Server 需要填写启动命令";
+  if (message.includes("Remote MCP server requires url")) return "远程 MCP Server 需要填写远程地址";
+  if (message.includes("Tool name already exists")) return "检测到同名工具已被其他工作空间使用，请调整 MCP Server 或先删除旧工具";
+  return message;
+}
+
 function MemoryEvidencePanel({ memory }: { memory: Partial<MemoryRow> }) {
   const metadata = memoryMetadataFromValue(memory.metadataJson);
   const sourceRefs = Array.isArray(metadata.sourceRefs) ? metadata.sourceRefs.filter(isJsonRecord) as Record<string, unknown>[] : [];
@@ -3707,4 +5394,6 @@ function MemoryTab() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+const RootApp = window.location.pathname.startsWith("/dev") ? LegacyDevApp : UserChatApp;
+
+createRoot(document.getElementById("root")!).render(<RootApp />);
