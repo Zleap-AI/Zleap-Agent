@@ -29,7 +29,7 @@
 
 | ID | 功能域 | 文档要求摘要 | 当前状态 | 下一步 |
 | --- | --- | --- | --- | --- |
-| A1 | 稳定 Agent 身份 | workspace 切换不改变 system/personality，变化的是工具、局部记忆和局部上下文。 | 待验证 | 检查 `ContextBuilder` 和 workspace 切换测试。 |
+| A1 | 稳定 Agent 身份 | workspace 切换不改变 system/personality，变化的是工具、局部记忆和局部上下文。 | 已验证 | 已补充 main/child/return-main 三次 LLM call 的 system/personality 稳定断言。 |
 | A2 | main/child workspace 工具边界 | `enterWorkspace`/`askUser`/`finishTask` 仅 main 可见；`exitWorkspace` 仅 child 可见；错误绑定也必须隐藏和拒绝。 | 已验证 | 已补充 provider tools、workspace local context 和错误绑定拒绝测试。 |
 | A3 | workspace manifest 可见性 | main 和 child 都可看到 workspace manifest；child 看到 sibling manifest 不等于获得 sibling tools。 | 已验证 | 已补充 child manifest 可见但 main-only tools 不可调用的测试。 |
 | A4 | handoff 隔离 | parent-to-child 只携带总体要求、当前用户请求、少量用户原话；不得携带父级 assistant 执行记录、enterWorkspace 结果、父级工具证据或 sibling 记录。 | 已验证 | 已核对 parent/child handoff 构造和隔离断言。 |
@@ -91,6 +91,7 @@
 
 | ID | 结论 | 证据 | 备注 |
 | --- | --- | --- | --- |
+| A1 | 已补强验证 | `src/core/context-builder.ts::ContextBuilder.build`；`src/tests/run-tests.ts::testRuntimeContextAndTools`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | `system` context segment 始终由 `## 基础系统提示词`、`## 人格提示词`、`## 内部运行策略` 组成。main、child、返回 main 三次 LLM call 的基础 system prompt 和 personality prompt 与 persisted agent 配置完全一致；变化的是 active workspace 策略、callable tools、workspace context、memory 和 local conversation。 |
 | A2 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`、`testWorkspaceBoundary`、`testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：main 的 workspace tools 不包含 `exitWorkspace`；child 的 provider `toolsJson` 与 callable tools 均不包含 `enterWorkspace`/`askUser`/`finishTask`，且包含 `exitWorkspace`。 |
 | A3 | 已补充验证 | `src/tests/run-tests.ts::testRuntimeContextAndTools`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | 新增断言：child workspace 的 `runtime_context.workspace` 能看到 `main` 与 `dev` manifest，但这不授予 main-only tools。 |
 | A4 | 已验证 | `src/core/agent-runtime.ts::createParentToChildHandoff`、`createChildToMainHandoff`、`saveFollowUpLlmCall`；`src/tests/run-tests.ts::testWorkspaceExitReturnsToMain`；`PATH=/opt/homebrew/bin:$PATH npm test` 通过。 | parent-to-child handoff 含当前用户请求、总体要求和少量用户原话参考，但不含 `enterWorkspace` tool result、父级工具结果、父级 assistant 执行记录或 sibling workspace 记录。child-to-main 只携带 `WorkspaceResult`、子 workspace AI 摘要、最后结论和关键工具结果；follow-up LLM call 复用完整 active base stack。 |

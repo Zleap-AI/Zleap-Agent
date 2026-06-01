@@ -1320,6 +1320,15 @@ function metadataSourceIds(memory: { metadataJson: string }, table: string): str
   return Array.isArray(ref?.ids) ? ref.ids : [];
 }
 
+function promptSection(content: string, heading: string, nextHeading: string): string {
+  const start = content.indexOf(heading);
+  assert.equal(start >= 0, true, `Missing prompt heading: ${heading}`);
+  const bodyStart = start + heading.length;
+  const end = content.indexOf(nextHeading, bodyStart);
+  assert.equal(end >= 0, true, `Missing next prompt heading: ${nextHeading}`);
+  return content.slice(bodyStart, end).trim();
+}
+
 const RAW_MEMORY_METADATA_PAYLOAD_KEYS = [
   "messages",
   "windowMessages",
@@ -1946,6 +1955,7 @@ async function testRuntimeContextAndTools() {
   const firstInput = fake.inputs[0];
   const childInput = fake.inputs[1];
   const lastInput = fake.inputs.at(-1);
+  const agent = repos.getAgent("default-agent");
   assert.equal(firstInput?.baseUrl, "https://api.302ai.com");
   assert.equal(normalizeChatCompletionsEndpoint(firstInput!.baseUrl), "https://api.302ai.com/v1/chat/completions");
   assert.equal(firstInput?.messages.at(-1)?.role, "user");
@@ -1955,6 +1965,14 @@ async function testRuntimeContextAndTools() {
   assert.equal(firstLocalConversationPayload.currentTask.workspaceId, "main");
   assert.equal(firstLocalConversationPayload.messages.some((message) => message.content.includes("old global user chat unrelated to file workspace")), true);
   const systemMessage = lastInput?.messages[0]?.content ?? "";
+  const firstSystemMessage = firstInput?.messages[0]?.content ?? "";
+  const childSystemMessage = childInput?.messages[0]?.content ?? "";
+  assert.equal(promptSection(firstSystemMessage, "## 基础系统提示词", "## 人格提示词"), agent.systemPrompt);
+  assert.equal(promptSection(childSystemMessage, "## 基础系统提示词", "## 人格提示词"), agent.systemPrompt);
+  assert.equal(promptSection(systemMessage, "## 基础系统提示词", "## 人格提示词"), agent.systemPrompt);
+  assert.equal(promptSection(firstSystemMessage, "## 人格提示词", "## 内部运行策略"), agent.personalityPrompt);
+  assert.equal(promptSection(childSystemMessage, "## 人格提示词", "## 内部运行策略"), agent.personalityPrompt);
+  assert.equal(promptSection(systemMessage, "## 人格提示词", "## 内部运行策略"), agent.personalityPrompt);
   assert.equal(systemMessage.includes("内部运行策略"), true);
   assert.equal(systemMessage.includes("记忆写入协议"), true);
   assert.equal(systemMessage.includes("writeUserImpression"), true);
@@ -1987,7 +2005,6 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("workspace 是内部能力边界"), true);
   assert.equal(systemMessage.includes("产物责任边界"), true);
   assert.equal(systemMessage.includes("不能因为知道用户最终想要什么，就在错误 workspace 中生成文件、网页、报告或其他下游产物"), true);
-  const childSystemMessage = childInput?.messages[0]?.content ?? "";
   assert.equal(childSystemMessage.includes("搜索类 workspace 搜索完就返回搜索结果、来源、可信度和建议"), true);
   assert.equal(childSystemMessage.includes("不要伪造当前工具没有真实产出的 artifacts"), true);
   assert.equal(systemMessage.includes("enterWorkspace"), true);
@@ -1997,7 +2014,6 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("\"toolCount\""), false);
   assert.equal(systemMessage.includes("\"availableWorkspaces\""), false);
   assert.equal(firstInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.workspace"), true);
-  const agent = repos.getAgent("default-agent");
   assert.equal(/workspace|context|runtime/i.test(agent.personalityPrompt), false);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "enterWorkspace"), true);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "searchFiles"), false);

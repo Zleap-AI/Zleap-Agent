@@ -2,6 +2,25 @@
 
 本文档用本地时间记录有意义的项目改动，方便之后把 Git 历史、实现目的、涉及区域和验证结果对应起来。
 
+## 2026-06-01 08:56 +08:00
+
+目的：
+- 完成 `docs/01-agent-philosophy.md` / `docs/07-context-and-prompt-contracts.md` 中稳定 Agent 身份不变量的验证。
+
+变更：
+- 新增 prompt section 测试 helper，用于从 system message 中精确抽取基础系统提示词和人格提示词。
+- 补强 `testRuntimeContextAndTools`：验证 main、child、返回 main 三次 LLM call 的基础 system prompt 和 personality prompt 与 persisted agent 配置一致。
+- 更新 `IMPLEMENTATION_AUDIT.md`，将 A1 标记为已验证。
+
+验证：
+- `PATH=/opt/homebrew/bin:$PATH npm test` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run typecheck` 通过。
+- `PATH=/opt/homebrew/bin:$PATH npm run build` 通过。
+- `git diff --check` 通过。
+
+Git：
+- 待提交。
+
 ## 2026-06-01 08:54 +08:00
 
 目的：
