@@ -1300,6 +1300,26 @@ function metadataSourceIds(memory: { metadataJson: string }, table: string): str
   return Array.isArray(ref?.ids) ? ref.ids : [];
 }
 
+const RAW_MEMORY_METADATA_PAYLOAD_KEYS = [
+  "messages",
+  "windowMessages",
+  "rawMessages",
+  "toolCalls",
+  "workspaceSessions",
+  "workspaceSession",
+  "llmCalls",
+  "contextSegments",
+  "argumentsJson",
+  "resultJson",
+  "messagesJson",
+  "toolsJson",
+  "responseJson",
+  "rawJson",
+  "finalMessages",
+  "localContextJson",
+  "taskJson"
+];
+
 function updateWorkspaceMemoryPolicy(repos: Repositories, workspaceId: string, patch: Record<string, unknown>) {
   const workspace = repos.getWorkspace(workspaceId);
   const memoryPolicy = { ...workspace.memoryPolicy, ...patch };
@@ -2983,8 +3003,9 @@ async function testEventMemoryIsHookGenerated() {
   assert.equal(events.every((memory) => typeof metadataOf(memory).taskId === "string" && metadataOf(memory).taskId.startsWith("conversation-window:")), true);
   assert.equal(events.every((memory) => Array.isArray(metadataOf(memory).sourceRefs)), true);
   assert.equal(events.every((memory) => JSON.stringify(metadataOf(memory)).includes("\"table\":\"messages\"")), true);
-  assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), "windowMessages")), true);
-  assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), "toolCalls")), true);
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.equal(events.every((memory) => !Object.prototype.hasOwnProperty.call(metadataOf(memory), key)), true);
+  }
   const processEvents = events.filter((memory) => metadataOf(memory).eventKind === "process");
   assert.equal(processEvents.length > 0, true);
   assert.equal(processEvents.every((memory) => memory.detail.length <= 900), true);
@@ -3018,22 +3039,40 @@ async function testEventMemoryIsHookGenerated() {
   assert.equal(repos.listMemories({ memoryType: "event", userId: "event-contract-user", workspaceId: "main" }).some((memory) => memory.title === "Tool event"), false);
 
   const memoryService = new MemoryService(repos);
-  assert.throws(() => memoryService.createMemoryRecord({
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.throws(() => memoryService.createMemoryRecord({
+      actorId: "creator",
+      actorRole: "creator",
+      memory: {
+        memoryType: "event",
+        userId: "event-contract-user",
+        workspaceId: "main",
+        title: `Raw payload event ${key}`,
+        summary: "Should be rejected.",
+        detail: "Memory metadata should reference raw tables instead of copying raw data.",
+        metadataJson: JSON.stringify({
+          source: "manualMemoryApi",
+          conversationId: "conv-event-hook-contract",
+          taskId: `task-manual-raw-payload-${key}`,
+          eventKind: "manual",
+          [key]: [{ id: "raw-source-payload" }]
+        })
+      }
+    }), /raw source payloads/);
+  }
+  assert.throws(() => memoryService.updateMemoryRecord({
     actorId: "creator",
     actorRole: "creator",
-    memory: {
-      memoryType: "event",
-      userId: "event-contract-user",
-      workspaceId: "main",
-      title: "Raw payload event",
-      summary: "Should be rejected.",
-      detail: "Memory metadata should reference raw tables instead of copying raw data.",
+    memoryId: events[0]!.id,
+    patch: {
       metadataJson: JSON.stringify({
         source: "manualMemoryApi",
         conversationId: "conv-event-hook-contract",
-        taskId: "task-manual-raw-payload",
+        taskId: "task-update-raw-payload",
         eventKind: "manual",
-        windowMessages: [{ role: "user", content: "raw" }]
+        nested: {
+          responseJson: { raw: true }
+        }
       })
     }
   }), /raw source payloads/);
