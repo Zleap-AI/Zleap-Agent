@@ -11,6 +11,9 @@ import type {
   McpServerDefinition,
   MemoryRow,
   RuntimeConfigItem,
+  SessionEntry,
+  SessionEntryContextMessage,
+  SessionEntryType,
   StoredMessage,
   ToolDefinition,
   ToolCallLog,
@@ -31,6 +34,66 @@ function parseJson<T>(value: string, fallback: T): T {
   }
 }
 
+function compactSessionEntryText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+function sessionEntryWorkspaceIdFromPayload(entry: Pick<SessionEntry, "workspaceId">, payload: Record<string, unknown>): string | undefined {
+  if (typeof entry.workspaceId === "string" && entry.workspaceId.trim()) return entry.workspaceId;
+  if (typeof payload.workspaceId === "string" && payload.workspaceId.trim()) return payload.workspaceId;
+  return undefined;
+}
+
+function workspaceIdFromContextSegments(segments: ContextSegment[]): string | undefined {
+  const workspaceSegment = segments.find((segment) => segment.segmentType === "workspace");
+  if (!workspaceSegment) return undefined;
+  return workspaceIdFromContextSegmentContent(workspaceSegment.content);
+}
+
+function workspaceIdFromContextSegmentContent(content: string): string | undefined {
+  const payload = parseJson<{ currentWorkspace?: { id?: string } }>(content, {});
+  const workspaceId = payload.currentWorkspace?.id;
+  return typeof workspaceId === "string" && workspaceId.trim() ? workspaceId : undefined;
+}
+
+function summarizeSessionEntryToolResult(resultJson: string, maxLength = 500): string {
+  let text = resultJson;
+  try {
+    const parsed = JSON.parse(resultJson) as Record<string, unknown>;
+    if (typeof parsed.error === "string") text = `失败：${parsed.error}`;
+    else if (typeof parsed.output === "string" && parsed.output.trim()) text = parsed.output;
+    else if (typeof parsed.stdout === "string" && parsed.stdout.trim()) text = parsed.stdout;
+    else if (typeof parsed.summary === "string" && parsed.summary.trim()) text = parsed.summary;
+    else if (typeof parsed.response === "string" && parsed.response.trim()) text = parsed.response;
+    else if (typeof parsed.question === "string" && parsed.question.trim()) text = parsed.question;
+    else if (typeof parsed.type === "string" && parsed.type.trim()) text = parsed.type;
+    else text = JSON.stringify(parsed);
+  } catch {
+    text = resultJson;
+  }
+  return compactSessionEntryText(text, maxLength);
+}
+
+function appendSessionEntryContextMessage(
+  target: SessionEntryContextMessage[],
+  entry: SessionEntry,
+  role: SessionEntryContextMessage["role"],
+  content: string,
+  workspaceId?: string
+): void {
+  const normalized = content.trim();
+  if (!normalized) return;
+  target.push({
+    role,
+    content: normalized,
+    workspaceId,
+    entryId: entry.id,
+    sourceType: entry.type,
+    createdAt: entry.createdAt
+  });
+}
+
 function parseStrictJson<T>(value: string, label: string): T {
   try {
     return JSON.parse(value) as T;
@@ -41,6 +104,11 @@ function parseStrictJson<T>(value: string, label: string): T {
 
 function sanitizeToolIdPart(value: string): string {
   return value.trim().replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "tool";
+}
+
+function oneLinePromptSnippet(value: string): string | null {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, 180) : null;
 }
 
 function quoteSqlIdentifier(value: string): string {
@@ -120,8 +188,10 @@ const builtInRuntimeToolIds = new Set([
   "tool-exit-workspace",
   "tool-ask-user",
   "tool-finish-task",
-  "tool-search-files",
-  "tool-run-command",
+  "tool-read",
+  "tool-write",
+  "tool-edit",
+  "tool-bash",
   ...builtInMemoryToolIds
 ]);
 
@@ -442,6 +512,16 @@ export class Repositories {
         : conversation.title;
       this.db.prepare("UPDATE conversations SET title = ?, updatedAt = ? WHERE id = ?").run(nextTitle, now, conversationId);
     }
+    this.appendSessionEntry({
+      conversationId,
+      type: "message",
+      payload: {
+        messageId: id,
+        role,
+        content,
+        raw
+      }
+    });
     return id;
   }
 
@@ -469,6 +549,138 @@ export class Repositories {
 
   countMessages(conversationId: string): number {
     return (this.db.prepare("SELECT COUNT(*) AS count FROM messages WHERE conversationId = ?").get(conversationId) as { count: number }).count;
+  }
+
+  appendSessionEntry(input: {
+    conversationId: string;
+    workspaceId?: string;
+    type: SessionEntryType;
+    payload: unknown;
+  }): SessionEntry {
+    const id = createId("entry");
+    const now = nowIso();
+    const parent = this.db.prepare(`
+      SELECT id FROM session_entries
+      WHERE conversationId = ?
+      ORDER BY createdAt DESC, rowid DESC
+      LIMIT 1
+    `).get(input.conversationId) as { id: string } | undefined;
+    const row: SessionEntry = {
+      id,
+      conversationId: input.conversationId,
+      parentId: parent?.id,
+      workspaceId: input.workspaceId,
+      type: input.type,
+      payloadJson: JSON.stringify(input.payload ?? {}),
+      createdAt: now
+    };
+    this.db.prepare(`
+      INSERT INTO session_entries (id, conversationId, parentId, workspaceId, type, payloadJson, createdAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(row.id, row.conversationId, row.parentId ?? null, row.workspaceId ?? null, row.type, row.payloadJson, row.createdAt);
+    return row;
+  }
+
+  listSessionEntries(conversationId: string, userId?: string): SessionEntry[] {
+    if (userId) {
+      const conversation = this.getConversation(conversationId);
+      if (conversation && conversation.userId !== userId) return [];
+    }
+    return this.db.prepare(`
+      SELECT * FROM session_entries
+      WHERE conversationId = ?
+      ORDER BY createdAt ASC, rowid ASC
+    `).all(conversationId) as SessionEntry[];
+  }
+
+  listSessionEntryMainChain(conversationId: string, userId?: string): SessionEntry[] {
+    const entries = this.listSessionEntries(conversationId, userId);
+    if (entries.length === 0) return [];
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    const chain: SessionEntry[] = [];
+    const seen = new Set<string>();
+    let current: SessionEntry | undefined = entries[entries.length - 1];
+    while (current && !seen.has(current.id)) {
+      chain.push(current);
+      seen.add(current.id);
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    return chain.reverse();
+  }
+
+  reconstructSessionEntryContext(input: {
+    conversationId: string;
+    userId?: string;
+    workspaceId?: string;
+    limit?: number;
+  }): SessionEntryContextMessage[] {
+    const entries = this.listSessionEntryMainChain(input.conversationId, input.userId);
+    const messages: SessionEntryContextMessage[] = [];
+    for (const entry of entries) {
+      const payload = parseJson<Record<string, unknown>>(entry.payloadJson, {});
+      const workspaceId = sessionEntryWorkspaceIdFromPayload(entry, payload);
+      if (input.workspaceId && workspaceId !== input.workspaceId) continue;
+
+      if (entry.type === "message") {
+        const role = typeof payload.role === "string" ? payload.role : "";
+        const content = typeof payload.content === "string" ? payload.content : "";
+        if (role === "user" || role === "assistant" || role === "tool") {
+          appendSessionEntryContextMessage(messages, entry, role, content, workspaceId);
+        }
+        continue;
+      }
+
+      if (entry.type === "llm_call" && payload.status === "completed") {
+        const response = payload.response && typeof payload.response === "object" && !Array.isArray(payload.response)
+          ? payload.response as Record<string, unknown>
+          : {};
+        const assistantMessage = typeof response.assistantMessage === "string" ? response.assistantMessage : "";
+        if (assistantMessage) {
+          appendSessionEntryContextMessage(messages, entry, "assistant", assistantMessage, workspaceId);
+        }
+        const message = response.message && typeof response.message === "object" && !Array.isArray(response.message)
+          ? response.message as Record<string, unknown>
+          : {};
+        const content = typeof message.content === "string" ? message.content : "";
+        if (content && content !== assistantMessage) {
+          appendSessionEntryContextMessage(messages, entry, "assistant", content, workspaceId);
+        }
+        const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+        const toolNames = toolCalls
+          .map((toolCall) => toolCall && typeof toolCall === "object" && !Array.isArray(toolCall)
+            ? (toolCall as { function?: { name?: unknown } }).function?.name
+            : undefined)
+          .filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+        if (toolNames.length > 0) {
+          appendSessionEntryContextMessage(messages, entry, "assistant", `调用工具：${toolNames.join(", ")}`, workspaceId);
+        }
+        continue;
+      }
+
+      if (entry.type === "tool_call") {
+        const toolName = typeof payload.toolName === "string" ? payload.toolName : "";
+        if (toolName) appendSessionEntryContextMessage(messages, entry, "assistant", `调用工具：${toolName}`, workspaceId);
+        continue;
+      }
+
+      if (entry.type === "tool_result") {
+        const toolName = typeof payload.toolName === "string" ? payload.toolName : "tool";
+        const resultJson = typeof payload.resultJson === "string" ? payload.resultJson : "";
+        appendSessionEntryContextMessage(messages, entry, "tool", `${toolName}: ${summarizeSessionEntryToolResult(resultJson)}`, workspaceId);
+      }
+    }
+    return messages.slice(-(input.limit ?? 40));
+  }
+
+  private hasSessionEntryForResource(conversationId: string, type: SessionEntryType, key: string, value: string): boolean {
+    const row = this.db.prepare(`
+      SELECT id FROM session_entries
+      WHERE conversationId = ?
+        AND type = ?
+        AND json_extract(payloadJson, ?) = ?
+      LIMIT 1
+    `).get(conversationId, type, `$.${key}`, value) as { id: string } | undefined;
+    return Boolean(row);
   }
 
   listMessagesWindow(conversationId: string, offset: number, limit: number): StoredMessage[] {
@@ -653,13 +865,16 @@ export class Repositories {
         const id = existingByName?.id ?? `tool-${sanitizeToolIdPart(input.workspaceId)}-${sanitizeToolIdPart(input.serverId)}-${sanitizeToolIdPart(name)}`;
         this.db.prepare(`
           INSERT INTO tool_definitions
-            (id, name, workspaceId, description, parametersJson, riskLevel, bindingType, bindingJson, mcpServerId, mcpToolName, createdAt, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, name, workspaceId, description, parametersJson, promptSnippet, promptGuidelinesJson, executionMode, riskLevel, bindingType, bindingJson, mcpServerId, mcpToolName, createdAt, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             workspaceId = excluded.workspaceId,
             description = excluded.description,
             parametersJson = excluded.parametersJson,
+            promptSnippet = excluded.promptSnippet,
+            promptGuidelinesJson = excluded.promptGuidelinesJson,
+            executionMode = excluded.executionMode,
             riskLevel = excluded.riskLevel,
             bindingType = excluded.bindingType,
             bindingJson = excluded.bindingJson,
@@ -672,6 +887,9 @@ export class Repositories {
           input.workspaceId,
           discovered.description ?? "",
           JSON.stringify(discovered.inputSchema ?? { type: "object", properties: {}, additionalProperties: true }),
+          oneLinePromptSnippet(discovered.description ?? ""),
+          "[]",
+          "parallel",
           "low",
           "mcp",
           bindingJson,
@@ -800,17 +1018,23 @@ export class Repositories {
     if (existing && existing.workspaceId && existing.workspaceId !== input.workspaceId) {
       throw new Error("Workspace tool belongs to a different workspace.");
     }
+    const executionMode = input.executionMode === "sequential" ? "sequential" : "parallel";
+    const promptGuidelinesJson = input.promptGuidelinesJson ?? existing?.promptGuidelinesJson ?? "[]";
+    JSON.parse(promptGuidelinesJson);
 
     this.db.transaction(() => {
       this.db.prepare(`
         INSERT INTO tool_definitions
-          (id, name, workspaceId, description, parametersJson, riskLevel, bindingType, bindingJson, mcpServerId, mcpToolName, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, name, workspaceId, description, parametersJson, promptSnippet, promptGuidelinesJson, executionMode, riskLevel, bindingType, bindingJson, mcpServerId, mcpToolName, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           name = excluded.name,
           workspaceId = excluded.workspaceId,
           description = excluded.description,
           parametersJson = excluded.parametersJson,
+          promptSnippet = excluded.promptSnippet,
+          promptGuidelinesJson = excluded.promptGuidelinesJson,
+          executionMode = excluded.executionMode,
           riskLevel = excluded.riskLevel,
           bindingType = excluded.bindingType,
           bindingJson = excluded.bindingJson,
@@ -823,6 +1047,9 @@ export class Repositories {
         input.workspaceId,
         input.description,
         input.parametersJson,
+        input.promptSnippet ?? existing?.promptSnippet ?? oneLinePromptSnippet(input.description),
+        promptGuidelinesJson,
+        executionMode,
         input.riskLevel,
         input.bindingType,
         input.bindingJson || "{}",
@@ -901,6 +1128,7 @@ export class Repositories {
     agentId: string;
     impressionLimit?: number;
     eventLimit?: number;
+    rollupEventLimit?: number;
     resultEventLimit?: number;
     processEventLimit?: number;
     skillLimit?: number;
@@ -949,6 +1177,11 @@ export class Repositories {
       [input.userId, input.agentId, input.workspaceId],
       input.resultEventLimit ?? input.eventLimit ?? 10
     );
+    const rollupEvents = recallPartition(
+      "m.memoryType = 'event' AND m.userId = ? AND m.agentId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'rollup'",
+      [input.userId, input.agentId, input.workspaceId],
+      input.rollupEventLimit ?? 3
+    );
     const processEvents = recallPartition(
       "m.memoryType = 'event' AND m.userId = ? AND m.agentId = ? AND m.workspaceId = ? AND json_extract(m.metadataJson, '$.eventKind') = 'process'",
       [input.userId, input.agentId, input.workspaceId],
@@ -961,7 +1194,7 @@ export class Repositories {
       input.skillLimit ?? 8
     );
 
-    return [...impressions, ...resultEvents, ...processEvents, ...skills];
+    return [...impressions, ...rollupEvents, ...resultEvents, ...processEvents, ...skills];
   }
 
   createMemory(input: Partial<MemoryRow> & Pick<MemoryRow, "memoryType" | "title" | "summary" | "detail">, actorId: string, actorRole: UserRole): MemoryRow {
@@ -997,7 +1230,45 @@ export class Repositories {
       conversationId: typeof metadata.conversationId === "string" ? metadata.conversationId : undefined,
       source: typeof metadata.source === "string" ? metadata.source : undefined
     });
-    return this.getMemory(id);
+    const memory = this.getMemory(id);
+    if (metadataConversationId && this.getConversation(metadataConversationId)) {
+      const eventKind = typeof metadata.eventKind === "string" ? metadata.eventKind : undefined;
+      this.appendSessionEntry({
+        conversationId: metadataConversationId,
+        workspaceId: memory.workspaceId,
+        type: "memory_write",
+        payload: {
+          memoryId: memory.id,
+          memoryType: memory.memoryType,
+          workspaceId: memory.workspaceId,
+          relationId: memory.relationId,
+          title: memory.title,
+          summary: memory.summary,
+          metadata: {
+            eventKind,
+            source: typeof metadata.source === "string" ? metadata.source : undefined
+          }
+        }
+      });
+      if (eventKind === "rollup") {
+        this.appendSessionEntry({
+          conversationId: metadataConversationId,
+          workspaceId: memory.workspaceId,
+          type: "event_rollup",
+          payload: {
+            memoryId: memory.id,
+            workspaceId: memory.workspaceId,
+            relationId: memory.relationId,
+            title: memory.title,
+            summary: memory.summary,
+            triggerSource: typeof metadata.triggerSource === "string" ? metadata.triggerSource : undefined,
+            rollupMode: typeof metadata.rollupMode === "string" ? metadata.rollupMode : undefined,
+            sourceEventIds: Array.isArray(metadata.sourceEventIds) ? metadata.sourceEventIds : []
+          }
+        });
+      }
+    }
+    return memory;
   }
 
   getMemoryByRelation(memoryType: string, relationId: string, scope: { userId?: string | null; agentId?: string | null; workspaceId?: string | null }): MemoryRow | undefined {
@@ -1092,6 +1363,19 @@ export class Repositories {
       session.startedAt,
       session.completedAt ?? null
     );
+    this.appendSessionEntry({
+      conversationId: session.conversationId,
+      workspaceId: session.workspaceId,
+      type: "workspace_enter",
+      payload: {
+        workspaceSessionId: session.id,
+        workspaceId: session.workspaceId,
+        taskId: session.taskId,
+        status: session.status,
+        objective: session.objective,
+        startedAt: session.startedAt
+      }
+    });
   }
 
   updateWorkspaceSessionLocalContext(session: WorkspaceSession): void {
@@ -1111,6 +1395,22 @@ export class Repositories {
       session.completedAt ?? null,
       session.id
     );
+    if (session.completedAt && session.status !== "running" && !this.hasSessionEntryForResource(session.conversationId, "workspace_exit", "workspaceSessionId", session.id)) {
+      this.appendSessionEntry({
+        conversationId: session.conversationId,
+        workspaceId: session.workspaceId,
+        type: "workspace_exit",
+        payload: {
+          workspaceSessionId: session.id,
+          workspaceId: session.workspaceId,
+          taskId: session.taskId,
+          status: session.status,
+          summary: session.summary,
+          result: session.result,
+          completedAt: session.completedAt
+        }
+      });
+    }
   }
 
   saveToolCall(log: Omit<ToolCallLog, "id" | "createdAt">): ToolCallLog {
@@ -1147,6 +1447,19 @@ export class Repositories {
       row.status,
       row.createdAt
     );
+    this.appendSessionEntry({
+      conversationId: row.conversationId,
+      workspaceId: row.workspaceId,
+      type: "tool_call",
+      payload: {
+        toolCallId: row.id,
+        workspaceSessionId: row.workspaceSessionId,
+        taskId: row.taskId,
+        toolName: row.toolName,
+        argumentsJson: row.argumentsJson,
+        status: row.status
+      }
+    });
     return row;
   }
 
@@ -1158,7 +1471,21 @@ export class Repositories {
       SET resultJson = ?, status = ?
       WHERE id = ?
     `).run(result.resultJson, result.status, id);
-    return this.db.prepare("SELECT * FROM tool_calls WHERE id = ?").get(id) as ToolCallLog;
+    const updated = this.db.prepare("SELECT * FROM tool_calls WHERE id = ?").get(id) as ToolCallLog;
+    this.appendSessionEntry({
+      conversationId: updated.conversationId,
+      workspaceId: updated.workspaceId,
+      type: "tool_result",
+      payload: {
+        toolCallId: updated.id,
+        workspaceSessionId: updated.workspaceSessionId,
+        taskId: updated.taskId,
+        toolName: updated.toolName,
+        status: updated.status,
+        resultJson: updated.resultJson
+      }
+    });
+    return updated;
   }
 
   listToolCalls(conversationId: string, userId?: string): ToolCallLog[] {
@@ -1242,6 +1569,37 @@ export class Repositories {
       });
       throw new Error("LLM call userId does not match conversation owner.");
     }
+    const previousModel = this.db.prepare(`
+      SELECT id, providerBaseUrl, normalizedEndpoint, model FROM llm_calls
+      WHERE conversationId = ?
+      ORDER BY createdAt DESC, rowid DESC
+      LIMIT 1
+    `).get(snapshot.conversationId) as Pick<LLMCallSnapshot, "id" | "providerBaseUrl" | "normalizedEndpoint" | "model"> | undefined;
+    if (previousModel && (
+      previousModel.model !== snapshot.model
+      || previousModel.providerBaseUrl !== snapshot.providerBaseUrl
+      || previousModel.normalizedEndpoint !== snapshot.normalizedEndpoint
+    )) {
+      this.appendSessionEntry({
+        conversationId: snapshot.conversationId,
+        workspaceId: workspaceIdFromContextSegments(segments),
+        type: "model_change",
+        payload: {
+          previousLlmCallId: previousModel.id,
+          nextLlmCallId: snapshot.id,
+          from: {
+            providerBaseUrl: previousModel.providerBaseUrl,
+            normalizedEndpoint: previousModel.normalizedEndpoint,
+            model: previousModel.model
+          },
+          to: {
+            providerBaseUrl: snapshot.providerBaseUrl,
+            normalizedEndpoint: snapshot.normalizedEndpoint,
+            model: snapshot.model
+          }
+        }
+      });
+    }
     this.db.prepare(`
       INSERT INTO llm_calls
         (id, conversationId, userId, providerBaseUrl, normalizedEndpoint, model, messagesJson, toolsJson, status, responseJson, errorText, createdAt, completedAt)
@@ -1269,22 +1627,71 @@ export class Repositories {
     for (const segment of segments) {
       stmt.run(segment.id, segment.llmCallId, segment.conversationId, segment.segmentType, segment.title, segment.content, segment.tokenEstimate, segment.sortOrder);
     }
+    const workspaceId = workspaceIdFromContextSegments(segments);
+    this.appendSessionEntry({
+      conversationId: snapshot.conversationId,
+      workspaceId,
+      type: "llm_call",
+      payload: {
+        llmCallId: snapshot.id,
+        workspaceId,
+        providerBaseUrl: snapshot.providerBaseUrl,
+        normalizedEndpoint: snapshot.normalizedEndpoint,
+        model: snapshot.model,
+        status: snapshot.status,
+        contextSegmentIds: segments.map((segment) => segment.id)
+      }
+    });
   }
 
   markLlmCallCompleted(llmCallId: string, response: unknown): void {
+    const existing = this.db.prepare("SELECT conversationId, model FROM llm_calls WHERE id = ?").get(llmCallId) as { conversationId: string; model: string } | undefined;
     this.db.prepare(`
       UPDATE llm_calls
       SET status = 'completed', responseJson = ?, errorText = NULL, completedAt = ?
       WHERE id = ?
     `).run(JSON.stringify(response ?? {}), nowIso(), llmCallId);
+    if (existing) {
+      const workspaceSegment = this.db.prepare("SELECT content FROM context_segments WHERE llmCallId = ? AND segmentType = 'workspace' LIMIT 1").get(llmCallId) as { content: string } | undefined;
+      const workspaceId = workspaceSegment ? workspaceIdFromContextSegmentContent(workspaceSegment.content) : undefined;
+      this.appendSessionEntry({
+        conversationId: existing.conversationId,
+        workspaceId,
+        type: "llm_call",
+        payload: {
+          llmCallId,
+          workspaceId,
+          model: existing.model,
+          status: "completed",
+          response
+        }
+      });
+    }
   }
 
   markLlmCallFailed(llmCallId: string, errorText: string): void {
+    const existing = this.db.prepare("SELECT conversationId, model FROM llm_calls WHERE id = ?").get(llmCallId) as { conversationId: string; model: string } | undefined;
     this.db.prepare(`
       UPDATE llm_calls
       SET status = 'failed', responseJson = ?, errorText = ?, completedAt = ?
       WHERE id = ?
     `).run(JSON.stringify({ failed: true, error: errorText }), errorText, nowIso(), llmCallId);
+    if (existing) {
+      const workspaceSegment = this.db.prepare("SELECT content FROM context_segments WHERE llmCallId = ? AND segmentType = 'workspace' LIMIT 1").get(llmCallId) as { content: string } | undefined;
+      const workspaceId = workspaceSegment ? workspaceIdFromContextSegmentContent(workspaceSegment.content) : undefined;
+      this.appendSessionEntry({
+        conversationId: existing.conversationId,
+        workspaceId,
+        type: "llm_call",
+        payload: {
+          llmCallId,
+          workspaceId,
+          model: existing.model,
+          status: "failed",
+          errorText
+        }
+      });
+    }
   }
 
   markPendingLlmCallsInterrupted(reason = "服务重启前请求未完成。"): void {
@@ -1354,6 +1761,21 @@ export class Repositories {
       toolName: input.toolName,
       reason: input.reason
     });
+    if (row.conversationId && this.getConversation(row.conversationId)) {
+      this.appendSessionEntry({
+        conversationId: row.conversationId,
+        workspaceId: row.workspaceId,
+        type: "approval_request",
+        payload: {
+          approvalRequestId: row.id,
+          workspaceId: row.workspaceId,
+          toolName: row.toolName,
+          argumentsJson: row.argumentsJson,
+          reason: row.reason,
+          status: row.status
+        }
+      });
+    }
     return this.getApprovalRequest(row.id);
   }
 
@@ -1401,21 +1823,41 @@ export class Repositories {
       throw new Error("Approval resolution requires creator role.");
     }
     if (current.status !== "pending") return current;
+    const resolvedAt = nowIso();
     this.db.prepare(`
       UPDATE approval_requests
       SET status = ?, resolvedAt = ?, resolvedBy = ?, resolutionReason = ?
       WHERE id = ?
-    `).run(input.status, nowIso(), input.resolvedBy, input.resolutionReason ?? null, id);
+    `).run(input.status, resolvedAt, input.resolvedBy, input.resolutionReason ?? null, id);
     this.audit(input.resolvedBy, "creator", `approval_${input.status}`, "approval", id, {
       conversationId: current.conversationId,
       workspaceId: current.workspaceId,
       toolName: current.toolName,
       resolutionReason: input.resolutionReason
     });
-    return this.getApprovalRequest(id);
+    const resolved = this.getApprovalRequest(id);
+    if (resolved.conversationId && this.getConversation(resolved.conversationId)) {
+      this.appendSessionEntry({
+        conversationId: resolved.conversationId,
+        workspaceId: resolved.workspaceId,
+        type: "approval_request",
+        payload: {
+          eventKind: "resolution",
+          approvalRequestId: resolved.id,
+          workspaceId: resolved.workspaceId,
+          toolName: resolved.toolName,
+          status: resolved.status,
+          previousStatus: current.status,
+          resolvedAt,
+          resolvedBy: input.resolvedBy,
+          resolutionReason: input.resolutionReason
+        }
+      });
+    }
+    return resolved;
   }
 
-  getTrace(conversationId: string, actorId: string, actorRole: UserRole): { sessions: WorkspaceSession[]; llmCalls: LLMCallSnapshot[]; contextSegments: ContextSegment[]; toolCalls: ToolCallLog[]; auditLogs: AuditLog[]; approvalRequests: ApprovalRequest[]; memoryWrites: MemoryRow[] } {
+  getTrace(conversationId: string, actorId: string, actorRole: UserRole): { sessions: WorkspaceSession[]; sessionEntries: SessionEntry[]; llmCalls: LLMCallSnapshot[]; contextSegments: ContextSegment[]; toolCalls: ToolCallLog[]; auditLogs: AuditLog[]; approvalRequests: ApprovalRequest[]; memoryWrites: MemoryRow[] } {
     if (!actorId || (actorRole !== "user" && actorRole !== "creator")) {
       throw new Error("Conversation trace requires explicit actor identity.");
     }
@@ -1437,6 +1879,7 @@ export class Repositories {
     const toolLogUserId = actorRole === "creator" ? undefined : actorId;
     return {
       sessions: this.listWorkspaceSessions(conversationId, toolLogUserId),
+      sessionEntries: this.listSessionEntries(conversationId, toolLogUserId),
       llmCalls: this.db.prepare("SELECT * FROM llm_calls WHERE conversationId = ? ORDER BY createdAt DESC").all(conversationId) as LLMCallSnapshot[],
       contextSegments: this.db.prepare("SELECT * FROM context_segments WHERE conversationId = ? ORDER BY sortOrder").all(conversationId) as ContextSegment[],
       toolCalls: this.listToolCalls(conversationId, toolLogUserId),

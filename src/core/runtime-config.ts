@@ -158,6 +158,14 @@ export const RUNTIME_CONFIG_DEFINITIONS: RuntimeConfigDefinition[] = [
     minValue: 200,
     maxValue: 20000,
     step: 100
+  },
+  {
+    key: "tools.devWorkspaceRoot",
+    category: "tools",
+    label: "Dev 工具文件根目录",
+    description: "read/write/edit/bash 的可配置文件根目录。留空时使用默认会话目录；设置后相对和绝对文件路径都必须落在该根目录内。",
+    valueType: "string",
+    defaultValue: ""
   }
 ];
 

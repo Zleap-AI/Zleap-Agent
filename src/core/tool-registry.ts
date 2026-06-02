@@ -4,7 +4,8 @@ import { MemoryService } from "./memory-service";
 import { PolicyEngine } from "./policy-engine";
 import { WorkspaceRuntime } from "./workspace-runtime";
 import { McpToolExecutor } from "./mcp-executor";
-import { executeReadFile, executeRunCommand, executeSearchFiles, executeWriteFile } from "./builtin-tools";
+import { executeBash, executeEdit, executeRead, executeWrite } from "./builtin-tools";
+import { SafeExtensionRegistry } from "./extension-registry";
 
 export type ToolExecutionResult = {
   ok: boolean;
@@ -35,7 +36,8 @@ export class ToolRegistry {
     private readonly repos: Repositories,
     private readonly memoryService: MemoryService,
     private readonly workspaceRuntime: WorkspaceRuntime,
-    private readonly policy: PolicyEngine
+    private readonly policy: PolicyEngine,
+    private readonly extensionRegistry: SafeExtensionRegistry = new SafeExtensionRegistry()
   ) {}
 
   getCallableTools(workspaceId: string): ToolDefinition[] {
@@ -48,7 +50,15 @@ export class ToolRegistry {
     const runtimeOrchestrationTools = workspaceId === "main"
       ? []
       : this.repos.listTools().filter((tool) => this.runtimeOrchestrationToolNames.has(tool.name) && !existing.has(tool.name));
-    return [...activeTools, ...runtimeOrchestrationTools, ...runtimeMemoryTools];
+    const nextExisting = new Set([
+      ...existing,
+      ...runtimeOrchestrationTools.map((tool) => tool.name),
+      ...runtimeMemoryTools.map((tool) => tool.name)
+    ]);
+    const extensionTools = this.extensionRegistry
+      .listTools(workspaceId)
+      .filter((tool) => !nextExisting.has(tool.name));
+    return [...activeTools, ...runtimeOrchestrationTools, ...runtimeMemoryTools, ...extensionTools];
   }
 
   async execute(input: {
@@ -67,7 +77,8 @@ export class ToolRegistry {
 
     const registeredToActiveWorkspace = this.repos
       .listToolsForWorkspace(input.activeWorkspaceId)
-      .some((item) => item.name === input.toolName && this.isToolVisibleInWorkspace(item.name, input.activeWorkspaceId));
+      .some((item) => item.name === input.toolName && this.isToolVisibleInWorkspace(item.name, input.activeWorkspaceId))
+      || Boolean(this.extensionRegistry.getTool(input.activeWorkspaceId, input.toolName));
     const runtimeTool = this.universalRuntimeMemoryToolNames.has(input.toolName)
       || (input.activeWorkspaceId !== "main" && this.runtimeOrchestrationToolNames.has(input.toolName));
     const decision = this.policy.canUseTool({
@@ -130,6 +141,10 @@ export class ToolRegistry {
     }
 
     if (tool.bindingType === "runtime" || this.runtimeMemoryToolNames.has(input.toolName) || this.runtimeOrchestrationToolNames.has(input.toolName)) {
+      const extensionTool = this.extensionRegistry.getTool(input.activeWorkspaceId, input.toolName);
+      if (extensionTool) {
+        return this.executeExtensionTool(input.run, input.activeWorkspaceId, input.toolName, input.argumentsJson, extensionTool.extensionId, extensionTool.tool);
+      }
       return this.executeRuntimeTool(input.run, input.activeWorkspaceId, input.activeWorkspaceSession, input.toolName, input.argumentsJson);
     }
 
@@ -149,33 +164,80 @@ export class ToolRegistry {
     };
   }
 
+  private async executeExtensionTool(
+    run: AgentRunInput,
+    activeWorkspaceId: string,
+    toolName: string,
+    argumentsJson: string,
+    extensionId: string,
+    tool: { execute: (input: { args: Record<string, unknown>; run: AgentRunInput; workspaceId: string; toolName: string }) => Promise<unknown> | unknown }
+  ): Promise<ToolExecutionResult> {
+    try {
+      const args = safeJson(argumentsJson) as Record<string, unknown>;
+      const output = await tool.execute({ args, run, workspaceId: activeWorkspaceId, toolName });
+      this.repos.audit(run.userId, "system", "extension_tool_executed", "tool", `extension:${extensionId}:tool:${toolName}`, {
+        conversationId: run.conversationId,
+        workspaceId: activeWorkspaceId,
+        extensionId,
+        toolName
+      });
+      return {
+        ok: true,
+        status: "completed",
+        result: {
+          extensionId,
+          toolName,
+          output
+        }
+      };
+    } catch (error) {
+      this.repos.audit(run.userId, "system", "extension_tool_failed", "tool", `extension:${extensionId}:tool:${toolName}`, {
+        conversationId: run.conversationId,
+        workspaceId: activeWorkspaceId,
+        extensionId,
+        toolName,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return {
+        ok: false,
+        status: "failed",
+        result: {
+          extensionId,
+          toolName,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      };
+    }
+  }
+
   private async executeRuntimeTool(run: AgentRunInput, activeWorkspaceId: string, activeWorkspaceSession: WorkspaceSession | undefined, toolName: string, argumentsJson: string): Promise<ToolExecutionResult> {
-    if (toolName === "searchFiles") {
+    const devWorkspaceRoot = this.devWorkspaceRoot();
+    if (toolName === "bash") {
       if (activeWorkspaceId !== "dev") {
-        return { ok: false, status: "failed", result: { error: "searchFiles can only be called from dev workspace." } };
+        return { ok: false, status: "failed", result: { error: "bash can only be called from dev workspace." } };
       }
-      return executeSearchFiles(argumentsJson, { conversationId: run.conversationId });
+      return executeBash(argumentsJson, { conversationId: run.conversationId, abortSignal: run.abortSignal, workspaceRoot: devWorkspaceRoot });
     }
 
-    if (toolName === "runCommand") {
+    if (toolName === "read") {
       if (activeWorkspaceId !== "dev") {
-        return { ok: false, status: "failed", result: { error: "runCommand can only be called from dev workspace." } };
+        return { ok: false, status: "failed", result: { error: "read can only be called from dev workspace." } };
       }
-      return executeRunCommand(argumentsJson, { conversationId: run.conversationId });
+      return executeRead(argumentsJson, { conversationId: run.conversationId, supportsImageContent: run.llm?.supportsImageContent, workspaceRoot: devWorkspaceRoot });
     }
 
-    if (toolName === "readFile") {
+    if (toolName === "write") {
       if (activeWorkspaceId !== "dev") {
-        return { ok: false, status: "failed", result: { error: "readFile can only be called from dev workspace." } };
+        return { ok: false, status: "failed", result: { error: "write can only be called from dev workspace." } };
       }
-      return executeReadFile(argumentsJson, { conversationId: run.conversationId });
+      return executeWrite(argumentsJson, { conversationId: run.conversationId, workspaceRoot: devWorkspaceRoot });
     }
 
-    if (toolName === "writeFile") {
+    if (toolName === "edit") {
       if (activeWorkspaceId !== "dev") {
-        return { ok: false, status: "failed", result: { error: "writeFile can only be called from dev workspace." } };
+        return { ok: false, status: "failed", result: { error: "edit can only be called from dev workspace." } };
       }
-      return executeWriteFile(argumentsJson, { conversationId: run.conversationId });
+      return executeEdit(argumentsJson, { conversationId: run.conversationId, workspaceRoot: devWorkspaceRoot });
     }
 
     if (this.runtimeMemoryToolNames.has(toolName)) {
@@ -446,6 +508,11 @@ export class ToolRegistry {
     if (this.mainOnlyToolNames.has(toolName)) return workspaceId === "main";
     if (toolName === "exitWorkspace") return workspaceId !== "main";
     return true;
+  }
+
+  private devWorkspaceRoot(): string | undefined {
+    const value = this.repos.getRuntimeConfigValues()["tools.devWorkspaceRoot"];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
   }
 
   private hasApprovedRequest(input: { run: AgentRunInput; workspaceId: string; toolName: string; argumentsJson: string }): boolean {

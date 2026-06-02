@@ -2,10 +2,11 @@ import type { AgentConfig, AgentRunInput, ContextSegment, LLMCallSnapshot, LLMMe
 import { AttentionBudget, AttentionBudgetManager, DEFAULT_ATTENTION_BUDGET, estimateTokens } from "./attention-budget";
 import { createId } from "./id";
 
-function memoryPartition(memories: MemoryRow[]): { impressions: MemoryRow[]; resultEvents: MemoryRow[]; processEvents: MemoryRow[]; skillMemories: MemoryRow[] } {
+function memoryPartition(memories: MemoryRow[]): { impressions: MemoryRow[]; rollupEvents: MemoryRow[]; resultEvents: MemoryRow[]; processEvents: MemoryRow[]; skillMemories: MemoryRow[] } {
   const eventMemories = memories.filter((memory) => memory.memoryType === "event");
   return {
     impressions: memories.filter((memory) => memory.memoryType === "impression"),
+    rollupEvents: eventMemories.filter((memory) => memoryEventKind(memory) === "rollup"),
     resultEvents: eventMemories.filter((memory) => memoryEventKind(memory) === "result"),
     processEvents: eventMemories.filter((memory) => memoryEventKind(memory) === "process"),
     skillMemories: memories.filter((memory) => memory.memoryType === "skill")
@@ -77,6 +78,20 @@ function projectResultEvent(memory: MemoryRow): Record<string, unknown> {
   };
 }
 
+function projectRollupEvent(memory: MemoryRow): Record<string, unknown> {
+  const metadata = parseRecord(memory.metadataJson);
+  return {
+    ...projectMemoryBase(memory),
+    eventKind: "rollup",
+    source: metadata.source,
+    triggerSource: metadata.triggerSource,
+    conversationId: metadata.conversationId,
+    rollupMode: metadata.rollupMode,
+    sourceEventIds: Array.isArray(metadata.sourceEventIds) ? metadata.sourceEventIds : [],
+    sourceRefs: Array.isArray(metadata.sourceRefs) ? metadata.sourceRefs : []
+  };
+}
+
 function projectProcessEvent(memory: MemoryRow): Record<string, unknown> {
   const metadata = parseRecord(memory.metadataJson);
   return {
@@ -125,19 +140,47 @@ function memoryDisclosureProtocol(userMessage: string): Record<string, unknown> 
   };
 }
 
+function parsePromptGuidelines(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function toolPromptSummary(tool: ToolDefinition): string {
+  return (tool.promptSnippet ?? tool.description).replace(/\s+/g, " ").trim();
+}
+
 function toolContext(tools: ToolDefinition[]): unknown[] {
   return tools.map((tool) => ({
     id: tool.id,
     workspaceId: tool.workspaceId,
     name: tool.name,
-    description: tool.description,
+    summary: toolPromptSummary(tool),
+    guidelines: parsePromptGuidelines(tool.promptGuidelinesJson),
+    executionMode: tool.executionMode,
     riskLevel: tool.riskLevel,
     bindingType: tool.bindingType,
+    providerCallable: true,
     mcpServerId: tool.mcpServerId,
-    mcpToolName: tool.mcpToolName,
-    parameters: parseJsonOrRaw(tool.parametersJson),
-    binding: parseJsonOrRaw(tool.bindingJson)
+    mcpToolName: tool.mcpToolName
   }));
+}
+
+function toolPromptSection(tools: ToolDefinition[]): string {
+  if (tools.length === 0) return "No provider-callable tools are enabled for this workspace.";
+  return tools.map((tool) => {
+    const guidelines = parsePromptGuidelines(tool.promptGuidelinesJson);
+    const lines = [
+      `- ${tool.name}: ${toolPromptSummary(tool)} [risk=${tool.riskLevel}; executionMode=${tool.executionMode}]`
+    ];
+    for (const guideline of guidelines) {
+      lines.push(`  - ${guideline.replace(/\s+/g, " ").trim()}`);
+    }
+    return lines.join("\n");
+  }).join("\n");
 }
 
 function runtimeSystemContract(input: {
@@ -261,7 +304,10 @@ export class ContextBuilder {
           input.agent.personalityPrompt,
           "",
           "## 内部运行策略",
-          workspaceDecisionContract({ run: input.run, workspace: input.workspace })
+          workspaceDecisionContract({ run: input.run, workspace: input.workspace }),
+          "",
+          "## Available tools",
+          toolPromptSection(currentTools)
         ].join("\n"),
         sortOrder: 10
       },
@@ -298,6 +344,7 @@ export class ContextBuilder {
         content: JSON.stringify({
           memoryDisclosureProtocol: memoryDisclosureProtocol(input.run.message),
           crossWorkspaceImpressionMemory: partitionedMemory.impressions.map(projectImpression),
+          currentWorkspaceEventRollups: partitionedMemory.rollupEvents.map(projectRollupEvent),
           currentWorkspaceResultEvents: partitionedMemory.resultEvents.map(projectResultEvent),
           currentWorkspaceRelevantProcessEvents: partitionedMemory.processEvents.map(projectProcessEvent),
           currentWorkspaceSkillMemory: partitionedMemory.skillMemories.map(projectSkill)
@@ -350,6 +397,8 @@ export class PromptAssembler {
     const systemContent = systemSegment ? `## ${systemSegment.title}\n${systemSegment.content}` : "";
 
     const workspaceToolCallId = "runtime_context_workspace";
+    const resourcesToolCallId = "runtime_context_resources";
+    const toolsToolCallId = "runtime_context_tools";
     const memoryToolCallId = "runtime_context_memory";
     const localConversationToolCallId = "runtime_context_local_conversation";
     return [
@@ -366,6 +415,22 @@ export class PromptAssembler {
             type: "function",
             function: {
               name: "runtime_context.workspace",
+              arguments: "{}"
+            }
+          },
+          {
+            id: resourcesToolCallId,
+            type: "function",
+            function: {
+              name: "runtime_context.resources",
+              arguments: "{}"
+            }
+          },
+          {
+            id: toolsToolCallId,
+            type: "function",
+            function: {
+              name: "runtime_context.tools",
               arguments: "{}"
             }
           },
@@ -394,6 +459,27 @@ export class PromptAssembler {
         content: JSON.stringify(parseSegment("workspace", {
           currentWorkspace: {},
           availableWorkspaces: []
+        }), null, 2)
+      },
+      {
+        role: "tool",
+        tool_call_id: resourcesToolCallId,
+        name: "runtime_context.resources",
+        content: JSON.stringify(parseSegment("resources", {
+          instructions: [],
+          promptTemplates: [],
+          filesystemSkills: [],
+          rules: []
+        }), null, 2)
+      },
+      {
+        role: "tool",
+        tool_call_id: toolsToolCallId,
+        name: "runtime_context.tools",
+        content: JSON.stringify(parseSegment("tools", {
+          activeWorkspaceId: "",
+          toolCount: 0,
+          tools: []
         }), null, 2)
       },
       {

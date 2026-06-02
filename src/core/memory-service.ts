@@ -13,6 +13,36 @@ type UserImpressionCandidate = {
   category: "identity" | "preference" | "constraint" | "background";
   sourceText: string;
 };
+export type EventRollupTriggerSource = "afterConversationWindow" | "afterWorkspaceExit";
+export type EventRollupProjection = {
+  id: string;
+  title: string;
+  summary: string;
+  workspaceId?: string;
+  taskId?: string;
+  outcome?: unknown;
+  updatedAt: string;
+  eventKind: string;
+  relationId?: string;
+  sourceRefs: unknown[];
+};
+export type EventRollupDraft = {
+  workspaceId: string;
+  triggerSource: EventRollupTriggerSource;
+  relationId: string;
+  title: string;
+  fallbackSummary: string;
+  fallbackDetail: string;
+  sourceEventIds: string[];
+  projections: EventRollupProjection[];
+  metadata: Record<string, unknown>;
+};
+export type EventRollupGeneratedContent = {
+  summary: string;
+  detail: string;
+  rollupMode: string;
+  rollupModel: string;
+};
 
 function truncate(value: string, maxLength: number): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
@@ -295,6 +325,26 @@ function sourceRefIds(metadata: Record<string, unknown>, table: string): string[
   return Array.isArray(ref?.ids) ? ref.ids.filter((id): id is string => typeof id === "string") : [];
 }
 
+function sourceRefsForRead(metadata: Record<string, unknown>): Array<{ table: string; ids: string[] }> {
+  const refs = metadata.sourceRefs;
+  if (!Array.isArray(refs)) return [];
+  return refs.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const table = typeof record.table === "string" ? record.table : "";
+    const ids = Array.isArray(record.ids)
+      ? record.ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    return table && ids.length > 0 ? [{ table, ids }] : [];
+  });
+}
+
+function sourceEventIdsForRead(metadata: Record<string, unknown>): string[] {
+  return Array.isArray(metadata.sourceEventIds)
+    ? metadata.sourceEventIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : [];
+}
+
 function stringValue(record: Record<string, unknown>, key: string): string {
   return typeof record[key] === "string" ? record[key] as string : "";
 }
@@ -323,14 +373,14 @@ function toolSignalsFromLogs(toolCalls: ToolCallLog[]): {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const toolNames = [...new Set(chronological.map((toolCall) => toolCall.toolName))];
   const toolKinds = [...new Set(chronological.map((toolCall) => {
-    if (toolCall.toolName !== "runCommand") return toolCall.toolName;
+    if (toolCall.toolName !== "bash") return toolCall.toolName;
     const args = parseObjectJson(toolCall.argumentsJson);
     return classifyCommand(stringValue(args, "command"));
   }))];
   const firstFailure = chronological.findIndex((toolCall) => toolCall.status === "failed");
   const hasFailureRecovery = firstFailure >= 0 && chronological.slice(firstFailure + 1).some((toolCall) => toolCall.status === "completed");
   const completedCount = chronological.filter((toolCall) => toolCall.status === "completed").length;
-  const hasConcreteWorkflow = hasFailureRecovery || chronological.length >= 2 || (completedCount >= 1 && toolKinds.some((kind) => /(python|node|npm|搜索|读取|写入|searchFiles|runCommand)/i.test(kind)));
+  const hasConcreteWorkflow = hasFailureRecovery || chronological.length >= 2 || (completedCount >= 1 && toolKinds.some((kind) => /(python|node|npm|搜索|读取|写入|read|write|edit|bash)/i.test(kind)));
   const procedureHints = [
     hasFailureRecovery ? "先识别失败信号，不要重复同一路径；改用已经验证能完成目标的替代工具或命令形态。" : "",
     toolKinds.length ? `优先复用已验证的工具类别：${toolKinds.join(" -> ")}。` : "",
@@ -430,7 +480,7 @@ function skillSeedFromEventBatch(workspaceId: string, input: {
     : `在 ${workspaceLabel} 处理类似任务时，只复用已经由事件证据验证过的具体工具流程。`;
   const workspaceAdvice: Record<string, string[]> = {
     dev: [
-      "先用 searchFiles 定位相关文件、脚本或配置证据，避免盲目运行命令。",
+      "先用 bash 的 ls、rg 或 find 定位相关文件、脚本或配置证据，避免盲目运行命令。",
       hasFailureRecovery ? "如果一种文件/命令路径失败，不要重复同一路径；改用已验证的替代方式，并记录失败信号、替代操作和最终结果。" : "运行命令前确认目标、风险级别和最小可执行命令；执行后记录退出状态、关键输出和错误摘要。",
       "把文件证据、命令结果、失败原因和成功路径结构化返回给 main workspace。"
     ],
@@ -495,12 +545,17 @@ export class MemoryService {
     run: AgentRunInput;
     activeWorkspaceId: string;
     assistantMessage: string;
+    writeEventRollup?: boolean;
   }): MemoryRow[] {
     const writes: MemoryRow[] = [];
     const eventWrites = this.maybeWriteConversationWindowEvent(input.run, input.activeWorkspaceId);
     writes.push(...eventWrites);
     const eventSkill = this.maybeWriteSkillFromEventBatch(input.run, input.activeWorkspaceId, eventWrites, "afterConversationWindow");
     if (eventSkill) writes.push(eventSkill);
+    if (input.writeEventRollup !== false) {
+      const eventRollup = this.maybeWriteEventRollup(input.run, input.activeWorkspaceId, "afterConversationWindow");
+      if (eventRollup) writes.push(eventRollup);
+    }
     const skill = this.maybeWriteSkillMemory(input.run, input.activeWorkspaceId, input.assistantMessage);
     if (skill) writes.push(skill);
     const userImpression = this.maybeWriteUserImpressionFromHook(input.run, input.activeWorkspaceId, input.assistantMessage);
@@ -512,6 +567,7 @@ export class MemoryService {
   afterWorkspaceExit(input: {
     run: AgentRunInput;
     session: WorkspaceSession;
+    writeEventRollup?: boolean;
   }): MemoryRow[] {
     if (input.session.workspaceId === "main") return [];
     this.recordRecalledSkillUsage(input.run, input.session);
@@ -579,6 +635,10 @@ export class MemoryService {
 
     const eventSkill = this.maybeWriteSkillFromEventBatch(input.run, input.session.workspaceId, writes, "afterWorkspaceExit");
     if (eventSkill) writes.push(eventSkill);
+    if (input.writeEventRollup !== false) {
+      const eventRollup = this.maybeWriteEventRollup(input.run, input.session.workspaceId, "afterWorkspaceExit");
+      if (eventRollup) writes.push(eventRollup);
+    }
     this.auditMemoryHooks(input.run, input.session.workspaceId, writes);
     return writes;
   }
@@ -1007,6 +1067,240 @@ export class MemoryService {
     return runtimeConfigNumber(this.repos.getRuntimeConfigValues(), "memory.processEventDetailLimit");
   }
 
+  private eventRollupMinSourceEvents(): number {
+    return 4;
+  }
+
+  private eventRollupSourceLimit(): number {
+    return 12;
+  }
+
+  buildEventRollupDraft(
+    run: AgentRunInput,
+    workspaceId: string,
+    triggerSource: EventRollupTriggerSource
+  ): EventRollupDraft | undefined {
+    const sourceEvents = this.nextEventRollupSourceEvents(run, workspaceId);
+    if (sourceEvents.length < this.eventRollupMinSourceEvents()) return undefined;
+
+    const sourceEventIds = sourceEvents.map((memory) => memory.id);
+    const sourceKey = sourceEventIds.join(":");
+    const fingerprint = stableId(`${run.userId}:${run.agentId}:${workspaceId}:${sourceKey}`);
+    const relationId = `event:${run.userId}:agent:${run.agentId}:${workspaceId}:rollup:${fingerprint}`;
+    const relationScope = this.memoryRelationScope({
+      memoryType: "event",
+      userId: run.userId,
+      agentId: run.agentId,
+      workspaceId,
+      title: "",
+      summary: "",
+      detail: ""
+    });
+    if (this.repos.getMemoryByRelation("event", relationId, relationScope)) return undefined;
+
+    const projections = sourceEvents.map((memory) => this.projectEventForRollup(memory));
+    const generatedAt = nowIso();
+    return {
+      workspaceId,
+      triggerSource,
+      relationId,
+      title: `${workspaceId} event rollup`,
+      fallbackSummary: this.eventRollupSummary(workspaceId, projections),
+      fallbackDetail: this.eventRollupDetail(run, workspaceId, projections),
+      sourceEventIds,
+      projections,
+      metadata: {
+        source: "eventRollup",
+        eventKind: "rollup",
+        triggerSource,
+        conversationId: run.conversationId,
+        workspaceId,
+        taskId: `event-rollup:${fingerprint}`,
+        sourceEventIds,
+        sourceRefs: [sourceRef("memories", sourceEventIds)],
+        coveredEventKinds: [...new Set(projections.map((projection) => projection.eventKind))],
+        coveredRelationIds: projections.map((projection) => projection.relationId).filter(Boolean),
+        generatedAt,
+        autoGenerated: true
+      }
+    };
+  }
+
+  writeEventRollupFromDraft(
+    run: AgentRunInput,
+    draft: EventRollupDraft,
+    generated: EventRollupGeneratedContent,
+    options: { audit?: boolean } = {}
+  ): MemoryRow | undefined {
+    const summary = truncate(generated.summary.trim() || draft.fallbackSummary, 220);
+    const detail = generated.detail.trim() || draft.fallbackDetail;
+    const rollupMemory = this.createOrSkip({
+      memoryType: "event",
+      userId: run.userId,
+      agentId: run.agentId,
+      workspaceId: draft.workspaceId,
+      relationId: draft.relationId,
+      version: 1,
+      title: draft.title,
+      summary,
+      detail,
+      metadataJson: JSON.stringify({
+        ...draft.metadata,
+        rollupMode: generated.rollupMode,
+        rollupModel: generated.rollupModel
+      })
+    }, run.userId, run.userRole);
+    if (rollupMemory && options.audit !== false) {
+      this.auditMemoryHooks(run, draft.workspaceId, [rollupMemory]);
+    }
+    return rollupMemory;
+  }
+
+  private maybeWriteEventRollup(
+    run: AgentRunInput,
+    workspaceId: string,
+    triggerSource: EventRollupTriggerSource
+  ): MemoryRow | undefined {
+    const draft = this.buildEventRollupDraft(run, workspaceId, triggerSource);
+    if (!draft) return undefined;
+    return this.writeEventRollupFromDraft(run, draft, {
+      summary: draft.fallbackSummary,
+      detail: draft.fallbackDetail,
+      rollupMode: "event_projection",
+      rollupModel: run.llm?.model ?? "active-runtime-model"
+    }, { audit: false });
+  }
+
+  private nextEventRollupSourceEvents(run: AgentRunInput, workspaceId: string): MemoryRow[] {
+    const exactWorkspaceEvents = this.repos.listMemories({
+      memoryType: "event",
+      userId: run.userId,
+      agentId: run.agentId,
+      workspaceId
+    }).filter((memory) => (
+      memory.userId === run.userId
+      && memory.agentId === run.agentId
+      && memory.workspaceId === workspaceId
+    ));
+    const latestProcessOrResultByRelation = new Map<string, MemoryRow>();
+    const rollupMemories: MemoryRow[] = [];
+    for (const memory of exactWorkspaceEvents) {
+      const eventKind = this.eventKindOf(memory);
+      if (eventKind === "rollup") {
+        rollupMemories.push(memory);
+        continue;
+      }
+      if (eventKind !== "process" && eventKind !== "result") continue;
+      const key = memory.relationId ?? memory.id;
+      const current = latestProcessOrResultByRelation.get(key);
+      if (!current || memory.version > current.version || (memory.version === current.version && memory.updatedAt > current.updatedAt)) {
+        latestProcessOrResultByRelation.set(key, memory);
+      }
+    }
+
+    const coveredEventIds = new Set<string>();
+    for (const rollup of rollupMemories) {
+      const metadata = this.parseMetadata(rollup.metadataJson);
+      if (Array.isArray(metadata.sourceEventIds)) {
+        for (const value of metadata.sourceEventIds) {
+          if (typeof value === "string" && value.trim()) coveredEventIds.add(value);
+        }
+      }
+    }
+
+    return [...latestProcessOrResultByRelation.values()]
+      .filter((memory) => !coveredEventIds.has(memory.id))
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(0, this.eventRollupSourceLimit());
+  }
+
+  private eventKindOf(memory: MemoryRow): string {
+    const metadata = this.parseMetadata(memory.metadataJson);
+    return typeof metadata.eventKind === "string" ? metadata.eventKind : "";
+  }
+
+  private projectEventForRollup(memory: MemoryRow): EventRollupProjection {
+    const metadata = this.parseMetadata(memory.metadataJson);
+    return {
+      id: memory.id,
+      title: memory.title,
+      summary: memory.summary,
+      workspaceId: memory.workspaceId,
+      taskId: typeof metadata.taskId === "string" ? metadata.taskId : undefined,
+      outcome: metadata.outcome,
+      updatedAt: memory.updatedAt,
+      eventKind: typeof metadata.eventKind === "string" ? metadata.eventKind : "",
+      relationId: memory.relationId,
+      sourceRefs: Array.isArray(metadata.sourceRefs) ? metadata.sourceRefs : []
+    };
+  }
+
+  private eventRollupSummary(workspaceId: string, projections: EventRollupProjection[]): string {
+    const recent = projections.slice(-4).map((projection) => `${projection.eventKind}:${projection.summary}`).join("；");
+    return truncate(`${workspaceId} event rollup covering ${projections.length} event memories. ${recent}`, 220);
+  }
+
+  private eventRollupDetail(
+    run: AgentRunInput,
+    workspaceId: string,
+    projections: EventRollupProjection[]
+  ): string {
+    const stableFacts = projections
+      .filter((projection) => projection.eventKind === "process")
+      .slice(-5)
+      .map((projection) => `- ${compactText(projection.title || projection.summary, 180)}`);
+    const recentOutcomes = projections
+      .filter((projection) => projection.eventKind === "result")
+      .slice(-5)
+      .map((projection) => `- ${compactText(`${projection.outcome ? `${projection.outcome}: ` : ""}${projection.summary}`, 220)}`);
+    const openThreads = projections
+      .filter((projection) => projection.outcome && !["success", "completed"].includes(String(projection.outcome)))
+      .slice(-4)
+      .map((projection) => `- ${compactText(`${projection.eventKind}:${projection.summary}`, 200)}`);
+    const evidenceReferences = this.rollupEvidenceReferenceSummary(projections);
+    const sourceEventIds = projections.map((projection) => projection.id);
+    return [
+      "Workspace Event Rollup",
+      "",
+      "Scope",
+      `- userId: ${run.userId}`,
+      `- workspaceId: ${workspaceId}`,
+      `- relation/window: ${sourceEventIds[0] ?? ""}..${sourceEventIds.at(-1) ?? ""}`,
+      "",
+      "Stable Facts",
+      stableFacts.length ? stableFacts.join("\n") : "- No stable process facts were projected.",
+      "",
+      "Recent Outcomes",
+      recentOutcomes.length ? recentOutcomes.join("\n") : "- No result outcomes were projected.",
+      "",
+      "Open Threads",
+      openThreads.length ? openThreads.join("\n") : "- No open threads were projected.",
+      "",
+      "Tool/File Evidence References",
+      evidenceReferences.length ? evidenceReferences.join("\n") : "- sourceRefs only: none projected.",
+      "",
+      "Memory Links",
+      ...sourceEventIds.map((id) => `- ${id}`)
+    ].join("\n");
+  }
+
+  private rollupEvidenceReferenceSummary(projections: EventRollupProjection[]): string[] {
+    const counts = new Map<string, number>();
+    for (const projection of projections) {
+      for (const ref of projection.sourceRefs) {
+        if (!ref || typeof ref !== "object" || Array.isArray(ref)) continue;
+        const record = ref as Record<string, unknown>;
+        const table = typeof record.table === "string" ? record.table : "";
+        const ids = Array.isArray(record.ids) ? record.ids.filter((id) => typeof id === "string") : [];
+        if (!table || ids.length === 0) continue;
+        counts.set(table, (counts.get(table) ?? 0) + ids.length);
+      }
+    }
+    return [...counts.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([table, count]) => `- ${table}: ${count} source id reference(s)`);
+  }
+
   private maybeWriteConversationWindowEvent(run: AgentRunInput, workspaceId: string): MemoryRow[] {
     const eventWindowSize = this.eventWindowSize();
     const processEventDetailLimit = this.processEventDetailLimit();
@@ -1277,14 +1571,14 @@ export class MemoryService {
     const evidenceToolCalls = this.toolCallsForEventMemories(run, eventMemories);
     const toolSignals = toolSignalsFromLogs(evidenceToolCalls);
     const hasExplicitLesson = /(retry|workaround|fallback|recover|instead|verified|validated|失败|报错|错误|重试|改用|换成|规避|最终成功|验证通过)/i.test(evidenceText);
-    const hasConcreteToolEvidence = /工具概况：[^\n]*(runCommand|searchFiles|readSkill|writeSkillMemory|metasoSearch)/i.test(evidenceText);
+    const hasConcreteToolEvidence = /工具概况：[^\n]*(bash|read|write|edit|readSkill|writeSkillMemory|metasoSearch)/i.test(evidenceText);
     if (!toolSignals.hasConcreteWorkflow && !hasExplicitLesson && !hasConcreteToolEvidence) return undefined;
 
     const effectiveToolSignals = toolSignals.hasConcreteWorkflow || !hasConcreteToolEvidence
       ? toolSignals
       : {
-        toolNames: [...new Set(["runCommand", "searchFiles", "readSkill", "writeSkillMemory", "metasoSearch"].filter((name) => evidenceText.includes(name)))],
-        toolKinds: [...new Set(["runCommand", "searchFiles", "readSkill", "writeSkillMemory", "metasoSearch"].filter((name) => evidenceText.includes(name)))],
+        toolNames: [...new Set(["bash", "read", "write", "edit", "readSkill", "writeSkillMemory", "metasoSearch"].filter((name) => evidenceText.includes(name)))],
+        toolKinds: [...new Set(["bash", "read", "write", "edit", "readSkill", "writeSkillMemory", "metasoSearch"].filter((name) => evidenceText.includes(name)))],
         hasFailureRecovery: hasExplicitLesson,
         hasConcreteWorkflow: true,
         procedureHints: ["复用源事件中已经验证过的具体工具流程；只保留工具类别和状态，不复制原始参数或输出。"]
@@ -1482,9 +1776,9 @@ export class MemoryService {
       return { allowed: false, reason: "Event memory requires metadata.taskId for audit and tenant isolation." };
     }
     const eventKind = typeof metadata.eventKind === "string" ? metadata.eventKind.trim() : "";
-    const allowedKinds = new Set(["process", "result", "manual", "agent_requested"]);
+    const allowedKinds = new Set(["process", "result", "rollup", "manual", "agent_requested"]);
     if (!allowedKinds.has(eventKind)) {
-      return { allowed: false, reason: "Event memory requires metadata.eventKind to be process, result, manual, or agent_requested." };
+      return { allowed: false, reason: "Event memory requires metadata.eventKind to be process, result, rollup, manual, or agent_requested." };
     }
     return { allowed: true };
   }
@@ -1707,7 +2001,13 @@ export class MemoryService {
         eventKind: typeof metadata.eventKind === "string" ? metadata.eventKind : undefined,
         outcome: metadata.outcome,
         source: metadata.source,
-        conversationId: metadata.conversationId
+        conversationId: metadata.conversationId,
+        taskId: typeof metadata.taskId === "string" ? metadata.taskId : undefined,
+        triggerSource: metadata.triggerSource,
+        rollupMode: metadata.rollupMode,
+        rollupModel: metadata.rollupModel,
+        sourceEventIds: sourceEventIdsForRead(metadata),
+        sourceRefs: sourceRefsForRead(metadata)
       };
     }
     if (memory.memoryType === "skill") {
@@ -1851,6 +2151,18 @@ export class MemoryService {
           version: memory.version,
           eventKind: metadata.eventKind,
           outcome: metadata.outcome
+        });
+      }
+      if (memory.memoryType === "event" && metadata.eventKind === "rollup") {
+        this.repos.audit(run.userId, "system", "hook.afterEventRollup", "memory", memory.id, {
+          ...base,
+          hook: "afterEventRollup",
+          relationId: memory.relationId,
+          version: memory.version,
+          triggerSource: metadata.triggerSource,
+          rollupMode: metadata.rollupMode,
+          rollupModel: metadata.rollupModel,
+          sourceEventIds: Array.isArray(metadata.sourceEventIds) ? metadata.sourceEventIds : []
         });
       }
       if (memory.memoryType === "skill") {

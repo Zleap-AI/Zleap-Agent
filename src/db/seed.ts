@@ -60,46 +60,52 @@ const toolSchemas = {
     required: ["summary"],
     additionalProperties: false
   },
-  searchFiles: {
+  read: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么需要搜索文件；必须说明要验证什么，而不是泛泛探索。" },
-      query: { type: "string" }
+      path: { type: "string", description: "Path to the file to read, relative to the configured workspace root or absolute within that root." },
+      offset: { type: "number", description: "Optional 1-based line number to start reading from." },
+      limit: { type: "number", description: "Optional maximum number of lines to read." }
     },
-    required: ["reason", "query"],
+    required: ["path"],
     additionalProperties: false
   },
-  readFile: {
+  write: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么需要读取这个文件；必须和当前任务直接相关。" },
-      path: { type: "string", description: "当前会话专属文件工作目录内的相对路径。" },
-      startLine: { type: "number", description: "可选，1-based 起始行。" },
-      maxLines: { type: "number", description: "可选，最多读取行数，默认 200，最大 500。" }
+      path: { type: "string", description: "Path to create or overwrite, relative to the configured workspace root or absolute within that root." },
+      content: { type: "string", description: "Complete UTF-8 file content." }
     },
-    required: ["reason", "path"],
+    required: ["path", "content"],
     additionalProperties: false
   },
-  writeFile: {
+  edit: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么需要写入这个文件；必须说明写入目标和预期效果。" },
-      path: { type: "string", description: "当前会话专属文件工作目录内的相对路径。" },
-      content: { type: "string", description: "完整 UTF-8 文件内容；这是覆盖写入，不是追加或局部替换。" },
-      createDirs: { type: "boolean", description: "目录不存在时是否自动创建父目录。" }
+      path: { type: "string", description: "Path to edit, relative to the configured workspace root or absolute within that root." },
+      edits: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            oldText: { type: "string", description: "Exact target text. It must identify one non-overlapping region in the original file." },
+            newText: { type: "string", description: "Replacement text." }
+          },
+          required: ["oldText", "newText"],
+          additionalProperties: false
+        }
+      }
     },
-    required: ["reason", "path", "content"],
+    required: ["path", "edits"],
     additionalProperties: false
   },
-  runCommand: {
+  bash: {
     type: "object",
     properties: {
-      reason: { type: "string", description: "为什么必须运行命令；必须说明预期验证或产出，避免无目的环境探测。" },
-      command: { type: "string", description: "要执行的最小必要命令。不要用它替代 readFile/writeFile/searchFiles。" },
-      cwd: { type: "string", description: "可选，当前会话专属文件工作目录内的相对工作目录。" },
-      timeoutMs: { type: "number", description: "可选，超时时间，最大 120000。" }
+      command: { type: "string", description: "Shell command to execute in the configured workspace root." },
+      timeout: { type: "number", description: "Optional timeout in seconds." }
     },
-    required: ["reason", "command"],
+    required: ["command"],
     additionalProperties: false
   },
   searchMemory: {
@@ -175,7 +181,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "你是 Zleap 的内部执行 agent。",
   "runtime、workspace、context、tool call、memory injection 等信息只用于内部决策，不要在面向用户的回答里展示或解释。",
   "需要使用工具时，直接通过 function call 调用，不要告诉用户你正在调用工具、切换内部模块或读取内部上下文。",
-  "每一次 function call 都必须在参数里写清楚 reason：说明这次调用为什么必要、预期获得什么信息或产物。reason 是给 runtime/UI 调试看的，不要把它写进面向用户的回答。",
+  "工具调用参数必须严格匹配工具 schema；不要添加未声明字段。开发工具 read/write/edit/bash 不需要 reason。",
   "回复语言必须跟随用户当前消息的主要语言：用户用中文就用中文，用户用英文就用英文；除非用户明确要求翻译或指定另一种语言，不要中英混杂或随意切换语言。",
   "searchMemory 是低频补查工具；每轮上下文已经自动召回主要记忆，只有自动上下文不足、用户明确追问旧记忆，或任务依赖旧事件/偏好/经验证据时才调用。",
   "Memory 采用渐进式披露：上下文和搜索结果只适合先看 id、标题、摘要或片段，默认不注入完整 detail；当用户主动要求回忆、摘要不足以回答、或需要核对某条 impression/event 的详情时，调用 readMemory(memoryId) 读取完整 detail，不要凭摘要脑补。",
@@ -274,14 +280,14 @@ export function seedDefaults(db: Database.Database): void {
   `);
 
   insertWorkspace.run("main", "主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。多阶段任务要按能力切片调度，例如搜索完成后回到 main，再进入开发/文件工作空间生成网页或写文件。", "只使用编排工具。", "low", now, now);
-  insertWorkspace.run("dev", "开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是用户文档目录下的 Zleap 会话专属工作目录，目录名形如 ~/Documents/Zleap/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", "medium", now, now);
+  insertWorkspace.run("dev", "开发工作空间", "统一处理会话文件工作目录内的搜索、读写、编辑和命令行执行。", "处理需要本地文件上下文的任务，可以在配置的 workspace root 内搜索文件、读取文件、写入文件、局部编辑文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "开发工具是 read/write/edit/bash。用 bash 的 ls、rg、find 定位文件；用 read 查看内容；用 edit 做局部修改；用 write 创建新文件或完整覆盖；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 bash。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", "medium", now, now);
 
   const updateWorkspace = db.prepare(`
     UPDATE workspaces SET name = ?, description = ?, instructions = ?, toolInstructions = ?, updatedAt = ?
     WHERE id = ?
   `);
   updateWorkspace.run("主工作空间", "负责任务编排和 workspace 选择。", "理解用户目标，选择合适的 workspace，并整合结构化结果。不要直接使用子 workspace 的工具。多阶段任务要按能力切片调度，例如搜索完成后回到 main，再进入开发/文件工作空间生成网页或写文件。", "只使用编排工具。", now, "main");
-  updateWorkspace.run("开发工作空间", "统一处理会话文件工作目录内的搜索、读写和命令行执行。", "处理需要本地文件上下文的任务，可以在当前会话专属目录中搜索文件、读取文件、写入文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "每次工具调用都填写 reason。文件和命令工具默认根目录是用户文档目录下的 Zleap 会话专属工作目录，目录名形如 ~/Documents/Zleap/conversations/<conversationId>-<hash>/；优先用 searchFiles 定位证据，用 readFile 查看内容，用 writeFile 写入完整文件；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 runCommand。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", now, "dev");
+  updateWorkspace.run("开发工作空间", "统一处理会话文件工作目录内的搜索、读写、编辑和命令行执行。", "处理需要本地文件上下文的任务，可以在配置的 workspace root 内搜索文件、读取文件、写入文件、局部编辑文件，并在必要时运行命令。不要默认操作项目根目录；高风险命令仍由工具级审批控制。", "开发工具是 read/write/edit/bash。用 bash 的 ls、rg、find 定位文件；用 read 查看内容；用 edit 做局部修改；用 write 创建新文件或完整覆盖；只有测试、构建、脚本运行、环境诊断或用户明确要求终端操作时才用 bash。不要无目的地查询系统配置；命令必须最小、可解释、和当前任务直接相关。把结果、错误和下一步建议结构化返回 main。", now, "dev");
   db.prepare("DELETE FROM workspace_tools WHERE workspaceId = 'memory'").run();
   db.prepare("DELETE FROM workspaces WHERE id = 'memory'").run();
   db.prepare("UPDATE memories SET workspaceId = 'dev', updatedAt = ? WHERE workspaceId IN ('file', 'cli')").run(now);
@@ -318,9 +324,9 @@ export function seedDefaults(db: Database.Database): void {
     "main"
   );
   updateWorkspaceManifest.run(
-    JSON.stringify(["文件搜索", "文件读取", "文件写入", "代码阅读", "命令执行", "终端诊断", "测试运行"]),
+    JSON.stringify(["文件搜索", "文件读取", "文件写入", "文件编辑", "代码阅读", "命令执行", "终端诊断", "测试运行"]),
     JSON.stringify(["user_request", "workspace_task"]),
-    JSON.stringify(["file_matches", "file_content", "file_write_result", "command_output", "exit_status", "workspace_result"]),
+    JSON.stringify(["file_matches", "file_content", "file_write_result", "file_edit_result", "command_output", "exit_status", "workspace_result"]),
     0,
     JSON.stringify(defaultMemoryPolicy),
     now,
@@ -333,14 +339,25 @@ export function seedDefaults(db: Database.Database): void {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
+  db.prepare(`
+    DELETE FROM workspace_tools
+    WHERE toolId IN ('tool-search-files', 'tool-read-file', 'tool-write-file', 'tool-run-command')
+       OR toolId IN (SELECT id FROM tool_definitions WHERE name IN ('searchFiles', 'readFile', 'writeFile', 'runCommand', 'editFile'))
+  `).run();
+  db.prepare(`
+    DELETE FROM tool_definitions
+    WHERE id IN ('tool-search-files', 'tool-read-file', 'tool-write-file', 'tool-run-command')
+       OR name IN ('searchFiles', 'readFile', 'writeFile', 'runCommand', 'editFile')
+  `).run();
+
   insertTool.run("tool-enter-workspace", "enterWorkspace", "带着目标请求进入子 workspace。", JSON.stringify(toolSchemas.enterWorkspace), "low", now, now);
   insertTool.run("tool-exit-workspace", "exitWorkspace", "用结构化 WorkspaceResult 退出当前子 workspace，并返回 main workspace。", JSON.stringify(toolSchemas.exitWorkspace), "low", now, now);
   insertTool.run("tool-ask-user", "askUser", "Ask the user for missing information before continuing orchestration.", JSON.stringify(toolSchemas.askUser), "low", now, now);
   insertTool.run("tool-finish-task", "finishTask", "Mark the main workspace task as ready for final user-facing response.", JSON.stringify(toolSchemas.finishTask), "low", now, now);
-  insertTool.run("tool-search-files", "searchFiles", "搜索当前会话专属文件工作目录内的文件名和文本内容。", JSON.stringify(toolSchemas.searchFiles), "medium", now, now);
-  insertTool.run("tool-read-file", "readFile", "读取当前会话专属文件工作目录内的文件内容，适合在搜索后查看具体文件。", JSON.stringify(toolSchemas.readFile), "low", now, now);
-  insertTool.run("tool-write-file", "writeFile", "覆盖写入当前会话专属文件工作目录内的 UTF-8 文件，适合创建或替换完整文件内容。", JSON.stringify(toolSchemas.writeFile), "medium", now, now);
-  insertTool.run("tool-run-command", "runCommand", "运行经过允许的命令行命令。", JSON.stringify(toolSchemas.runCommand), "high", now, now);
+  insertTool.run("tool-read", "read", "Read file contents.", JSON.stringify(toolSchemas.read), "low", now, now);
+  insertTool.run("tool-write", "write", "Create or overwrite files.", JSON.stringify(toolSchemas.write), "medium", now, now);
+  insertTool.run("tool-edit", "edit", "Make precise file edits with exact text replacement.", JSON.stringify(toolSchemas.edit), "medium", now, now);
+  insertTool.run("tool-bash", "bash", "Execute shell commands in the configured workspace root.", JSON.stringify(toolSchemas.bash), "high", now, now);
   insertTool.run("tool-search-memory", "searchMemory", "低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", JSON.stringify(toolSchemas.searchMemory), "low", now, now);
   insertTool.run("tool-read-memory", "readMemory", "按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户追问详细说说、主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", JSON.stringify(toolSchemas.readMemory), "low", now, now);
   insertTool.run("tool-read-skill", "readSkill", "读取当前 active workspace 中一条已召回 skill 的完整经验详情。", JSON.stringify(toolSchemas.readSkill), "low", now, now);
@@ -348,47 +365,41 @@ export function seedDefaults(db: Database.Database): void {
   insertTool.run("tool-write-agent-self-impression", "writeAgentSelfImpression", "只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "high", now, now);
   insertTool.run("tool-write-skill-memory", "writeSkillMemory", "为当前 active workspace 写入脱敏后的可复用经验。", JSON.stringify(toolSchemas.writeSkillMemory), "medium", now, now);
 
-  const updateTool = db.prepare("UPDATE tool_definitions SET description = ?, updatedAt = ? WHERE id = ?");
-  updateTool.run("带着目标请求进入子 workspace。", now, "tool-enter-workspace");
-  updateTool.run("用结构化 WorkspaceResult 退出当前子 workspace，并返回 main workspace。", now, "tool-exit-workspace");
-  updateTool.run("Ask the user for missing information before continuing orchestration.", now, "tool-ask-user");
-  updateTool.run("Mark the main workspace task as ready for final user-facing response.", now, "tool-finish-task");
-  updateTool.run("搜索当前会话专属文件工作目录内的文件名和文本内容。用于定位候选文件或关键词证据，不用于读取完整文件。调用时必须填写 reason，说明要验证什么。", now, "tool-search-files");
-  updateTool.run("读取当前会话专属文件工作目录内的文件内容。优先在 searchFiles 定位后使用；不要用 runCommand/cat 代替。调用时必须填写 reason。", now, "tool-read-file");
-  updateTool.run("覆盖写入当前会话专属文件工作目录内的 UTF-8 文件。适合创建或替换完整文件内容；不要用 runCommand/echo/python heredoc 代替普通文件写入。调用时必须填写 reason。", now, "tool-write-file");
-  updateTool.run("运行最小必要命令。只用于测试、构建、脚本、诊断或用户明确要求终端操作；不要用它替代 searchFiles/readFile/writeFile，也不要无目的查询系统配置。调用时必须填写 reason、说明预期产出。", now, "tool-run-command");
-  updateTool.run("低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", now, "tool-search-memory");
-  updateTool.run("按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户追问详细说说、主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", now, "tool-read-memory");
-  updateTool.run("读取当前 active workspace 中一条已召回 skill 的完整经验详情。", now, "tool-read-skill");
-  updateTool.run("只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", now, "tool-write-agent-self-impression");
-  updateTool.run("为当前用户写入长期偏好、背景、身份、称呼、约束、工作习惯或用户授权搜索确认的稳定公开信息；不要记录 agent 自己或一次性任务细节。", now, "tool-write-user-impression");
-  updateTool.run("为当前 active workspace 写入脱敏后的可复用经验。", now, "tool-write-skill-memory");
-
-  const updateToolSchema = db.prepare("UPDATE tool_definitions SET parametersJson = ?, updatedAt = ? WHERE id = ?");
-  updateToolSchema.run(JSON.stringify(toolSchemas.enterWorkspace), now, "tool-enter-workspace");
-  updateToolSchema.run(JSON.stringify(toolSchemas.exitWorkspace), now, "tool-exit-workspace");
-  updateToolSchema.run(JSON.stringify(toolSchemas.askUser), now, "tool-ask-user");
-  updateToolSchema.run(JSON.stringify(toolSchemas.finishTask), now, "tool-finish-task");
-  updateToolSchema.run(JSON.stringify(toolSchemas.searchFiles), now, "tool-search-files");
-  updateToolSchema.run(JSON.stringify(toolSchemas.readFile), now, "tool-read-file");
-  updateToolSchema.run(JSON.stringify(toolSchemas.writeFile), now, "tool-write-file");
-  updateToolSchema.run(JSON.stringify(toolSchemas.runCommand), now, "tool-run-command");
-  updateToolSchema.run(JSON.stringify(toolSchemas.searchMemory), now, "tool-search-memory");
-  updateToolSchema.run(JSON.stringify(toolSchemas.readMemory), now, "tool-read-memory");
-  updateToolSchema.run(JSON.stringify(toolSchemas.readSkill), now, "tool-read-skill");
-  updateToolSchema.run(JSON.stringify(toolSchemas.writeUserImpression), now, "tool-write-user-impression");
-  updateToolSchema.run(JSON.stringify(toolSchemas.writeAgentSelfImpression), now, "tool-write-agent-self-impression");
-  updateToolSchema.run(JSON.stringify(toolSchemas.writeSkillMemory), now, "tool-write-skill-memory");
+  const updateToolDefinition = db.prepare(`
+    UPDATE tool_definitions SET
+      description = ?,
+      parametersJson = ?,
+      promptSnippet = ?,
+      promptGuidelinesJson = ?,
+      executionMode = ?,
+      riskLevel = ?,
+      updatedAt = ?
+    WHERE id = ?
+  `);
+  updateToolDefinition.run("带着目标请求进入子 workspace。", JSON.stringify(toolSchemas.enterWorkspace), "Enter a specialized workspace with a concrete objective", JSON.stringify(["Use this only from main when another workspace has the right capability."]), "sequential", "low", now, "tool-enter-workspace");
+  updateToolDefinition.run("用结构化 WorkspaceResult 退出当前子 workspace，并返回 main workspace。", JSON.stringify(toolSchemas.exitWorkspace), "Exit the current child workspace with a structured result", JSON.stringify(["Use this when the child workspace task is complete, blocked, failed, needs user input, or needs approval."]), "sequential", "low", now, "tool-exit-workspace");
+  updateToolDefinition.run("Ask the user for missing information before continuing orchestration.", JSON.stringify(toolSchemas.askUser), "Ask the user a focused question when required information is missing", JSON.stringify(["Use only when runtime cannot make safe progress without user input."]), "sequential", "low", now, "tool-ask-user");
+  updateToolDefinition.run("Mark the main workspace task as ready for final user-facing response.", JSON.stringify(toolSchemas.finishTask), "Finish the main task with a user-facing response", JSON.stringify(["Use only from main when the task can be answered without more tool work."]), "sequential", "low", now, "tool-finish-task");
+  updateToolDefinition.run("读取配置 workspace root 内的文件内容。支持 offset/limit、大文件截断和图片检测。", JSON.stringify(toolSchemas.read), "Read file contents", JSON.stringify(["Use read to examine files instead of bash with cat or sed.", "For large files, continue from the next offset when the result is truncated.", "Use bash with ls, rg, or find when you need to locate files."]), "parallel", "low", now, "tool-read");
+  updateToolDefinition.run("创建或完整覆盖配置 workspace root 内的文件，自动创建父目录。", JSON.stringify(toolSchemas.write), "Create or overwrite files", JSON.stringify(["Use write only for new files or complete rewrites.", "Use edit for localized changes to existing files.", "Do not use bash, echo, heredoc, or shell redirection for ordinary file writes."]), "parallel", "medium", now, "tool-write");
+  updateToolDefinition.run("对配置 workspace root 内的文件进行精确局部编辑，支持 Pi-style fuzzy matching。", JSON.stringify(toolSchemas.edit), "Make precise file edits with exact text replacement, including multiple disjoint edits in one call", JSON.stringify(["Use edit for precise localized changes.", "Each edits[].oldText is matched against the original file, not after earlier edits are applied.", "Use one edit call with multiple edits[] entries for separate changes in the same file.", "Do not emit overlapping or nested edits; merge nearby changes into one edit.", "Keep oldText as small as possible while still uniquely identifying the target region.", "Use write only for new files or complete rewrites."]), "parallel", "medium", now, "tool-edit");
+  updateToolDefinition.run("在配置 workspace root 内执行 shell 命令。文件搜索通过 ls、rg、find 完成。", JSON.stringify(toolSchemas.bash), "Execute shell commands, including ls, rg, find, tests, builds, scripts, and diagnostics", JSON.stringify(["Use bash for file exploration commands like ls, rg, and find.", "Use bash only when command execution is necessary.", "Do not use bash as a substitute for read, write, or edit.", "Keep commands minimal."]), "sequential", "high", now, "tool-bash");
+  updateToolDefinition.run("低频补查记忆：仅在自动召回不足或用户明确追问旧记忆时，用具体 query 和可选 memoryType 进行作用域内 SQLite FTS 搜索。", JSON.stringify(toolSchemas.searchMemory), "Search scoped memory when automatic recall is insufficient", JSON.stringify(["Use concrete queries and narrow memoryType when possible."]), "parallel", "low", now, "tool-search-memory");
+  updateToolDefinition.run("按 memoryId 读取当前 runtime scope 可见记忆的完整详情；用于用户追问详细说说、主动回忆或摘要不足时，不暴露跨用户或跨工作空间记录。", JSON.stringify(toolSchemas.readMemory), "Read full details for a scoped memory", JSON.stringify(["Use when summary-only memory is insufficient or the user asks for details."]), "parallel", "low", now, "tool-read-memory");
+  updateToolDefinition.run("读取当前 active workspace 中一条已召回 skill 的完整经验详情。", JSON.stringify(toolSchemas.readSkill), "Read a recalled skill before applying it", JSON.stringify(["Use when a recalled skill is highly relevant to the current task."]), "parallel", "low", now, "tool-read-skill");
+  updateToolDefinition.run("只在 creator 明确授权时写入 agent 自己的名字、身份、职责或长期行为原则；不要记录用户。", JSON.stringify(toolSchemas.writeAgentSelfImpression), "Write an authorized long-term agent self impression", JSON.stringify(["Use only with creator authorization."]), "sequential", "high", now, "tool-write-agent-self-impression");
+  updateToolDefinition.run("为当前用户写入长期偏好、背景、身份、称呼、约束、工作习惯或用户授权搜索确认的稳定公开信息；不要记录 agent 自己或一次性任务细节。", JSON.stringify(toolSchemas.writeUserImpression), "Write a stable user impression", JSON.stringify(["Use only for long-lived user facts, preferences, or constraints."]), "sequential", "medium", now, "tool-write-user-impression");
+  updateToolDefinition.run("为当前 active workspace 写入脱敏后的可复用经验。", JSON.stringify(toolSchemas.writeSkillMemory), "Write a reusable desensitized workspace skill memory", JSON.stringify(["Use only for verified reusable procedures or failure-avoidance lessons."]), "sequential", "medium", now, "tool-write-skill-memory");
 
   const updateToolBinding = db.prepare("UPDATE tool_definitions SET bindingType = ?, bindingJson = ?, mcpServerId = ?, mcpToolName = ?, updatedAt = ? WHERE id = ?");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.enterWorkspace" }), null, null, now, "tool-enter-workspace");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.exitWorkspace" }), null, null, now, "tool-exit-workspace");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.askUser" }), null, null, now, "tool-ask-user");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "workspaceRuntime.finishTask" }), null, null, now, "tool-finish-task");
-  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.searchFiles" }), null, null, now, "tool-search-files");
-  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.readFile" }), null, null, now, "tool-read-file");
-  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.writeFile" }), null, null, now, "tool-write-file");
-  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.runCommand" }), null, null, now, "tool-run-command");
+  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.read" }), null, null, now, "tool-read");
+  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.write" }), null, null, now, "tool-write");
+  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.edit" }), null, null, now, "tool-edit");
+  updateToolBinding.run("runtime", JSON.stringify({ executor: "builtin.bash" }), null, null, now, "tool-bash");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.searchMemory" }), null, null, now, "tool-search-memory");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.readMemory" }), null, null, now, "tool-read-memory");
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.readSkill" }), null, null, now, "tool-read-skill");
@@ -397,16 +408,16 @@ export function seedDefaults(db: Database.Database): void {
   updateToolBinding.run("runtime", JSON.stringify({ executor: "memoryService.writeSkillMemory" }), null, null, now, "tool-write-skill-memory");
 
   db.prepare("UPDATE tool_definitions SET workspaceId = NULL WHERE bindingType = 'runtime'").run();
-  db.prepare("UPDATE tool_definitions SET workspaceId = 'dev' WHERE id IN ('tool-search-files', 'tool-read-file', 'tool-write-file', 'tool-run-command')").run();
+  db.prepare("UPDATE tool_definitions SET workspaceId = 'dev' WHERE id IN ('tool-read', 'tool-write', 'tool-edit', 'tool-bash')").run();
 
   const link = db.prepare("INSERT OR IGNORE INTO workspace_tools (workspaceId, toolId, createdAt) VALUES (?, ?, ?)");
   link.run("main", "tool-enter-workspace", now);
   link.run("main", "tool-ask-user", now);
   link.run("main", "tool-finish-task", now);
-  link.run("dev", "tool-search-files", now);
-  link.run("dev", "tool-read-file", now);
-  link.run("dev", "tool-write-file", now);
-  link.run("dev", "tool-run-command", now);
+  link.run("dev", "tool-read", now);
+  link.run("dev", "tool-write", now);
+  link.run("dev", "tool-edit", now);
+  link.run("dev", "tool-bash", now);
   const memoryToolIds = [
     "tool-search-memory",
     "tool-read-memory",

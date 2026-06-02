@@ -3,6 +3,11 @@ import { createId, nowIso } from "./id";
 import { Repositories } from "../db/repositories";
 import { runtimeConfigNumber } from "./runtime-config";
 
+function compactEntryText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
+
 export class WorkspaceRuntime {
   private readonly universalRuntimeMemoryToolNames = new Set([
     "searchMemory",
@@ -94,6 +99,7 @@ export class WorkspaceRuntime {
       workspaceId: workspace.id,
       query,
       impressionLimit: runtimeConfigNumber(runtimeConfig, "memory.impressionRecallLimit"),
+      rollupEventLimit: workspace.memoryPolicy.eventRecallEnabled ? 3 : 0,
       resultEventLimit: workspace.memoryPolicy.eventRecallEnabled ? runtimeConfigNumber(runtimeConfig, "memory.resultEventRecallLimit") : 0,
       processEventLimit: workspace.memoryPolicy.eventRecallEnabled ? runtimeConfigNumber(runtimeConfig, "memory.processEventRecallLimit") : 0,
       skillLimit: workspace.memoryPolicy.skillRecallEnabled ? workspace.memoryPolicy.maxSkillMemories : 0
@@ -118,6 +124,7 @@ export class WorkspaceRuntime {
         agentId: run.agentId,
         workspaceId: workspace.id,
         impressionLimit: recallInput.impressionLimit,
+        rollupEventLimit: recallInput.rollupEventLimit,
         resultEventLimit: recallInput.resultEventLimit,
         processEventLimit: recallInput.processEventLimit,
         skillLimit: recallInput.skillLimit
@@ -127,6 +134,7 @@ export class WorkspaceRuntime {
       rawPartitionCounts: {
         impression: rawImpressions.length,
         event: rawEvents.length,
+        rollupEvent: rawEvents.filter((memory) => this.eventKindOf(memory) === "rollup").length,
         resultEvent: rawEvents.filter((memory) => this.eventKindOf(memory) === "result").length,
         processEvent: rawEvents.filter((memory) => this.eventKindOf(memory) === "process").length,
         skill: rawSkills.length
@@ -135,15 +143,53 @@ export class WorkspaceRuntime {
       injectedPartitionCounts: {
         impression: recalledImpressions.length,
         event: recalledEventMemories.length,
+        rollupEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "rollup").length,
         resultEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "result").length,
         processEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "process").length,
         skill: recalledSkillMemories.length
       },
       hitIds: {
         impressions: recalledImpressions.map((memory) => memory.id),
+        rollupEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "rollup").map((memory) => memory.id),
         resultEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "result").map((memory) => memory.id),
         processEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "process").map((memory) => memory.id),
         skills: recalledSkillMemories.map((memory) => memory.id)
+      }
+    });
+    this.repos.appendSessionEntry({
+      conversationId: run.conversationId,
+      workspaceId: workspace.id,
+      type: "memory_recall",
+      payload: {
+        workspaceId: workspace.id,
+        taskId: task.taskId,
+        algorithm: "sqlite_fts_relation_version",
+        vectorEnabled: false,
+        queryPreview: compactEntryText(query, 240),
+        recallInput: {
+          impressionLimit: recallInput.impressionLimit,
+          rollupEventLimit: recallInput.rollupEventLimit,
+          resultEventLimit: recallInput.resultEventLimit,
+          processEventLimit: recallInput.processEventLimit,
+          skillLimit: recallInput.skillLimit
+        },
+        rawHitCount: rawRecalled.length,
+        injectedHitCount: recalled.length,
+        injectedPartitionCounts: {
+          impression: recalledImpressions.length,
+          event: recalledEventMemories.length,
+          rollupEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "rollup").length,
+          resultEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "result").length,
+          processEvent: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "process").length,
+          skill: recalledSkillMemories.length
+        },
+        hitIds: {
+          impressions: recalledImpressions.map((memory) => memory.id),
+          rollupEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "rollup").map((memory) => memory.id),
+          resultEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "result").map((memory) => memory.id),
+          processEvents: recalledEventMemories.filter((memory) => this.eventKindOf(memory) === "process").map((memory) => memory.id),
+          skills: recalledSkillMemories.map((memory) => memory.id)
+        }
       }
     });
     const availableTools = this.visibleToolDefinitions(workspace);
@@ -159,6 +205,9 @@ export class WorkspaceRuntime {
         id: tool.id,
         name: tool.name,
         description: tool.description,
+        promptSnippet: tool.promptSnippet ?? undefined,
+        promptGuidelines: parsePromptGuidelines(tool.promptGuidelinesJson),
+        executionMode: tool.executionMode,
         riskLevel: tool.riskLevel,
         bindingType: tool.bindingType,
         mcpServerId: tool.mcpServerId,
@@ -244,5 +293,14 @@ export class WorkspaceRuntime {
     if (/(memory|remember|impression|skill|event|记忆|记住|回忆|经验|总结经验|偏好|以后)/i.test(lower)) return "main";
     if (/(command|terminal|shell|npm|node|test|file|code|search|read|write|命令|终端|文件|代码|搜索)/i.test(lower)) return "dev";
     return "main";
+  }
+}
+
+function parsePromptGuidelines(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
   }
 }

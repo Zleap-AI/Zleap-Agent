@@ -17,6 +17,75 @@ export type ChatCompletionInput = {
 export type ChatCompletionOutput = {
   message: LLMMessage;
   raw: unknown;
+  rawRequest?: unknown;
+  normalizedRequest?: NormalizedProviderRequest;
+  normalizedResponse?: NormalizedProviderResponse;
+  usage?: NormalizedUsage;
+};
+
+export type NormalizedContentPart =
+  | { type: "text"; text: string }
+  | { type: "image"; mimeType?: string; url?: string; detail?: "auto" | "low" | "high" };
+
+export type ProviderContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url" | "input_image"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+export type NormalizedProviderMessage = {
+  role: LLMMessage["role"];
+  content: NormalizedContentPart[];
+  toolCallId?: string;
+  name?: string;
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+  }>;
+};
+
+export type NormalizedProviderTool = {
+  name: string;
+  description: string;
+  parameters: unknown;
+  executionMode: ToolDefinition["executionMode"];
+  riskLevel: ToolDefinition["riskLevel"];
+};
+
+export type NormalizedSyntheticToolResult = {
+  toolCallId: string;
+  toolName: string;
+  insertedAfterAssistantIndex: number;
+  reason: string;
+};
+
+export type NormalizedUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  providerUsage?: Record<string, unknown>;
+};
+
+export type NormalizedProviderRequest = {
+  provider: "openai-compatible";
+  endpoint: string;
+  model: string;
+  stream: boolean;
+  temperature?: number;
+  messages: NormalizedProviderMessage[];
+  tools: NormalizedProviderTool[];
+  syntheticToolResults?: NormalizedSyntheticToolResult[];
+};
+
+export type NormalizedProviderResponse = {
+  provider: "openai-compatible";
+  message?: NormalizedProviderMessage;
+  usage?: NormalizedUsage;
+  finishReason?: string;
+  rawChoiceIndex?: number;
 };
 
 const MAX_PROVIDER_ATTEMPTS = 5;
@@ -117,6 +186,363 @@ function providerFetchTimeoutMs(): number {
 
 function streamIdleTimeoutMs(): number {
   return positiveEnvInt("ZLEAP_LLM_STREAM_IDLE_TIMEOUT_MS", DEFAULT_STREAM_IDLE_TIMEOUT_MS);
+}
+
+function parseToolParameters(tool: ToolDefinition): unknown {
+  try {
+    return JSON.parse(tool.parametersJson);
+  } catch {
+    return { type: "object", properties: {}, additionalProperties: true };
+  }
+}
+
+function normalizeMessageContent(content: LLMMessage["content"] | ProviderContentPart[]): NormalizedContentPart[] {
+  if (typeof content === "string") return content ? [{ type: "text", text: content }] : [];
+  if (Array.isArray(content)) {
+    const parts: NormalizedContentPart[] = [];
+    for (const part of content) {
+      if (part.type === "text") {
+        if (part.text) parts.push({ type: "text", text: part.text });
+        continue;
+      }
+      const url = part.image_url?.url;
+      if (!url) continue;
+      const dataUrlMatch = url.match(/^data:([^;,]+)[;,]/);
+      parts.push({
+        type: "image",
+        mimeType: dataUrlMatch?.[1],
+        url,
+        detail: part.image_url.detail
+      });
+    }
+    return parts;
+  }
+  return [];
+}
+
+function toolResultImageContent(content: LLMMessage["content"]): ProviderContentPart[] | undefined {
+  if (typeof content !== "string" || !content.trim().startsWith("{")) return undefined;
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.imageContent)) return undefined;
+    const imageContent = parsed.imageContent;
+    if (imageContent.type !== "input_image" && imageContent.type !== "image_url") return undefined;
+    if (!isRecord(imageContent.image_url) || typeof imageContent.image_url.url !== "string") return undefined;
+    const detail = imageContent.image_url.detail;
+    const imagePart: ProviderContentPart = {
+      type: imageContent.type,
+      image_url: {
+        url: imageContent.image_url.url,
+        detail: detail === "auto" || detail === "low" || detail === "high" ? detail : undefined
+      }
+    };
+    const textPayload = {
+      ...parsed,
+      imageContent: {
+        type: imageContent.type,
+        routedToProviderImagePart: true
+      }
+    };
+    return [
+      { type: "text", text: JSON.stringify(textPayload) },
+      imagePart
+    ];
+  } catch {
+    return undefined;
+  }
+}
+
+function providerMessageContent(message: LLMMessage): LLMMessage["content"] | ProviderContentPart[] {
+  if (message.role === "tool") {
+    return toolResultImageContent(message.content) ?? message.content;
+  }
+  return message.content as LLMMessage["content"] | ProviderContentPart[];
+}
+
+function normalizeProviderMessage(message: LLMMessage): NormalizedProviderMessage {
+  const content = providerMessageContent(message);
+  return {
+    role: message.role,
+    content: normalizeMessageContent(content),
+    toolCallId: message.tool_call_id,
+    name: message.name,
+    toolCalls: message.tool_calls?.map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.function.name,
+      arguments: toolCall.function.arguments
+    }))
+  };
+}
+
+function normalizeProviderTool(tool: ToolDefinition): NormalizedProviderTool {
+  return {
+    name: tool.name,
+    description: tool.description,
+    parameters: parseToolParameters(tool),
+    executionMode: tool.executionMode,
+    riskLevel: tool.riskLevel
+  };
+}
+
+function toOpenAIMessage(message: LLMMessage): Record<string, unknown> {
+  const content = providerMessageContent(message);
+  return {
+    role: message.role,
+    content: Array.isArray(content)
+      ? content.map((part) => {
+        if (part.type === "text") return part;
+        return {
+          type: "image_url",
+          image_url: part.image_url
+        };
+      })
+      : message.content,
+    name: message.name,
+    tool_call_id: message.tool_call_id,
+    tool_calls: message.tool_calls
+  };
+}
+
+function toOpenAITool(tool: ToolDefinition): Record<string, unknown> {
+  return {
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: parseToolParameters(tool)
+    }
+  };
+}
+
+function syntheticMissingToolMessage(toolCall: NonNullable<LLMMessage["tool_calls"]>[number]): LLMMessage {
+  return {
+    role: "tool",
+    tool_call_id: toolCall.id,
+    name: toolCall.function.name,
+    content: JSON.stringify({
+      error: `Synthetic tool result inserted by ProviderFacade because tool call ${toolCall.id} (${toolCall.function.name}) had no matching tool result message.`,
+      synthetic: true,
+      toolCallId: toolCall.id,
+      toolName: toolCall.function.name
+    })
+  };
+}
+
+function normalizeMessagesForProvider(inputMessages: LLMMessage[]): { messages: LLMMessage[]; syntheticToolResults: NormalizedSyntheticToolResult[] } {
+  const messages: LLMMessage[] = [];
+  const syntheticToolResults: NormalizedSyntheticToolResult[] = [];
+  let pending: Array<{ call: NonNullable<LLMMessage["tool_calls"]>[number]; assistantIndex: number }> = [];
+
+  const flushPending = () => {
+    for (const item of pending) {
+      messages.push(syntheticMissingToolMessage(item.call));
+      syntheticToolResults.push({
+        toolCallId: item.call.id,
+        toolName: item.call.function.name,
+        insertedAfterAssistantIndex: item.assistantIndex,
+        reason: "missing_tool_result"
+      });
+    }
+    pending = [];
+  };
+
+  for (let index = 0; index < inputMessages.length; index += 1) {
+    const message = inputMessages[index];
+    if (pending.length > 0 && message.role !== "tool") {
+      flushPending();
+    }
+
+    messages.push(message);
+    if (message.role === "assistant" && message.tool_calls?.length) {
+      pending = message.tool_calls.map((call) => ({ call, assistantIndex: index }));
+      continue;
+    }
+    if (message.role === "tool" && pending.length > 0 && message.tool_call_id) {
+      pending = pending.filter((item) => item.call.id !== message.tool_call_id);
+    }
+  }
+  flushPending();
+  return { messages, syntheticToolResults };
+}
+
+function normalizeAssistantToolCallsForRuntime(message: LLMMessage): LLMMessage {
+  if (!message.tool_calls?.length) return message;
+  return {
+    ...message,
+    tool_calls: message.tool_calls.map((toolCall, index) => ({
+      id: typeof toolCall.id === "string" && toolCall.id.trim() ? toolCall.id : `tool_call_${index}`,
+      type: "function",
+      function: {
+        name: typeof toolCall.function?.name === "string" ? toolCall.function.name : "",
+        arguments: typeof toolCall.function?.arguments === "string" ? toolCall.function.arguments : "{}"
+      }
+    }))
+  };
+}
+
+function normalizeUsage(raw: unknown): NormalizedUsage | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const usage = (raw as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return undefined;
+  const record = usage as Record<string, unknown>;
+  const inputTokens = numberValue(record.prompt_tokens) ?? numberValue(record.input_tokens);
+  const outputTokens = numberValue(record.completion_tokens) ?? numberValue(record.output_tokens);
+  const totalTokens = numberValue(record.total_tokens) ?? (
+    inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined
+  );
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    providerUsage: record
+  };
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function buildOpenAICompatiblePayload(input: ChatCompletionInput, options: { stream: boolean }): {
+  endpoint: string;
+  body: Record<string, unknown>;
+  normalizedRequest: NormalizedProviderRequest;
+} {
+  const endpoint = normalizeChatCompletionsEndpoint(input.baseUrl);
+  const normalizedTools = input.tools.map(normalizeProviderTool);
+  const normalizedMessages = normalizeMessagesForProvider(input.messages);
+  const body: Record<string, unknown> = {
+    model: input.model,
+    messages: normalizedMessages.messages.map(toOpenAIMessage),
+    temperature: input.temperature ?? 0.2,
+    tools: input.tools.map(toOpenAITool)
+  };
+  if (options.stream) body.stream = true;
+  return {
+    endpoint,
+    body,
+    normalizedRequest: {
+      provider: "openai-compatible",
+      endpoint,
+      model: input.model,
+      stream: options.stream,
+      temperature: input.temperature ?? 0.2,
+      messages: normalizedMessages.messages.map(normalizeProviderMessage),
+      tools: normalizedTools,
+      syntheticToolResults: normalizedMessages.syntheticToolResults
+    }
+  };
+}
+
+type StreamResponseState = {
+  content: string;
+  toolCalls: Map<number, { id?: string; name?: string; arguments: string }>;
+  finishReason?: string;
+  rawChoiceIndex?: number;
+  usage?: NormalizedUsage;
+};
+
+function createStreamResponseState(): StreamResponseState {
+  return {
+    content: "",
+    toolCalls: new Map()
+  };
+}
+
+function updateStreamResponseState(state: StreamResponseState, parsed: Record<string, any>): void {
+  const usage = normalizeUsage(parsed);
+  if (usage) state.usage = usage;
+  const choice = parsed.choices?.[0];
+  if (!choice || typeof choice !== "object" || Array.isArray(choice)) return;
+  if (typeof choice.index === "number" && state.rawChoiceIndex === undefined) state.rawChoiceIndex = choice.index;
+  if (typeof choice.finish_reason === "string") state.finishReason = choice.finish_reason;
+  const delta = choice.delta;
+  if (!delta || typeof delta !== "object" || Array.isArray(delta)) return;
+  if (typeof delta.content === "string") state.content += delta.content;
+  if (!Array.isArray(delta.tool_calls)) return;
+  for (const toolCall of delta.tool_calls) {
+    if (!toolCall || typeof toolCall !== "object" || Array.isArray(toolCall)) continue;
+    const index = typeof toolCall.index === "number" ? toolCall.index : 0;
+    const current = state.toolCalls.get(index) ?? { arguments: "" };
+    if (typeof toolCall.id === "string" && toolCall.id.trim()) current.id = toolCall.id;
+    const fn = toolCall.function;
+    if (fn && typeof fn === "object" && !Array.isArray(fn)) {
+      if (typeof fn.name === "string" && fn.name.trim()) {
+        current.name = current.name ? `${current.name}${fn.name}` : fn.name;
+      }
+      if (typeof fn.arguments === "string") current.arguments += fn.arguments;
+    }
+    state.toolCalls.set(index, current);
+  }
+}
+
+function normalizedStreamResponseFromState(state: StreamResponseState): NormalizedProviderResponse {
+  const toolCalls = [...state.toolCalls.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([index, toolCall]) => ({
+      id: toolCall.id ?? `tool_call_${index}`,
+      type: "function" as const,
+      function: {
+        name: toolCall.name ?? "",
+        arguments: toolCall.arguments || "{}"
+      }
+    }));
+  const message: LLMMessage = normalizeAssistantToolCallsForRuntime({
+    role: "assistant",
+    content: state.content || null,
+    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+  });
+  return {
+    provider: "openai-compatible",
+    message: normalizeProviderMessage(message),
+    usage: state.usage,
+    finishReason: state.finishReason,
+    rawChoiceIndex: state.rawChoiceIndex
+  };
+}
+
+function streamDoneRaw(providerPayload: ReturnType<typeof buildOpenAICompatiblePayload>, rawEvents: unknown[], state: StreamResponseState): Record<string, unknown> {
+  const normalizedResponse = normalizedStreamResponseFromState(state);
+  return {
+    rawRequest: {
+      endpoint: providerPayload.endpoint,
+      body: providerPayload.body
+    },
+    normalizedRequest: providerPayload.normalizedRequest,
+    normalizedResponse,
+    usage: normalizedResponse.usage,
+    rawEvents
+  };
+}
+
+function previewStreamData(data: string, maxLength = 240): string {
+  const normalized = data.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+function parseProviderStreamJson(data: string, input: { endpoint: string; eventIndex: number }): Record<string, any> {
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, any>;
+    throw new Error("parsed data is not an object");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Malformed OpenAI-compatible stream event JSON at event ${input.eventIndex} for ${input.endpoint}: ${detail}. data=${previewStreamData(data)}`);
+  }
+}
+
+function normalizeOpenAICompatibleResponse(raw: unknown, message?: LLMMessage): NormalizedProviderResponse {
+  const rawRecord = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const choices = Array.isArray(rawRecord.choices) ? rawRecord.choices : [];
+  const firstChoice = choices[0] && typeof choices[0] === "object" && !Array.isArray(choices[0])
+    ? choices[0] as Record<string, unknown>
+    : undefined;
+  return {
+    provider: "openai-compatible",
+    message: message ? normalizeProviderMessage(message) : undefined,
+    usage: normalizeUsage(raw),
+    finishReason: typeof firstChoice?.finish_reason === "string" ? firstChoice.finish_reason : undefined,
+    rawChoiceIndex: numberValue(firstChoice?.index)
+  };
 }
 
 async function readStreamChunkWithIdleTimeout(
@@ -247,31 +673,22 @@ async function fetchWithProviderRetry(input: {
   throw formatFetchError(lastNetworkError ?? new Error("Provider retry attempts exhausted."), input.endpoint);
 }
 
-export interface LLMClient {
+export interface ProviderFacade {
   complete(input: ChatCompletionInput): Promise<ChatCompletionOutput>;
-  stream?(input: ChatCompletionInput): AsyncGenerator<string>;
   streamEvents?(input: ChatCompletionInput): AsyncGenerator<LLMStreamEvent>;
 }
 
-export class OpenAICompatibleClient implements LLMClient {
+export interface LLMClient extends ProviderFacade {
+  stream?(input: ChatCompletionInput): AsyncGenerator<string>;
+}
+
+export class OpenAICompatibleProviderAdapter implements ProviderFacade {
   async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
-    const endpoint = normalizeChatCompletionsEndpoint(input.baseUrl);
+    const providerPayload = buildOpenAICompatiblePayload(input, { stream: false });
     const response = await fetchWithProviderRetry({
-      endpoint,
+      endpoint: providerPayload.endpoint,
       apiKey: input.apiKey,
-      body: {
-        model: input.model,
-        messages: input.messages,
-        temperature: input.temperature ?? 0.2,
-        tools: input.tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: JSON.parse(tool.parametersJson)
-          }
-        }))
-      },
+      body: providerPayload.body,
       signal: input.signal,
       maxProviderAttempts: input.maxProviderAttempts,
       providerFetchTimeoutMs: input.providerFetchTimeoutMs
@@ -283,36 +700,29 @@ export class OpenAICompatibleClient implements LLMClient {
     }
 
     const raw = await response.json() as any;
-    const message = raw.choices?.[0]?.message as LLMMessage | undefined;
-    if (!message) throw new Error("LLM response did not contain choices[0].message");
-    return { message, raw };
-  }
-
-  async *stream(input: ChatCompletionInput): AsyncGenerator<string> {
-    for await (const event of this.streamEvents(input)) {
-      if (event.type === "content") yield event.text;
-    }
+    const rawMessage = raw.choices?.[0]?.message as LLMMessage | undefined;
+    if (!rawMessage) throw new Error("LLM response did not contain choices[0].message");
+    const message = normalizeAssistantToolCallsForRuntime(rawMessage);
+    const normalizedResponse = normalizeOpenAICompatibleResponse(raw, message);
+    return {
+      message,
+      raw,
+      rawRequest: {
+        endpoint: providerPayload.endpoint,
+        body: providerPayload.body
+      },
+      normalizedRequest: providerPayload.normalizedRequest,
+      normalizedResponse,
+      usage: normalizedResponse.usage
+    };
   }
 
   async *streamEvents(input: ChatCompletionInput): AsyncGenerator<LLMStreamEvent> {
-    const endpoint = normalizeChatCompletionsEndpoint(input.baseUrl);
+    const providerPayload = buildOpenAICompatiblePayload(input, { stream: true });
     const response = await fetchWithProviderRetry({
-      endpoint,
+      endpoint: providerPayload.endpoint,
       apiKey: input.apiKey,
-      body: {
-        model: input.model,
-        messages: input.messages,
-        temperature: input.temperature ?? 0.2,
-        stream: true,
-        tools: input.tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            description: tool.description,
-            parameters: JSON.parse(tool.parametersJson)
-          }
-        }))
-      },
+      body: providerPayload.body,
       signal: input.signal,
       maxProviderAttempts: input.maxProviderAttempts,
       providerFetchTimeoutMs: input.providerFetchTimeoutMs
@@ -328,6 +738,8 @@ export class OpenAICompatibleClient implements LLMClient {
     const decoder = new TextDecoder();
     let buffer = "";
     const idleTimeoutMs = Math.max(1, Math.floor(input.streamIdleTimeoutMs ?? streamIdleTimeoutMs()));
+    const rawEvents: unknown[] = [];
+    const responseState = createStreamResponseState();
 
     try {
       while (true) {
@@ -341,9 +753,17 @@ export class OpenAICompatibleClient implements LLMClient {
             const trimmed = line.trim();
             if (!trimmed.startsWith("data:")) continue;
             const data = trimmed.slice(5).trim();
-            if (data === "[DONE]") return;
+            if (data === "[DONE]") {
+              yield { type: "done", raw: streamDoneRaw(providerPayload, rawEvents, responseState) };
+              return;
+            }
             if (!data) continue;
-            const parsed = JSON.parse(data) as any;
+            const parsed = parseProviderStreamJson(data, {
+              endpoint: providerPayload.endpoint,
+              eventIndex: rawEvents.length + 1
+            });
+            rawEvents.push(parsed);
+            updateStreamResponseState(responseState, parsed);
             const delta = parsed.choices?.[0]?.delta;
             const content = delta?.content;
             if (content) yield { type: "content", text: content };
@@ -368,6 +788,17 @@ export class OpenAICompatibleClient implements LLMClient {
     } finally {
       reader.releaseLock();
     }
-    yield { type: "done" };
+    yield {
+      type: "done",
+      raw: streamDoneRaw(providerPayload, rawEvents, responseState)
+    };
+  }
+}
+
+export class OpenAICompatibleClient extends OpenAICompatibleProviderAdapter implements LLMClient {
+  async *stream(input: ChatCompletionInput): AsyncGenerator<string> {
+    for await (const event of this.streamEvents(input)) {
+      if (event.type === "content") yield event.text;
+    }
   }
 }

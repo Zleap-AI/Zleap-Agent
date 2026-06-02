@@ -12,6 +12,7 @@ export const DEFAULT_ATTENTION_BUDGET: AttentionBudget = {
   workspace_result: 1200,
   workspace_local_context: 1600,
   tools: 1400,
+  resources: 2600,
   memory: 3000,
   impression_memory: 900,
   event_memory: 1400,

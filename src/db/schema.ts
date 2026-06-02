@@ -99,6 +99,9 @@ export function migrate(db: Database.Database): void {
       workspaceId TEXT,
       description TEXT NOT NULL,
       parametersJson TEXT NOT NULL,
+      promptSnippet TEXT,
+      promptGuidelinesJson TEXT NOT NULL DEFAULT '[]',
+      executionMode TEXT NOT NULL DEFAULT 'parallel' CHECK (executionMode IN ('parallel', 'sequential')),
       riskLevel TEXT NOT NULL CHECK (riskLevel IN ('low', 'medium', 'high')),
       bindingType TEXT NOT NULL DEFAULT 'placeholder' CHECK (bindingType IN ('placeholder', 'runtime', 'mcp')),
       bindingJson TEXT NOT NULL DEFAULT '{}',
@@ -150,6 +153,17 @@ export function migrate(db: Database.Database): void {
       errorsJson TEXT NOT NULL,
       startedAt TEXT NOT NULL,
       completedAt TEXT,
+      FOREIGN KEY (conversationId) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS session_entries (
+      id TEXT PRIMARY KEY,
+      conversationId TEXT NOT NULL,
+      parentId TEXT,
+      workspaceId TEXT,
+      type TEXT NOT NULL,
+      payloadJson TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
       FOREIGN KEY (conversationId) REFERENCES conversations(id) ON DELETE CASCADE
     );
 
@@ -292,6 +306,9 @@ export function migrate(db: Database.Database): void {
   ensureColumn(db, "tool_definitions", "mcpServerId", "TEXT");
   ensureColumn(db, "tool_definitions", "mcpToolName", "TEXT");
   ensureColumn(db, "tool_definitions", "workspaceId", "TEXT");
+  ensureColumn(db, "tool_definitions", "promptSnippet", "TEXT");
+  ensureColumn(db, "tool_definitions", "promptGuidelinesJson", "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, "tool_definitions", "executionMode", "TEXT NOT NULL DEFAULT 'parallel'");
   ensureColumn(db, "mcp_servers", "timeoutMs", "INTEGER NOT NULL DEFAULT 30000");
   ensureColumn(db, "memories", "deletedAt", "TEXT");
   ensureColumn(db, "memories", "deletedBy", "TEXT");

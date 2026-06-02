@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ConversationSummary, ContextSegment, DatabaseTableRows, DatabaseTableSummary, LLMCallSnapshot, McpServerDefinition, MemoryRow, RuntimeConfigItem, StoredMessage, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
+import type { AgentConfig, AgentRunOutput, ApprovalRequest, AuditLog, ConversationSummary, ContextSegment, DatabaseTableRows, DatabaseTableSummary, LLMCallSnapshot, McpServerDefinition, MemoryRow, RuntimeConfigItem, SessionEntry, StoredMessage, ToolCallLog, ToolDefinition, WorkspaceDefinition, WorkspaceProcessItem, WorkspaceSession } from "../types";
 import "./styles.css";
 
 type Tab = "chat" | "workspace" | "memory" | "logs" | "tables" | "config" | "concept";
@@ -25,6 +25,7 @@ type ChatMessage = {
 
 type ConversationTrace = {
   sessions: WorkspaceSession[];
+  sessionEntries: SessionEntry[];
   llmCalls: LLMCallSnapshot[];
   toolCalls: ToolCallLog[];
   auditLogs: AuditLog[];
@@ -146,6 +147,11 @@ function bindingLabel(value: ToolDefinition["bindingType"]): string {
   if (value === "runtime") return "内置";
   if (value === "mcp") return "MCP";
   return "占位";
+}
+
+function executionModeLabel(value: ToolDefinition["executionMode"] | undefined): string {
+  if (value === "sequential") return "串行";
+  return "并行";
 }
 
 function workspaceStatusLabel(value: WorkspaceSession["status"]): string {
@@ -419,6 +425,65 @@ function summarizeResultPreview(resultJson: string | undefined): string {
   } catch {
     return trimOneLine(resultJson, 220);
   }
+}
+
+type ToolResultDetail = { label: string; value: string };
+
+function compactToolDetailValue(value: unknown): string {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+  if (typeof value === "string") return trimOneLine(value, 180);
+  return trimOneLine(JSON.stringify(value), 180);
+}
+
+function toolResultDetails(log: ToolCallLog): ToolResultDetail[] {
+  const result = parseJsonRecord(log.resultJson);
+  const details: ToolResultDetail[] = [];
+  const add = (label: string, value: unknown) => {
+    const rendered = compactToolDetailValue(value);
+    if (rendered) details.push({ label, value: rendered });
+  };
+  const nestedDetails = result.details && typeof result.details === "object" && !Array.isArray(result.details)
+    ? result.details as Record<string, unknown>
+    : {};
+
+  add("path", result.path);
+  if (log.toolName === "read") {
+    add("mediaType", result.mediaType);
+    add("mimeType", result.mimeType);
+    add("bytes", result.bytes);
+    add("truncated", result.truncated);
+    add("continuationOffset", result.continuationOffset);
+    add("imageTooLarge", result.imageTooLarge);
+    add("resized", result.resized);
+    add("inlineBytes", result.inlineBytes);
+    if (typeof result.width === "number" && typeof result.height === "number") add("imageSize", `${result.width}x${result.height}`);
+  } else if (log.toolName === "write") {
+    add("bytes", result.bytes);
+    add("created", result.created);
+    add("updated", result.updated);
+    add("mutationQueued", result.mutationQueued);
+  } else if (log.toolName === "edit") {
+    add("editCount", result.editCount);
+    add("firstChangedLine", result.firstChangedLine);
+    add("usedFuzzyMatch", nestedDetails.usedFuzzyMatch);
+    add("preservedBom", nestedDetails.preservedBom);
+    add("preservedLineEndings", nestedDetails.preservedLineEndings);
+    add("normalizations", nestedDetails.normalizations);
+    add("patch", result.patch);
+  } else if (log.toolName === "bash") {
+    add("exitCode", result.exitCode);
+    add("timedOut", result.timedOut);
+    add("aborted", result.aborted);
+    add("truncated", result.truncated);
+    add("fullOutputPath", result.fullOutputPath);
+  } else {
+    add("truncated", result.truncated);
+    add("fullOutputPath", result.fullOutputPath);
+  }
+  add("error", result.error);
+  return details;
 }
 
 function processItemFromToolLog(log: ToolCallLog, eventKind?: string): WorkspaceProcessItem {
@@ -756,6 +821,9 @@ function createToolDraft(workspaceId: string): Partial<ToolDefinition> {
     name: "",
     description: "",
     parametersJson: JSON.stringify({ type: "object", properties: {}, additionalProperties: false }, null, 2),
+    promptSnippet: "",
+    promptGuidelinesJson: "[]",
+    executionMode: "parallel",
     riskLevel: "low",
     bindingType: "mcp",
     bindingJson: defaultMcpBindingJson(),
@@ -2959,7 +3027,7 @@ function ConceptIntroTab() {
           </div>
           <div className="map-branches">
             {[
-              ["Dev", "统一处理文件搜索、代码检查和命令执行", "searchFiles / runCommand"],
+              ["Dev", "统一处理文件搜索、代码检查和命令执行", "read / write / edit / bash"],
               ["MCP", "外部或用户提供能力，可建议 main handoff", "stdio / Streamable HTTP"]
             ].map(([name, desc, tools]) => (
               <div className="map-workspace" key={name}>
@@ -3073,12 +3141,19 @@ function ConceptIntroTab() {
               items: ["function 名称与说明", "参数 schema", "runtime / MCP / risk / active workspace metadata"]
             },
             {
+              code: "resources",
+              title: "资源与模板",
+              summary: "runtime_context.resources 的可检查资源索引，来自 .zleap 和 AGENTS.md。",
+              items: [".zleap/AGENTS.md", ".zleap/workspaces/<workspaceId>.md", "prompt templates", "filesystem skill index"]
+            },
+            {
               code: "memory",
               title: "记忆投影",
               summary: "runtime_context.memory 的分区投影视图，默认只注入 compact projection，不回灌原始 detail。",
               items: ["跨工作空间印象记忆", "当前工作空间结果事件", "当前工作空间相关过程事件", "当前工作空间经验记忆"],
               memoryDetails: [
                 ["crossWorkspaceImpressionMemory", "跨工作空间印象记忆", "最新有效 20 条投影", "用户印象与 Agent 自我印象；默认不做 query 筛选，详情未注入，必要时用 readMemory。"],
+                ["currentWorkspaceEventRollups", "当前工作空间事件 Rollup", "少量旧事件摘要", "对更早 process/result events 的二次摘要；只保留 source memory ids，必要时 readMemory 追溯。"],
                 ["currentWorkspaceResultEvents", "当前工作空间结果事件", "约 10 条旧结果时间线", "记录过去完成了什么、失败了什么、产出在哪里；不复制原始对话。"],
                 ["currentWorkspaceRelevantProcessEvents", "当前工作空间相关过程事件", "少量 FTS 相关过程索引", "只给 id/title/summary/readMemory 提示；过程 detail 不直接进入上下文。"],
                 ["currentWorkspaceSkillMemory", "当前工作空间经验记忆", "近 N 条名称和简介", "先看简介判断相关性；高度相关时调用 readSkill 读取 procedure/appliesWhen/avoidWhen。"]
@@ -3798,6 +3873,7 @@ function LogsTab() {
   const [conversationId, setConversationId] = useState(cached.conversationId ?? "");
   const [llmLogs, setLlmLogs] = useState<LLMCallSnapshot[]>([]);
   const [globalLlmLogs, setGlobalLlmLogs] = useState<LLMCallSnapshot[]>([]);
+  const [sessionEntries, setSessionEntries] = useState<SessionEntry[]>([]);
   const [toolLogs, setToolLogs] = useState<ToolCallLog[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
@@ -3812,11 +3888,13 @@ function LogsTab() {
         const traceParams = new URLSearchParams({ actorId: userId, actorRole: userRole });
         const trace = await api<ConversationTrace>(`/api/conversations/${encodeURIComponent(conversationId.trim())}/trace?${traceParams.toString()}`);
         setLlmLogs(trace.llmCalls);
+        setSessionEntries(trace.sessionEntries ?? []);
         setToolLogs(trace.toolCalls ?? []);
         setAuditLogs(trace.auditLogs ?? []);
         setApprovalRequests(trace.approvalRequests ?? []);
       } else {
         setLlmLogs([]);
+        setSessionEntries([]);
         setToolLogs([]);
         setAuditLogs([]);
         setApprovalRequests([]);
@@ -3834,6 +3912,7 @@ function LogsTab() {
   function clearLogView() {
     setLlmLogs([]);
     setGlobalLlmLogs([]);
+    setSessionEntries([]);
     setToolLogs([]);
     setAuditLogs([]);
     setApprovalRequests([]);
@@ -3868,6 +3947,13 @@ function LogsTab() {
           globalLogs={globalLlmLogs}
           onRefresh={() => void loadLogs()}
         />
+        <section className="panel logs-panel">
+          <div className="section-heading">
+            <h2>Session entries timeline</h2>
+            <button onClick={() => setSessionEntries([])}>清空</button>
+          </div>
+          <SessionEntryPanel entries={sessionEntries} />
+        </section>
         <section className="panel logs-panel">
           <div className="section-heading">
             <h2>生命周期护持日志</h2>
@@ -3947,31 +4033,121 @@ function MemoryWriteStack({ memories }: { memories: MemoryRow[] }) {
   );
 }
 
+function sessionEntryLabel(type: SessionEntry["type"]): string {
+  const labels: Record<SessionEntry["type"], string> = {
+    message: "消息",
+    llm_call: "LLM 调用",
+    assistant_delta: "流式输出",
+    tool_call: "工具调用",
+    tool_result: "工具结果",
+    workspace_enter: "进入工作空间",
+    workspace_exit: "退出工作空间",
+    workspace_handoff: "工作空间交接",
+    memory_recall: "记忆召回",
+    memory_write: "记忆写入",
+    event_rollup: "事件 Rollup",
+    approval_request: "审批请求",
+    model_change: "模型切换",
+    custom: "自定义事件"
+  };
+  return labels[type] ?? type;
+}
+
+function sessionEntrySummary(entry: SessionEntry, payload: unknown): string {
+  if (!isJsonRecord(payload)) return entry.type;
+  if (entry.type === "model_change") {
+    const from = isJsonRecord(payload.from) ? String(payload.from.model ?? "-") : "-";
+    const to = isJsonRecord(payload.to) ? String(payload.to.model ?? "-") : "-";
+    return `${from} -> ${to}`;
+  }
+  if (entry.type === "memory_recall") {
+    const hitCount = payload.hitCount ?? payload.totalHits ?? 0;
+    return `命中 ${String(hitCount)} 条`;
+  }
+  if (entry.type === "workspace_handoff") {
+    return `${String(payload.fromWorkspaceId ?? "-")} -> ${String(payload.toWorkspaceId ?? "-")} · ${String(payload.direction ?? "-")}`;
+  }
+  if (entry.type === "assistant_delta") {
+    return `文本长度 ${String(payload.textLength ?? 0)}`;
+  }
+  if (entry.type === "event_rollup") {
+    return `memory ${String(payload.memoryId ?? payload.id ?? "-")}`;
+  }
+  if (entry.type === "llm_call") {
+    return String(payload.status ?? payload.llmCallId ?? "LLM 调用");
+  }
+  if (entry.type === "tool_call" || entry.type === "tool_result" || entry.type === "approval_request") {
+    return String(payload.toolName ?? payload.name ?? entry.type);
+  }
+  if (entry.type === "message") return String(payload.role ?? "message");
+  return String(payload.summary ?? payload.title ?? entry.type);
+}
+
+function SessionEntryPanel({ entries }: { entries: SessionEntry[] }) {
+  if (entries.length === 0) return <div className="empty">还没有 session entries。</div>;
+  return (
+    <div className="stack session-entry-stack">
+      {entries.map((entry, index) => {
+        const payload = parseJsonText(entry.payloadJson);
+        return (
+          <details key={entry.id}>
+            <summary>
+              <span>{index + 1}. {sessionEntryLabel(entry.type)}</span>
+              <small>{sessionEntrySummary(entry, payload)}</small>
+            </summary>
+            <div className="llm-log-meta">
+              <span>类型：{entry.type}</span>
+              {entry.workspaceId && <span>工作空间：{entry.workspaceId}</span>}
+              <span>时间：{entry.createdAt}</span>
+              <span>Entry ID：{entry.id}</span>
+              <span>Parent ID：{entry.parentId ?? "-"}</span>
+            </div>
+            <details open>
+              <summary>payload</summary>
+              <JsonValueView value={payload} />
+            </details>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
 function ToolLogPanel({ logs }: { logs: ToolCallLog[] }) {
   if (logs.length === 0) return <div className="empty">还没有工具调用日志。</div>;
   return (
     <div className="stack tool-log-stack">
-      {logs.map((log) => (
-        <details key={log.id}>
-          <summary>
-            <span>{log.toolName}</span>
-            <small className={`status-pill ${toolCallStatusClass(log.status)}`}>{toolCallStatusLabel(log.status)}</small>
-          </summary>
-          <div className="llm-log-meta">
-            <span>工作空间：{log.workspaceId}</span>
-            <span>时间：{log.createdAt}</span>
-            <span>调用 ID：{log.id}</span>
-          </div>
-          <details>
-            <summary>参数</summary>
-            <pre>{JSON.stringify(parseJsonText(log.argumentsJson), null, 2)}</pre>
+      {logs.map((log) => {
+        const resultDetails = toolResultDetails(log);
+        return (
+          <details key={log.id}>
+            <summary>
+              <span>{log.toolName}</span>
+              <small className={`status-pill ${toolCallStatusClass(log.status)}`}>{toolCallStatusLabel(log.status)}</small>
+            </summary>
+            <div className="llm-log-meta">
+              <span>工作空间：{log.workspaceId}</span>
+              <span>时间：{log.createdAt}</span>
+              <span>调用 ID：{log.id}</span>
+            </div>
+            {resultDetails.length > 0 && (
+              <div className="llm-log-meta tool-result-details">
+                {resultDetails.map((detail) => (
+                  <span key={detail.label}><strong>{detail.label}：</strong>{detail.value}</span>
+                ))}
+              </div>
+            )}
+            <details>
+              <summary>参数</summary>
+              <pre>{JSON.stringify(parseJsonText(log.argumentsJson), null, 2)}</pre>
+            </details>
+            <details>
+              <summary>结果</summary>
+              <pre>{JSON.stringify(parseJsonText(log.resultJson), null, 2)}</pre>
+            </details>
           </details>
-          <details>
-            <summary>结果</summary>
-            <pre>{JSON.stringify(parseJsonText(log.resultJson), null, 2)}</pre>
-          </details>
-        </details>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -4146,6 +4322,41 @@ function logDiagnostic(log: LLMCallSnapshot): string {
   return logResultText(log);
 }
 
+function providerPayloadFromResponse(response: unknown): Record<string, unknown> | null {
+  if (!isJsonRecord(response) || !isJsonRecord(response.provider)) return null;
+  return response.provider;
+}
+
+function ProviderPayloadPanel({ response }: { response: unknown }) {
+  const provider = providerPayloadFromResponse(response);
+  if (!provider) return null;
+  const sections = [
+    ["normalizedRequest", "Provider normalized request"],
+    ["normalizedResponse", "Provider normalized response"],
+    ["usage", "Provider usage"],
+    ["rawRequest", "Provider raw request"],
+    ["rawResponse", "Provider raw response"]
+  ] as const;
+  return (
+    <details>
+      <summary>Provider normalized/raw payload</summary>
+      <div className="context-substack">
+        {sections
+          .filter(([key]) => provider[key] !== undefined)
+          .map(([key, label]) => (
+            <details key={key} open={key === "normalizedRequest" || key === "normalizedResponse"}>
+              <summary>{label}</summary>
+              <JsonValueView value={provider[key]} />
+            </details>
+          ))}
+      </div>
+      {JSON.stringify(provider.normalizedRequest ?? {}).includes("syntheticToolResults") && (
+        <div className="empty">normalized request includes syntheticToolResults inserted at provider boundary.</div>
+      )}
+    </details>
+  );
+}
+
 function LlmDebugSummary({ conversationLogs, globalLogs, onRefresh }: {
   conversationLogs: LLMCallSnapshot[];
   globalLogs: LLMCallSnapshot[];
@@ -4227,13 +4438,14 @@ function LlmLogPanel({ logs }: { logs: LLMCallSnapshot[] }) {
               <JsonValueView value={messages} />
             </details>
             <details>
-              <summary>请求 tools</summary>
+              <summary>请求 tools / active tool prompt</summary>
               <JsonValueView value={tools} />
             </details>
             <details>
               <summary>返回 / 诊断</summary>
               <JsonValueView value={response} />
             </details>
+            <ProviderPayloadPanel response={response} />
           </details>
         );
       })}
@@ -4262,6 +4474,7 @@ function contextSegmentLabel(segment: ContextSegment): string {
   if (segment.segmentType === "system") return "系统提示词";
   if (segment.segmentType === "workspace") return "工作空间信息";
   if (segment.segmentType === "tools") return "可调用工具";
+  if (segment.segmentType === "resources") return "资源与模板";
   if (segment.segmentType === "memory") return "记忆";
   if (segment.segmentType === "history") return "本地对话片段";
   if (segment.segmentType === "user") return "干净用户消息";
@@ -4277,7 +4490,19 @@ function contextSubsectionLabel(key: string): string {
     activeWorkspaceId: "当前工作空间",
     toolCount: "工具数量",
     tools: "本次可调用工具",
+    root: "资源根目录",
+    workspaceId: "资源工作空间",
+    instructions: "加载的 AGENTS 指令",
+    promptTemplates: "Prompt 模板索引",
+    filesystemSkills: "Filesystem Skill 索引",
+    extensionPromptTemplates: "Extension Prompt 模板",
+    extensionFilesystemSkills: "Extension Skill 索引",
+    extensionSafeContext: "Extension 安全上下文",
+    skipped: "跳过的资源",
+    parameterSyntax: "模板参数语法",
+    rules: "资源加载规则",
     crossWorkspaceImpressionMemory: "跨工作空间印象记忆",
+    currentWorkspaceEventRollups: "当前工作空间事件 rollup",
     currentWorkspaceResultEvents: "当前工作空间结果事件记忆",
     currentWorkspaceRelevantProcessEvents: "当前工作空间相关过程事件记忆",
     currentWorkspaceSkillMemory: "当前工作空间经验记忆",
@@ -4299,7 +4524,7 @@ function ContextSegmentContent({ segment }: { segment: ContextSegment }) {
     if (segment.segmentType === "memory" && isJsonRecord(parsed)) {
       return <MemoryContextView memory={parsed} />;
     }
-    if (!Array.isArray(parsed) && ["workspace", "tools", "memory", "history"].includes(segment.segmentType)) {
+    if (!Array.isArray(parsed) && ["workspace", "tools", "resources", "memory", "history"].includes(segment.segmentType)) {
       return (
         <div className="context-substack">
           {Object.entries(parsed as Record<string, unknown>)
@@ -4325,6 +4550,12 @@ function MemoryContextView({ memory }: { memory: Record<string, unknown> }) {
       title: "跨工作空间印象记忆",
       note: "每轮强制载入最近有效印象，不做选择性召回。",
       empty: "本次没有注入用户/Agent 印象记忆。"
+    },
+    {
+      key: "currentWorkspaceEventRollups",
+      title: "当前工作空间事件 Rollup",
+      note: "旧 process/result events 的二次摘要，只注入投影和 source memory ids；完整细节需要 readMemory 追溯。",
+      empty: "本次没有注入事件 rollup。"
     },
     {
       key: "currentWorkspaceResultEvents",
@@ -4673,6 +4904,9 @@ function jsonFieldLabel(key: string): string {
     binding: "绑定",
     bindingJson: "绑定",
     bindingType: "绑定类型",
+    promptSnippet: "Prompt 摘要",
+    promptGuidelinesJson: "Prompt 规则",
+    executionMode: "执行模式",
     riskLevel: "风险",
     mcpServerId: "MCP Server",
     mcpToolName: "MCP 工具名",
@@ -4780,6 +5014,7 @@ function WorkspaceTab() {
     try {
       JSON.parse(toolDraft.parametersJson);
       JSON.parse(toolDraft.bindingJson || "{}");
+      JSON.parse(toolDraft.promptGuidelinesJson || "[]");
       const cached = loadCache();
       const body = {
         ...toolDraft,
@@ -5161,7 +5396,7 @@ function WorkspaceTab() {
                     <span>{tool.description}</span>
                   </div>
                   <small title={tool.bindingType === "mcp" ? `${tool.mcpServerId ?? ""}/${tool.mcpToolName ?? ""}` : tool.bindingJson}>
-                    {riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)}
+                    {riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)} · {executionModeLabel(tool.executionMode)}
                   </small>
                   <div className="tool-card-actions">
                     <button onClick={() => setToolDraft({ ...tool })}>编辑</button>
@@ -5189,6 +5424,13 @@ function WorkspaceTab() {
                   </select>
                 </label>
                 <label>
+                  执行模式
+                  <select value={toolDraft.executionMode ?? "parallel"} onChange={(event) => setToolDraft({ ...toolDraft, executionMode: event.target.value as ToolDefinition["executionMode"] })}>
+                    <option value="parallel">并行</option>
+                    <option value="sequential">串行</option>
+                  </select>
+                </label>
+                <label>
                   风险等级
                   <select value={toolDraft.riskLevel ?? "low"} onChange={(event) => setToolDraft({ ...toolDraft, riskLevel: event.target.value as ToolDefinition["riskLevel"] })}>
                     <option value="low">低</option>
@@ -5196,6 +5438,8 @@ function WorkspaceTab() {
                     <option value="high">高</option>
                   </select>
                 </label>
+                <label>Prompt 摘要<textarea value={toolDraft.promptSnippet ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, promptSnippet: event.target.value })} /></label>
+                <label>Prompt 规则 JSON<textarea className="json-editor" value={toolDraft.promptGuidelinesJson ?? "[]"} onChange={(event) => setToolDraft({ ...toolDraft, promptGuidelinesJson: event.target.value })} /></label>
                 <label>参数 JSON Schema<textarea className="json-editor" value={toolDraft.parametersJson ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, parametersJson: event.target.value })} /></label>
                 <label>MCP Server ID<input value={toolDraft.mcpServerId ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, mcpServerId: event.target.value })} /></label>
                 <label>MCP Tool 名称<input value={toolDraft.mcpToolName ?? ""} onChange={(event) => setToolDraft({ ...toolDraft, mcpToolName: event.target.value })} /></label>
@@ -5210,7 +5454,7 @@ function WorkspaceTab() {
               {systemTools.map((tool) => (
                 <div key={tool.id} className="check-row locked-tool">
                   <span>{tool.name}</span>
-                  <small>{riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)}</small>
+                  <small>{riskLabel(tool.riskLevel)} · {bindingLabel(tool.bindingType)} · {executionModeLabel(tool.executionMode)}</small>
                 </div>
               ))}
             </div>

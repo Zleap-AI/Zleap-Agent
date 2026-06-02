@@ -66,6 +66,7 @@ export type AgentRunInput = {
     model?: string;
     apiKey?: string;
     temperature?: number;
+    supportsImageContent?: boolean;
   };
 };
 
@@ -176,12 +177,17 @@ export type McpServerDefinition = {
   updatedAt: string;
 };
 
+export type ToolExecutionMode = "parallel" | "sequential";
+
 export type ToolDefinition = {
   id: string;
   name: string;
   workspaceId?: string;
   description: string;
   parametersJson: string;
+  promptSnippet?: string;
+  promptGuidelinesJson: string;
+  executionMode: ToolExecutionMode;
   riskLevel: "low" | "medium" | "high";
   bindingType: "placeholder" | "runtime" | "mcp";
   bindingJson: string;
@@ -248,6 +254,9 @@ export type WorkspaceLocalContext = {
     id: string;
     name: string;
     description: string;
+    promptSnippet?: string;
+    promptGuidelines: string[];
+    executionMode: ToolExecutionMode;
     riskLevel: ToolDefinition["riskLevel"];
     bindingType: ToolDefinition["bindingType"];
     mcpServerId?: string;
@@ -288,6 +297,7 @@ export type ContextSegment = {
     | "workspace_result"
     | "workspace_local_context"
     | "tools"
+    | "resources"
     | "memory"
     | "impression_memory"
     | "event_memory"
@@ -385,6 +395,41 @@ export type ToolCallLog = {
   argumentsJson: string;
   resultJson: string;
   status: "pending" | "completed" | "failed" | "blocked";
+  createdAt: string;
+};
+
+export type SessionEntryType =
+  | "message"
+  | "llm_call"
+  | "assistant_delta"
+  | "tool_call"
+  | "tool_result"
+  | "workspace_enter"
+  | "workspace_exit"
+  | "workspace_handoff"
+  | "memory_recall"
+  | "memory_write"
+  | "event_rollup"
+  | "approval_request"
+  | "model_change"
+  | "custom";
+
+export type SessionEntry = {
+  id: string;
+  conversationId: string;
+  parentId?: string;
+  workspaceId?: string;
+  type: SessionEntryType;
+  payloadJson: string;
+  createdAt: string;
+};
+
+export type SessionEntryContextMessage = {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  workspaceId?: string;
+  entryId: string;
+  sourceType: SessionEntryType;
   createdAt: string;
 };
 

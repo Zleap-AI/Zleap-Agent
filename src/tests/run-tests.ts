@@ -1,25 +1,87 @@
 ﻿import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
+import { deflateSync, gzipSync } from "node:zlib";
 import type { AddressInfo } from "node:net";
 import Database from "better-sqlite3";
 import { migrate } from "../db/schema";
 import { seedDefaults } from "../db/seed";
 import { Repositories, mcpServerToBindingJson } from "../db/repositories";
 import { AgentRuntime } from "../core/agent-runtime";
-import { conversationWorkspaceRoot, defaultFileWorkspaceBaseRoot } from "../core/builtin-tools";
+import { conversationWorkspaceRoot, defaultFileWorkspaceBaseRoot, executeBash, executeEdit, executeRead, executeWrite } from "../core/builtin-tools";
 import { MemoryService } from "../core/memory-service";
 import { WorkspaceRuntime } from "../core/workspace-runtime";
 import { McpToolExecutor } from "../core/mcp-executor";
+import { expandPromptTemplate, loadWorkspaceResources, parseMarkdownWithFrontmatter, parseResourceCommand } from "../core/resource-loader";
+import { SafeExtensionRegistry } from "../core/extension-registry";
 import { parseActor, parseActorFromSearchParams } from "../server/actor";
 import { createZleapServer } from "../server/index";
 import type { ChatCompletionInput, ChatCompletionOutput, LLMClient, LLMStreamEvent } from "../core/llm-client";
 import { normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "../core/llm-client";
-import type { ContextSegment, MemoryRow } from "../types";
+import type { AgentStreamEvent, ContextSegment, MemoryRow } from "../types";
 
 async function pathExists(filePath: string): Promise<boolean> {
   return fs.stat(filePath).then(() => true, () => false);
+}
+
+async function writeTestFile(filePath: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, content, "utf8");
+}
+
+function createTestPngRgba(width: number, height: number): Buffer {
+  const rowBytes = width * 4;
+  const raw = Buffer.alloc((rowBytes + 1) * height);
+  let seed = 0x12345678;
+  const nextByte = () => {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    return (seed >>> 24) & 0xff;
+  };
+  for (let y = 0; y < height; y += 1) {
+    const rowOffset = y * (rowBytes + 1);
+    raw[rowOffset] = 0;
+    for (let x = 0; x < width; x += 1) {
+      const pixelOffset = rowOffset + 1 + x * 4;
+      raw[pixelOffset] = nextByte();
+      raw[pixelOffset + 1] = nextByte();
+      raw[pixelOffset + 2] = nextByte();
+      raw[pixelOffset + 3] = nextByte();
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    createTestPngChunk("IHDR", ihdr),
+    createTestPngChunk("IDAT", deflateSync(raw)),
+    createTestPngChunk("IEND", Buffer.alloc(0))
+  ]);
+}
+
+function createTestPngChunk(type: string, data: Buffer): Buffer {
+  const typeBuffer = Buffer.from(type, "ascii");
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(testCrc32(Buffer.concat([typeBuffer, data])), 0);
+  return Buffer.concat([length, typeBuffer, data, crc]);
+}
+
+function testCrc32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 class FakeLLMClient implements LLMClient {
@@ -47,9 +109,11 @@ async function testWebUiMasterPlanContracts() {
   const webSource = await fs.readFile(path.resolve("src/web/main.tsx"), "utf8");
   const webCssSource = await fs.readFile(path.resolve("src/web/styles.css"), "utf8");
   const serverSource = await fs.readFile(path.resolve("src/server/index.ts"), "utf8");
+  const runtimeSource = await fs.readFile(path.resolve("src/core/agent-runtime.ts"), "utf8");
 
   const expectWeb = (needle: string) => assert.ok(webSource.includes(needle), `Web UI contract missing: ${needle}`);
   const expectServer = (needle: string) => assert.ok(serverSource.includes(needle), `Server stream contract missing: ${needle}`);
+  const expectRuntime = (needle: string) => assert.ok(runtimeSource.includes(needle), `AgentRuntime contract missing: ${needle}`);
 
   for (const tab of ["chat", "workspace", "memory", "logs", "tables", "config", "concept"]) {
     expectWeb(`renderTabPanel("${tab}"`);
@@ -110,6 +174,36 @@ async function testWebUiMasterPlanContracts() {
   expectWeb("showRawContextLogs ? \"显示结构化视图\" : \"显示原始日志\"");
   expectWeb("placeholder=\"搜索原始日志关键词\"");
   expectWeb("renderRawLogSearchHighlights");
+  expectWeb("sessionEntries: SessionEntry[];");
+  expectWeb("const [sessionEntries, setSessionEntries] = useState<SessionEntry[]>([])");
+  expectWeb("<SessionEntryPanel entries={sessionEntries} />");
+  expectWeb("function SessionEntryPanel({ entries }: { entries: SessionEntry[] })");
+  expectWeb("assistant_delta: \"流式输出\"");
+  expectWeb("memory_recall: \"记忆召回\"");
+  expectWeb("workspace_handoff: \"工作空间交接\"");
+  expectWeb("event_rollup: \"事件 Rollup\"");
+  expectWeb("model_change: \"模型切换\"");
+  expectWeb("Provider normalized/raw payload");
+  expectWeb("Provider normalized request");
+  expectWeb("Provider raw request");
+  expectWeb("syntheticToolResults");
+  expectWeb("请求 tools / active tool prompt");
+  expectWeb("runtime_context.resources");
+  expectWeb("read / write / edit / bash");
+  assert.equal(webSource.includes("searchFiles / runCommand"), false);
+  expectWeb("function toolResultDetails(log: ToolCallLog)");
+  expectWeb("continuationOffset");
+  expectWeb("imageTooLarge");
+  expectWeb("usedFuzzyMatch");
+  expectWeb("fullOutputPath");
+  expectWeb("tool-result-details");
+  expectWeb("Prompt 摘要");
+  expectWeb("Prompt 规则 JSON");
+  expectWeb("JSON.parse(toolDraft.promptGuidelinesJson || \"[]\")");
+  expectWeb("value={toolDraft.executionMode ?? \"parallel\"}");
+  expectWeb("function executionModeLabel(value: ToolDefinition[\"executionMode\"] | undefined)");
+  expectWeb("executionModeLabel(tool.executionMode)");
+  expectWeb("资源与模板");
   expectWeb("rawLogMatchCount");
   expectWeb("toolProcessMessagesForTurn");
   expectWeb("main 函数调用");
@@ -121,12 +215,20 @@ async function testWebUiMasterPlanContracts() {
   expectServer("request.on(\"aborted\", stopRun)");
   expectServer("response.on(\"close\", stopRun)");
   expectServer("runtime.runStream({ ...body, abortSignal: abortController.signal })");
+  expectRuntime("private async finalizeVisibleAssistantTurn");
+  assert.equal((runtimeSource.match(/finalizeVisibleAssistantTurn\(input, prepared/g) ?? []).length, 6);
+  expectRuntime("private async executeToolRoundAndAdvance");
+  assert.equal((runtimeSource.match(/executeToolRoundAndAdvance\(input, prepared/g) ?? []).length, 2);
+  expectRuntime("private async completeLlmRound");
+  assert.equal((runtimeSource.match(/completeLlmRound\(input, prepared/g) ?? []).length, 3);
+  expectRuntime("private async streamLlmRound");
+  assert.equal((runtimeSource.match(/streamLlmRound\(input, prepared/g) ?? []).length, 1);
 }
 
 function assertFollowUpContextStacksIncludeBaseSegments(trace: ReturnType<Repositories["getTrace"]>): void {
   const followUpSegments = trace.contextSegments.filter((segment) => segment.segmentType === "tool_result");
   assert.equal(followUpSegments.length > 0, true);
-  const requiredTypes: ContextSegment["segmentType"][] = ["system", "workspace", "tools", "memory", "history", "user", "tool_result", "final_messages"];
+  const requiredTypes: ContextSegment["segmentType"][] = ["system", "workspace", "tools", "resources", "memory", "history", "user", "tool_result", "final_messages"];
   for (const followUpSegment of followUpSegments) {
     const segmentsForCall = trace.contextSegments.filter((segment) => segment.llmCallId === followUpSegment.llmCallId);
     const segmentTypes = new Set(segmentsForCall.map((segment) => segment.segmentType));
@@ -148,7 +250,7 @@ class MainToFileLLMClient implements LLMClient {
     this.inputs.push(input);
     if (this.calls === 1) {
       assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
-      assert.equal(input.tools.some((tool) => tool.name === "searchFiles"), false);
+      assert.equal(input.tools.some((tool) => tool.name === "bash"), false);
       return {
         message: {
           role: "assistant",
@@ -166,8 +268,10 @@ class MainToFileLLMClient implements LLMClient {
       };
     }
     if (this.calls === 2) {
-      assert.equal(input.tools.some((tool) => tool.name === "searchFiles"), true);
-      assert.equal(input.tools.some((tool) => tool.name === "runCommand"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "read"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "write"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "edit"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "bash"), true);
       assert.equal(input.messages.some((message) => message.role === "tool" && message.name === "enterWorkspace"), true);
       return {
         message: {
@@ -204,7 +308,7 @@ class MainToFileLLMClient implements LLMClient {
       };
     }
     assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
-    assert.equal(input.tools.some((tool) => tool.name === "searchFiles"), false);
+    assert.equal(input.tools.some((tool) => tool.name === "bash"), false);
     assert.equal(input.messages.some((message) => message.role === "tool" && message.name === "exitWorkspace"), true);
     return {
       message: {
@@ -250,7 +354,7 @@ class MainToFileExitToMainLLMClient implements LLMClient {
       };
     }
     if (this.calls === 2) {
-      assert.equal(input.tools.some((tool) => tool.name === "searchFiles"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "bash"), true);
       assert.equal(input.tools.some((tool) => tool.name === "exitWorkspace"), true);
       return {
         message: {
@@ -265,7 +369,7 @@ class MainToFileExitToMainLLMClient implements LLMClient {
                 status: "completed",
                 summary: "File workspace inspected available evidence.",
                 artifacts: [],
-                observations: ["File workspace had searchFiles available."],
+                observations: ["File workspace had read/write/edit/bash available."],
                 errors: [],
                 suggestedNextSteps: ["Return to main for final response."]
               })
@@ -276,7 +380,7 @@ class MainToFileExitToMainLLMClient implements LLMClient {
       };
     }
     assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
-    assert.equal(input.tools.some((tool) => tool.name === "searchFiles"), false);
+    assert.equal(input.tools.some((tool) => tool.name === "bash"), false);
     assert.equal(input.messages.some((message) => message.role === "tool" && message.name === "exitWorkspace"), true);
     return {
       message: {
@@ -296,8 +400,8 @@ class ResumeChildWorkspaceLLMClient implements LLMClient {
     this.calls += 1;
     this.inputs.push(input);
     if (this.calls === 1) {
-      assert.equal(input.tools.some((tool) => tool.name === "writeFile"), true);
-      assert.equal(input.tools.some((tool) => tool.name === "runCommand"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "write"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "bash"), true);
       assert.equal(input.tools.some((tool) => tool.name === "exitWorkspace"), true);
       assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), false);
       const workspaceMessage = input.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
@@ -329,7 +433,7 @@ class ResumeChildWorkspaceLLMClient implements LLMClient {
       };
     }
     assert.equal(input.tools.some((tool) => tool.name === "enterWorkspace"), true);
-    assert.equal(input.tools.some((tool) => tool.name === "writeFile"), false);
+    assert.equal(input.tools.some((tool) => tool.name === "write"), false);
     assert.equal(input.messages.some((message) => message.role === "tool" && message.name === "exitWorkspace"), true);
     return {
       message: {
@@ -365,7 +469,7 @@ class MainToFileExitWithExtraToolLLMClient implements LLMClient {
     }
     if (this.calls === 2) {
       assert.equal(input.tools.some((tool) => tool.name === "exitWorkspace"), true);
-      assert.equal(input.tools.some((tool) => tool.name === "searchFiles"), true);
+      assert.equal(input.tools.some((tool) => tool.name === "bash"), true);
       return {
         message: {
           role: "assistant",
@@ -387,11 +491,11 @@ class MainToFileExitWithExtraToolLLMClient implements LLMClient {
               }
             },
             {
-              id: "call-search-after-exit-same-batch",
+              id: "call-bash-after-exit-same-batch",
               type: "function",
               function: {
-                name: "searchFiles",
-                arguments: JSON.stringify({ query: "late evidence" })
+                name: "bash",
+                arguments: JSON.stringify({ command: "rg 'late evidence' ." })
               }
             }
           ]
@@ -560,12 +664,29 @@ class MainToFileMalformedExitLLMClient implements LLMClient {
 
 class TwoFileSessionsLLMClient implements LLMClient {
   calls = 0;
+  agentCalls = 0;
+  rollupCalls = 0;
   inputs: ChatCompletionInput[] = [];
 
   async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
     this.calls += 1;
     this.inputs.push(input);
-    if (this.calls === 1) {
+    const systemText = String(input.messages.find((message) => message.role === "system")?.content ?? "");
+    if (systemText.includes("event memory rollups")) {
+      this.rollupCalls += 1;
+      return {
+        message: {
+          role: "assistant",
+          content: JSON.stringify({
+            summary: "Two file sessions rollup",
+            detail: "Workspace Event Rollup\n\nScope\n- workspaceId: dev\n\nStable Facts\n- Two dev sessions completed.\n\nRecent Outcomes\n- Both sessions returned results.\n\nOpen Threads\n- No open threads.\n\nTool/File Evidence References\n- sourceRefs only.\n\nMemory Links\n- source event ids"
+          })
+        },
+        raw: { step: "rollup" }
+      };
+    }
+    this.agentCalls += 1;
+    if (this.agentCalls === 1) {
       return {
         message: {
           role: "assistant",
@@ -582,7 +703,7 @@ class TwoFileSessionsLLMClient implements LLMClient {
         raw: { step: "enter-first-file" }
       };
     }
-    if (this.calls === 2) {
+    if (this.agentCalls === 2) {
       return {
         message: {
           role: "assistant",
@@ -606,7 +727,7 @@ class TwoFileSessionsLLMClient implements LLMClient {
         raw: { step: "exit-first-file" }
       };
     }
-    if (this.calls === 3) {
+    if (this.agentCalls === 3) {
       return {
         message: {
           role: "assistant",
@@ -623,7 +744,7 @@ class TwoFileSessionsLLMClient implements LLMClient {
         raw: { step: "enter-second-file" }
       };
     }
-    if (this.calls === 4) {
+    if (this.agentCalls === 4) {
       return {
         message: {
           role: "assistant",
@@ -680,7 +801,7 @@ class MainToCliLLMClient implements LLMClient {
         raw: { plannedWorkspace: "dev" }
       };
     }
-    assert.equal(input.tools.some((tool) => tool.name === "runCommand"), true);
+    assert.equal(input.tools.some((tool) => tool.name === "bash"), true);
     return {
       message: {
         role: "assistant",
@@ -752,6 +873,7 @@ class MainToCliToolRequestLLMClient implements LLMClient {
 class MainToWorkspaceToolRequestLLMClient implements LLMClient {
   calls = 0;
   lastToolResult = "";
+  inputs: ChatCompletionInput[] = [];
 
   constructor(
     private readonly workspaceId: string,
@@ -761,6 +883,7 @@ class MainToWorkspaceToolRequestLLMClient implements LLMClient {
 
   async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
     this.calls += 1;
+    this.inputs.push(input);
     if (this.calls === 1) {
       return {
         message: {
@@ -834,6 +957,96 @@ class MainToWorkspaceToolRequestLLMClient implements LLMClient {
   }
 }
 
+class ParallelMcpToolBatchLLMClient implements LLMClient {
+  calls = 0;
+  toolResultCallIds: string[] = [];
+  toolResultTexts: string[] = [];
+
+  async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-enter-parallel-mcp",
+            type: "function",
+            function: {
+              name: "enterWorkspace",
+              arguments: JSON.stringify({ workspaceId: "dev", objective: "run parallel MCP tool calls" })
+            }
+          }]
+        },
+        raw: { plannedWorkspace: "dev" }
+      };
+    }
+    if (this.calls === 2) {
+      assert.equal(input.tools.some((tool) => tool.name === "sleepEcho"), true);
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "call-sleep-first",
+              type: "function",
+              function: {
+                name: "sleepEcho",
+                arguments: JSON.stringify({ text: "first", delayMs: 120 })
+              }
+            },
+            {
+              id: "call-sleep-second",
+              type: "function",
+              function: {
+                name: "sleepEcho",
+                arguments: JSON.stringify({ text: "second", delayMs: 0 })
+              }
+            }
+          ]
+        },
+        raw: { requestedParallelTools: true }
+      };
+    }
+    if (this.calls === 3) {
+      const toolMessages = input.messages.filter((message) => message.role === "tool" && message.name === "sleepEcho");
+      this.toolResultCallIds = toolMessages.map((message) => message.tool_call_id ?? "");
+      this.toolResultTexts = toolMessages.map((message) => message.content ?? "");
+      assert.deepEqual(this.toolResultCallIds, ["call-sleep-first", "call-sleep-second"]);
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-exit-parallel-mcp",
+            type: "function",
+            function: {
+              name: "exitWorkspace",
+              arguments: JSON.stringify({
+                status: "completed",
+                summary: "Parallel MCP tool batch completed.",
+                artifacts: [],
+                observations: this.toolResultTexts,
+                errors: [],
+                suggestedNextSteps: []
+              })
+            }
+          }]
+        },
+        raw: { requestedExit: true }
+      };
+    }
+    return {
+      message: {
+        role: "assistant",
+        content: "parallel batch handled"
+      },
+      raw: { final: true }
+    };
+  }
+}
+
 class MainToCliRunCommandExitLLMClient implements LLMClient {
   calls = 0;
   lastToolResult = "";
@@ -865,18 +1078,18 @@ class MainToCliRunCommandExitLLMClient implements LLMClient {
           role: "assistant",
           content: null,
           tool_calls: [{
-            id: "call-run-command-for-skill",
+            id: "call-bash-for-skill",
             type: "function",
             function: {
-              name: "runCommand",
+              name: "bash",
               arguments: JSON.stringify({ command: this.command })
             }
           }]
         },
-        raw: { requestedTool: "runCommand" }
+        raw: { requestedTool: "bash" }
       };
     }
-    const toolMessage = [...input.messages].reverse().find((message) => message.role === "tool" && message.name === "runCommand");
+    const toolMessage = [...input.messages].reverse().find((message) => message.role === "tool" && message.name === "bash");
     this.lastToolResult = toolMessage?.content ?? "";
     if (this.calls === 3) {
       return {
@@ -890,7 +1103,7 @@ class MainToCliRunCommandExitLLMClient implements LLMClient {
               name: "exitWorkspace",
               arguments: JSON.stringify({
                 status: "completed",
-                summary: "runCommand completed.",
+                summary: "bash completed.",
                 artifacts: [],
                 observations: [this.lastToolResult],
                 errors: [],
@@ -1238,7 +1451,10 @@ class MultiStepToolLoopLLMClient implements LLMClient {
       };
     }
     if (this.calls === 2) {
-      assert.equal(input.messages.filter((message) => message.role === "tool").length, 4);
+      const toolMessageNames = input.messages.filter((message) => message.role === "tool").map((message) => message.name);
+      for (const name of ["runtime_context.workspace", "runtime_context.resources", "runtime_context.tools", "runtime_context.memory", "runtime_context.local_conversation", "writeUserImpression"]) {
+        assert.equal(toolMessageNames.includes(name), true);
+      }
       return {
         message: {
           role: "assistant",
@@ -1320,7 +1536,10 @@ class StreamingMultiStepToolLoopLLMClient implements LLMClient {
       return;
     }
     if (this.calls === 2) {
-      assert.equal(input.messages.filter((message) => message.role === "tool").length, 4);
+      const toolMessageNames = input.messages.filter((message) => message.role === "tool").map((message) => message.name);
+      for (const name of ["runtime_context.workspace", "runtime_context.resources", "runtime_context.tools", "runtime_context.memory", "runtime_context.local_conversation", "writeUserImpression"]) {
+        assert.equal(toolMessageNames.includes(name), true);
+      }
       yield { type: "tool_call_delta", index: 0, id: "stream-second-memory", name: "writeUserImpression" };
       yield {
         type: "tool_call_delta",
@@ -1519,10 +1738,11 @@ async function testDatabaseAndMemory() {
     "mcp_servers",
     "memories",
     "memories_fts",
-    "messages",
-    "runtime_config",
-    "schema_migrations",
-    "tool_calls",
+	    "messages",
+	    "runtime_config",
+	    "schema_migrations",
+	    "session_entries",
+	    "tool_calls",
     "tool_definitions",
     "users",
     "workspace_sessions",
@@ -1540,8 +1760,9 @@ async function testDatabaseAndMemory() {
   assertTableColumns("agents", ["id", "systemPrompt", "personalityPrompt", "defaultModel", "defaultBaseUrl"]);
   assertTableColumns("workspaces", ["id", "capabilitiesJson", "inputKindsJson", "outputKindsJson", "requiresApproval", "memoryPolicyJson", "riskLevel"]);
   assertTableColumns("mcp_servers", ["id", "workspaceId", "transport", "command", "argsJson", "envJson", "url", "headersJson", "timeoutMs"]);
-  assertTableColumns("tool_definitions", ["id", "name", "workspaceId", "bindingType", "bindingJson", "mcpServerId", "mcpToolName"]);
+  assertTableColumns("tool_definitions", ["id", "name", "workspaceId", "bindingType", "bindingJson", "mcpServerId", "mcpToolName", "promptSnippet", "promptGuidelinesJson", "executionMode"]);
   assertTableColumns("tool_calls", ["id", "conversationId", "userId", "workspaceId", "workspaceSessionId", "taskId", "toolName", "argumentsJson", "resultJson", "status"]);
+  assertTableColumns("session_entries", ["id", "conversationId", "parentId", "workspaceId", "type", "payloadJson", "createdAt"]);
   assertTableColumns("memories", ["id", "memoryType", "userId", "agentId", "workspaceId", "relationId", "version", "metadataJson", "deletedAt"]);
   assertTableColumns("runtime_config", ["key", "category", "valueType", "valueJson", "defaultValueJson", "minValue", "maxValue"]);
   assertTableColumns("llm_calls", ["id", "conversationId", "userId", "providerBaseUrl", "normalizedEndpoint", "messagesJson", "toolsJson", "status", "responseJson", "errorText", "completedAt"]);
@@ -1804,7 +2025,7 @@ async function testSensitiveHttpEndpointsRequireExplicitActor() {
     userId: "http-owner",
     conversationId: "conv-http-actor",
     workspaceId: "dev",
-    toolName: "runCommand",
+    toolName: "bash",
     argumentsJson: "{}",
     reason: "HTTP actor boundary fixture"
   });
@@ -1975,7 +2196,7 @@ async function testTraceAndToolLogsAreUserScoped() {
     userId: "trace-intruder",
     conversationId: "conv-trace-owner",
     workspaceId: "dev",
-    toolName: "runCommand",
+    toolName: "bash",
     argumentsJson: JSON.stringify({ command: "npm test" }),
     reason: "mismatched approval request"
   }), /conversation owner/);
@@ -2048,7 +2269,7 @@ async function testApprovalListIsUserScoped() {
     userId: "approval-owner-a",
     conversationId: "conv-approval-owner-a",
     workspaceId: "dev",
-    toolName: "runCommand",
+    toolName: "bash",
     argumentsJson: JSON.stringify({ command: "npm test" }),
     reason: "owner a approval"
   });
@@ -2056,7 +2277,7 @@ async function testApprovalListIsUserScoped() {
     userId: "approval-owner-b",
     conversationId: "conv-approval-owner-b",
     workspaceId: "dev",
-    toolName: "writeFile",
+    toolName: "write",
     argumentsJson: JSON.stringify({ path: "private.txt" }),
     reason: "owner b approval"
   });
@@ -2084,6 +2305,61 @@ async function testApprovalListIsUserScoped() {
   });
   assert.equal(creatorList.some((request) => request.id === ownerA.id), true);
   assert.equal(creatorList.some((request) => request.id === ownerB.id), true);
+}
+
+async function testApprovalResolutionWritesSessionEntries() {
+  const repos = createRepos();
+  repos.ensureConversation("conv-approval-session-entry", "default-agent", "approval-session-user");
+  const request = repos.createApprovalRequest({
+    userId: "approval-session-user",
+    conversationId: "conv-approval-session-entry",
+    workspaceId: "dev",
+    toolName: "bash",
+    argumentsJson: JSON.stringify({ command: "npm test" }),
+    reason: "session entry approval fixture"
+  });
+  const beforeTrace = repos.getTrace("conv-approval-session-entry", "creator", "creator");
+  const beforeApprovalEntries = beforeTrace.sessionEntries.filter((entry) => entry.type === "approval_request");
+  assert.equal(beforeApprovalEntries.length, 1);
+  const requestPayload = JSON.parse(beforeApprovalEntries[0].payloadJson) as { approvalRequestId?: string; status?: string };
+  assert.equal(requestPayload.approvalRequestId, request.id);
+  assert.equal(requestPayload.status, "pending");
+
+  const resolved = repos.resolveApprovalRequest(request.id, {
+    status: "approved",
+    resolvedBy: "creator",
+    resolverRole: "creator",
+    resolutionReason: "session entry approval resolution"
+  });
+  assert.equal(resolved.status, "approved");
+
+  const trace = repos.getTrace("conv-approval-session-entry", "creator", "creator");
+  const approvalEntries = trace.sessionEntries.filter((entry) => entry.type === "approval_request");
+  assert.equal(approvalEntries.length, 2);
+  assert.equal(approvalEntries[1].parentId, approvalEntries[0].id);
+  const resolutionPayload = JSON.parse(approvalEntries[1].payloadJson) as {
+    eventKind?: string;
+    approvalRequestId?: string;
+    previousStatus?: string;
+    status?: string;
+    resolvedBy?: string;
+    resolutionReason?: string;
+  };
+  assert.equal(resolutionPayload.eventKind, "resolution");
+  assert.equal(resolutionPayload.approvalRequestId, request.id);
+  assert.equal(resolutionPayload.previousStatus, "pending");
+  assert.equal(resolutionPayload.status, "approved");
+  assert.equal(resolutionPayload.resolvedBy, "creator");
+  assert.equal(resolutionPayload.resolutionReason, "session entry approval resolution");
+
+  repos.resolveApprovalRequest(request.id, {
+    status: "rejected",
+    resolvedBy: "creator",
+    resolverRole: "creator",
+    resolutionReason: "already resolved"
+  });
+  const afterTrace = repos.getTrace("conv-approval-session-entry", "creator", "creator");
+  assert.equal(afterTrace.sessionEntries.filter((entry) => entry.type === "approval_request").length, 2);
 }
 
 async function testRuntimeContextAndTools() {
@@ -2134,6 +2410,8 @@ async function testRuntimeContextAndTools() {
   });
 
   assert.equal(output.assistantMessage, "fake response");
+  assert.equal(output.finalMessages.at(-1)?.role, "assistant");
+  assert.equal(output.finalMessages.at(-1)?.content, "fake response");
   assert.equal(output.activeWorkspaceId, "main");
   assert.equal(normalizeProviderBaseUrl("https://api.302.ai"), "https://api.302ai.com");
   assert.equal(normalizeProviderBaseUrl("http://api.302.ai/v1/chat/completions/"), "https://api.302ai.com/v1/chat/completions");
@@ -2199,16 +2477,31 @@ async function testRuntimeContextAndTools() {
   assert.equal(systemMessage.includes("enterWorkspace"), true);
   assert.equal(systemMessage.includes("exitWorkspace"), true);
   assert.equal(systemMessage.includes("suggestedNextSteps"), true);
+  assert.equal(systemMessage.includes("## Available tools"), true);
+  assert.equal(systemMessage.includes("- enterWorkspace:"), true);
+  assert.equal(childSystemMessage.includes("## Available tools"), true);
+  assert.equal(childSystemMessage.includes("- read: Read file contents"), true);
+  assert.equal(childSystemMessage.includes("- bash: Execute shell commands"), true);
+  assert.equal(childSystemMessage.includes("executionMode=sequential"), true);
+  assert.equal(childSystemMessage.includes("risk=high"), true);
   assert.equal(systemMessage.includes("## Callable Tools"), false);
   assert.equal(systemMessage.includes("\"toolCount\""), false);
+  assert.equal(systemMessage.includes("\"parametersJson\""), false);
+  assert.equal(systemMessage.includes("\"bindingJson\""), false);
+  assert.equal(childSystemMessage.includes("\"parametersJson\""), false);
+  assert.equal(childSystemMessage.includes("\"bindingJson\""), false);
   assert.equal(systemMessage.includes("\"availableWorkspaces\""), false);
   assert.equal(firstInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.workspace"), true);
+  assert.equal(firstInput?.messages.some((message) => message.role === "tool" && message.name === "runtime_context.tools"), true);
   assert.equal(/workspace|context|runtime/i.test(agent.personalityPrompt), false);
   assert.equal(firstInput?.tools.some((tool) => tool.name === "enterWorkspace"), true);
-  assert.equal(firstInput?.tools.some((tool) => tool.name === "searchFiles"), false);
-  assert.equal(lastInput?.tools.some((tool) => tool.name === "runCommand"), false);
-  assert.equal(lastInput?.tools.some((tool) => tool.name === "searchFiles"), false);
-  assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
+  assert.equal(firstInput?.tools.some((tool) => tool.name === "bash"), false);
+  assert.equal(lastInput?.tools.some((tool) => tool.name === "bash"), false);
+  assert.equal(lastInput?.tools.some((tool) => tool.name === "read"), false);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "read"), true);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "write"), true);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "edit"), true);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "bash"), true);
   assert.equal(lastInput?.tools.some((tool) => tool.name === "writeUserImpression"), true);
   assert.equal(lastInput?.tools.some((tool) => tool.name === "readMemory"), true);
   assert.equal(output.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
@@ -2220,6 +2513,14 @@ async function testRuntimeContextAndTools() {
   assert.equal(firstWorkspaceToolMessage?.content?.includes("\"id\": \"cli\""), false);
   const childWorkspaceToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.workspace");
   assert.equal(childWorkspaceToolMessage?.content?.includes("\"id\": \"dev\""), true);
+  const childToolsToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.tools");
+  assert.ok(childToolsToolMessage);
+  const childToolsPayload = JSON.parse(childToolsToolMessage.content ?? "{}") as RuntimeToolsPayloadForTest;
+  assert.equal(childToolsPayload.activeWorkspaceId, "dev");
+  assert.equal(childToolsPayload.tools.some((tool) => tool.name === "read" && tool.summary === "Read file contents"), true);
+  assert.equal(childToolsPayload.tools.some((tool) => tool.name === "bash" && tool.executionMode === "sequential"), true);
+  assert.equal(childToolsToolMessage.content?.includes("\"parametersJson\""), false);
+  assert.equal(childToolsToolMessage.content?.includes("\"bindingJson\""), false);
   const childWorkspacePayload = JSON.parse(childWorkspaceToolMessage?.content ?? "{}") as {
     currentWorkspace?: { id?: string };
     availableWorkspaces?: Array<{ id?: string }>;
@@ -2261,9 +2562,9 @@ async function testRuntimeContextAndTools() {
   assert.equal(childLocalConversationPayload.messages.some((message) => String(message.content ?? "").includes("old global user chat unrelated to file workspace")), false);
   assert.equal(JSON.stringify(childLocalConversationPayload.crossWorkspaceHandoffContext).includes("old global user chat unrelated to file workspace"), true);
   assert.equal(childLocalConversationPayload.recentToolEvidence.length, 0);
-  assert.equal(childInput?.messages[0]?.content?.includes("\"name\": \"searchFiles\""), false);
+  assert.equal(childInput?.messages[0]?.content?.includes("\"name\": \"read\""), false);
   assert.equal(childInput?.messages[0]?.content?.includes("\"bindingType\": \"runtime\""), false);
-  assert.equal(childInput?.tools.some((tool) => tool.name === "searchFiles"), true);
+  assert.equal(childInput?.tools.some((tool) => tool.name === "bash"), true);
   const memoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const memoryPayload = JSON.parse(memoryToolMessage?.content ?? "{}") as {
     memoryDisclosureProtocol: { defaultDisclosure: string; detailInjectedByDefault: boolean; ordinaryMemoryReadTool: string; activeReadTriggers?: string[]; rules: string[] };
@@ -2297,11 +2598,42 @@ async function testRuntimeContextAndTools() {
   assert.equal(output.workspaceTrace[1].result.suggestedNextSteps.length > 0, true);
   assert.equal(output.workspaceTrace[1].localContext.recalledEventMemories.some((memory) => memory.title === "Runtime file search event"), true);
   assert.equal(output.workspaceTrace[1].localContext.recalledSkillMemories.some((memory) => memory.title === "Runtime search skill"), true);
-  assert.equal(output.workspaceTrace[1].localContext.availableTools.some((tool) => tool.name === "searchFiles"), true);
+  assert.equal(output.workspaceTrace[1].localContext.availableTools.some((tool) => tool.name === "read"), true);
+  assert.equal(output.workspaceTrace[1].localContext.availableTools.some((tool) => tool.name === "write"), true);
+  assert.equal(output.workspaceTrace[1].localContext.availableTools.some((tool) => tool.name === "edit"), true);
+  assert.equal(output.workspaceTrace[1].localContext.availableTools.some((tool) => tool.name === "bash"), true);
   const trace = repos.getTrace("conv-test", "creator", "creator");
   const mainSession = trace.sessions.find((session) => session.workspaceId === "main");
   assert.equal(mainSession?.status, "completed");
   assert.equal(mainSession?.result.summary, "fake response");
+  assert.equal(trace.sessionEntries.length > 0, true);
+  assert.equal(trace.sessionEntries[0].parentId, null);
+  for (let index = 1; index < trace.sessionEntries.length; index += 1) {
+    assert.equal(trace.sessionEntries[index].parentId, trace.sessionEntries[index - 1].id);
+  }
+  const sessionEntryTypes = new Set(trace.sessionEntries.map((entry) => entry.type));
+  assert.equal(sessionEntryTypes.has("message"), true);
+  assert.equal(sessionEntryTypes.has("llm_call"), true);
+  assert.equal(sessionEntryTypes.has("tool_call"), true);
+  assert.equal(sessionEntryTypes.has("tool_result"), true);
+  assert.equal(sessionEntryTypes.has("workspace_enter"), true);
+  assert.equal(sessionEntryTypes.has("workspace_exit"), true);
+  assert.equal(sessionEntryTypes.has("workspace_handoff"), true);
+  assert.equal(sessionEntryTypes.has("memory_recall"), true);
+  assert.equal(sessionEntryTypes.has("memory_write"), true);
+  assert.equal(trace.sessionEntries.some((entry) => entry.type === "tool_call" && entry.payloadJson.includes("enterWorkspace")), true);
+  assert.equal(trace.sessionEntries.some((entry) => entry.type === "tool_result" && entry.payloadJson.includes("exitWorkspace")), true);
+  const memoryRecallEntry = trace.sessionEntries.find((entry) => entry.type === "memory_recall" && entry.workspaceId === "dev");
+  assert.equal(Boolean(memoryRecallEntry), true);
+  const memoryRecallPayload = JSON.parse(memoryRecallEntry?.payloadJson ?? "{}") as { hitIds?: { resultEvents?: string[]; skills?: string[] }; injectedPartitionCounts?: { resultEvent?: number; skill?: number } };
+  assert.equal(memoryRecallPayload.injectedPartitionCounts?.resultEvent, 1);
+  assert.equal(memoryRecallPayload.injectedPartitionCounts?.skill, 1);
+  assert.equal(memoryRecallPayload.hitIds?.resultEvents?.length, 1);
+  assert.equal(memoryRecallPayload.hitIds?.skills?.length, 1);
+  const handoffEntry = trace.sessionEntries.find((entry) => entry.type === "workspace_handoff" && entry.payloadJson.includes("\"direction\":\"parent_to_child\""));
+  assert.equal(Boolean(handoffEntry), true);
+  assert.equal(handoffEntry!.payloadJson.includes("old global user chat unrelated to file workspace"), false);
+  assert.equal(handoffEntry!.payloadJson.includes("\"contentLength\""), true);
   assert.equal(trace.auditLogs.some((log) => log.action === "main_workspace_direct_response_committed"), true);
   assert.equal(trace.llmCalls.length >= 4, true);
   assert.equal(trace.llmCalls.every((call) => call.status === "completed"), true);
@@ -2313,7 +2645,7 @@ async function testRuntimeContextAndTools() {
     auditLogs: trace.auditLogs
   }).includes("test-key"), false);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tool_result" && segment.content.includes("enterWorkspace")), true);
-  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"dev\"") && segment.content.includes("\"name\": \"searchFiles\"")), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"dev\"") && segment.content.includes("\"name\": \"bash\"")), true);
   assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "tools" && segment.content.includes("\"activeWorkspaceId\": \"main\"") && segment.content.includes("\"name\": \"enterWorkspace\"")), true);
   const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.task.objective, "search files for runtime");
@@ -2356,6 +2688,24 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
     metadataJson: JSON.stringify({ source: "test", conversationId: "conv-session-context-recall", eventKind: "process" })
   }, "creator", "creator");
   repos.createMemory({
+    memoryType: "event",
+    userId: "session-recall-user",
+    workspaceId: "dev",
+    relationId: "event:session-recall-user:file:objective-rollup",
+    title: "Objective-only file rollup",
+    summary: "rollup covers objective-only file events without injecting raw details",
+    detail: "Workspace Event Rollup\n\nMemory Links\n- event-source-objective",
+    metadataJson: JSON.stringify({
+      source: "eventRollup",
+      conversationId: "conv-session-context-recall",
+      taskId: "event-rollup:objective",
+      eventKind: "rollup",
+      rollupMode: "event_projection",
+      sourceEventIds: ["event-source-objective"],
+      sourceRefs: [{ table: "memories", ids: ["event-source-objective"] }]
+    })
+  }, "creator", "creator");
+  repos.createMemory({
     memoryType: "skill",
     workspaceId: "dev",
     relationId: "skill:file:objective-only",
@@ -2386,10 +2736,17 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
   const childInput = fake.inputs[1];
   const childMemoryToolMessage = childInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const childMemoryPayload = JSON.parse(childMemoryToolMessage?.content ?? "{}") as {
+    currentWorkspaceEventRollups: Array<Record<string, unknown>>;
     currentWorkspaceResultEvents: Array<Record<string, unknown>>;
     currentWorkspaceRelevantProcessEvents: Array<Record<string, unknown>>;
     currentWorkspaceSkillMemory: Array<Record<string, unknown>>;
   };
+  assert.equal(childMemoryPayload.currentWorkspaceEventRollups.some((memory) => memory.title === "Objective-only file rollup"), true);
+  const recalledRollupProjection = childMemoryPayload.currentWorkspaceEventRollups.find((memory) => memory.title === "Objective-only file rollup");
+  assert.equal(recalledRollupProjection?.eventKind, "rollup");
+  assert.equal(recalledRollupProjection?.readTool, "readMemory");
+  assert.equal(recalledRollupProjection?.detailInjected, false);
+  assert.equal(JSON.stringify(recalledRollupProjection).includes("Workspace Event Rollup"), false);
   assert.equal(childMemoryPayload.currentWorkspaceRelevantProcessEvents.some((memory) => memory.title === "Objective-only file event"), true);
   const recalledProcessProjection = childMemoryPayload.currentWorkspaceRelevantProcessEvents.find((memory) => memory.title === "Objective-only file event");
   assert.equal(Boolean(recalledProcessProjection?.detailSnippet), false);
@@ -2408,17 +2765,423 @@ async function testLlmMemoryContextUsesWorkspaceSessionRecall() {
     vectorEnabled: boolean;
     query: string;
     rawHitCount: number;
-    injectedPartitionCounts: { event: number; processEvent: number; skill: number };
-    hitIds: { resultEvents: string[]; processEvents: string[]; skills: string[] };
+    injectedPartitionCounts: { event: number; rollupEvent: number; processEvent: number; skill: number };
+    hitIds: { rollupEvents: string[]; resultEvents: string[]; processEvents: string[]; skills: string[] };
   };
   assert.equal(fileRecallMetadata.algorithm, "sqlite_fts_relation_version");
   assert.equal(fileRecallMetadata.vectorEnabled, false);
   assert.equal(fileRecallMetadata.query.includes("inspect file evidence"), true);
-  assert.equal(fileRecallMetadata.rawHitCount >= 2, true);
-  assert.equal(fileRecallMetadata.injectedPartitionCounts.event, 1);
+  assert.equal(fileRecallMetadata.rawHitCount >= 3, true);
+  assert.equal(fileRecallMetadata.injectedPartitionCounts.event, 2);
+  assert.equal(fileRecallMetadata.injectedPartitionCounts.rollupEvent, 1);
   assert.equal(fileRecallMetadata.injectedPartitionCounts.processEvent, 1);
   assert.equal(fileRecallMetadata.injectedPartitionCounts.skill, 1);
+  assert.equal(fileRecallMetadata.hitIds.rollupEvents.length, 1);
   assert.equal(fileRecallMetadata.hitIds.processEvents.length, 1);
+}
+
+async function testWorkspaceResourceLoaderInjectsZleapTemplatesAndSkills() {
+  const repos = createRepos();
+  const resourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "zleap-resources-"));
+  const globalRoot = await fs.mkdtemp(path.join(os.tmpdir(), "zleap-global-resources-"));
+  const previousResourceRoot = process.env.ZLEAP_RESOURCE_ROOT;
+  const previousGlobalResourceRoot = process.env.ZLEAP_GLOBAL_RESOURCE_ROOT;
+  try {
+    process.env.ZLEAP_RESOURCE_ROOT = resourceRoot;
+    process.env.ZLEAP_GLOBAL_RESOURCE_ROOT = globalRoot;
+    await writeTestFile(path.join(resourceRoot, ".zleap", "AGENTS.md"), "# Workspace Agents\nUse repo-local zleap instructions first.");
+    await writeTestFile(path.join(resourceRoot, ".zleap", "workspaces", "dev.md"), "# Dev Workspace\nUse read/edit/write/bash in the configured root.");
+    await writeTestFile(path.join(resourceRoot, "AGENTS.md"), "# Root Agents\nRoot fallback instructions.");
+    await writeTestFile(path.join(resourceRoot, "CLAUDE.md"), "This file must not be loaded by default.");
+    await writeTestFile(path.join(resourceRoot, ".zleap", "prompts", "fix.md"), [
+      "---",
+      "description: Fix a bug",
+      "argument-hint: <file> <issue>",
+      "---",
+      "Fix $1 using $@ and ${@:2}."
+    ].join("\n"));
+    await writeTestFile(path.join(resourceRoot, ".zleap", "prompts", "crlf.md"), [
+      "---",
+      "description: CRLF prompt",
+      "argument-hint: <target>",
+      "---",
+      "Fix CRLF $1."
+    ].join("\r\n"));
+    await writeTestFile(path.join(resourceRoot, ".zleap", "skills", "review", "SKILL.md"), [
+      "---",
+      "name: code-review",
+      "description: Review code changes",
+      "---",
+      "Review target $1 using $@.",
+      "Full review body should stay out of the default prompt index."
+    ].join("\n"));
+    await writeTestFile(path.join(resourceRoot, ".zleap", "skills", "crlf-review", "SKILL.md"), [
+      "---",
+      "name: crlf-review",
+      "description: CRLF review skill",
+      "---",
+      "CRLF review body."
+    ].join("\r\n"));
+    await writeTestFile(path.join(globalRoot, "skills", "release", "SKILL.md"), [
+      "---",
+      "name: release-check",
+      "description: Check release readiness",
+      "---",
+      "Global release skill body."
+    ].join("\n"));
+    await writeTestFile(path.join(globalRoot, "prompts", "global-fix.md"), [
+      "---",
+      "description: Global fix",
+      "argument-hint: <target>",
+      "---",
+      "Global fix $1"
+    ].join("\n"));
+
+    const parsed = parseMarkdownWithFrontmatter("---\ndescription: Demo\nargument-hint: <one>\n---\nBody");
+    assert.equal(parsed.frontmatter.description, "Demo");
+    assert.equal(parsed.frontmatter["argument-hint"], "<one>");
+    assert.equal(parsed.body, "Body");
+    const crlfParsed = parseMarkdownWithFrontmatter("---\r\ndescription: CRLF Demo\r\nargument-hint: <crlf>\r\n---\r\nCRLF Body");
+    assert.equal(crlfParsed.frontmatter.description, "CRLF Demo");
+    assert.equal(crlfParsed.frontmatter["argument-hint"], "<crlf>");
+    assert.equal(crlfParsed.body, "CRLF Body");
+    assert.equal(expandPromptTemplate("A=$1 B=$2 All=$@ Args=$ARGUMENTS Tail=${@:2} One=${@:2:1}", ["one", "two", "three"]), "A=one B=two All=one two three Args=one two three Tail=two three One=two");
+    assert.deepEqual(parseResourceCommand("/skill:review src/app.ts \"accessibility pass\""), {
+      kind: "filesystem_skill",
+      name: "review",
+      args: ["src/app.ts", "accessibility pass"]
+    });
+    assert.equal(parseResourceCommand("//fix src/app.ts"), undefined);
+    assert.equal(parseResourceCommand("/skill:../secret"), undefined);
+    assert.deepEqual(parseResourceCommand("/fix src/app.ts"), {
+      kind: "prompt_template",
+      name: "fix",
+      args: ["src/app.ts"]
+    });
+
+    const resources = loadWorkspaceResources({ conversationId: "conv-resource-loader", workspaceId: "dev" });
+    assert.deepEqual(resources.instructions.map((item) => item.kind), ["zleap_agents", "workspace_agents", "root_agents"]);
+    assert.equal(resources.instructions.some((item) => item.path === ".zleap/AGENTS.md" && item.content.includes("repo-local zleap")), true);
+    assert.equal(resources.instructions.some((item) => item.path === ".zleap/workspaces/dev.md" && item.content.includes("read/edit/write/bash")), true);
+    assert.equal(resources.promptTemplates.some((template) => template.name === "fix" && template.description === "Fix a bug" && template.argumentHint === "<file> <issue>"), true);
+    assert.equal(resources.promptTemplates.some((template) => template.name === "crlf" && template.description === "CRLF prompt" && template.argumentHint === "<target>"), true);
+    assert.equal(resources.promptTemplates.some((template) => template.name === "global-fix" && template.scope === "global"), true);
+    assert.equal(resources.filesystemSkills.some((skill) => skill.name === "code-review" && skill.scope === "workspace" && skill.description === "Review code changes"), true);
+    assert.equal(resources.filesystemSkills.some((skill) => skill.name === "crlf-review" && skill.scope === "workspace" && skill.description === "CRLF review skill"), true);
+    assert.equal(resources.filesystemSkills.some((skill) => skill.name === "release-check" && skill.scope === "global"), true);
+    assert.equal(resources.instructions.some((item) => item.path === "CLAUDE.md"), false);
+    assert.equal(resources.instructions.some((item) => item.content.includes("This file must not be loaded")), false);
+    assert.equal(JSON.stringify(resources).includes("Full review body"), false);
+    assert.equal(JSON.stringify(resources).includes("Global release skill body"), false);
+    const unsafeWorkspaceResources = loadWorkspaceResources({ conversationId: "conv-resource-loader", workspaceId: "../dev" });
+    assert.equal(unsafeWorkspaceResources.instructions.some((item) => item.kind === "workspace_agents"), false);
+    assert.equal(unsafeWorkspaceResources.skipped.some((item) => item.reason.includes("safe resource filename")), true);
+
+    const fake = new MainToFileExitToMainLLMClient();
+    const runtime = new AgentRuntime(repos, fake);
+    const output = await runtime.run({
+      agentId: "default-agent",
+      userId: "resource-user",
+      userRole: "creator",
+      conversationId: "conv-resource-loader",
+      message: "please inspect dev resources",
+      llm: {
+        baseUrl: "https://api.302ai.com",
+        model: "gpt-5-mini",
+        apiKey: "test-key"
+      }
+    });
+    const childResourcesMessage = fake.inputs[1]?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.resources");
+    assert.ok(childResourcesMessage);
+    const childResources = JSON.parse(childResourcesMessage.content ?? "{}") as WorkspaceResourcesPayloadForTest;
+    assert.equal(childResources.instructions.some((item) => item.kind === "workspace_agents" && item.content.includes("Dev Workspace")), true);
+    assert.equal(childResources.promptTemplates.some((template) => template.name === "fix"), true);
+    assert.equal(childResources.filesystemSkills.some((skill) => skill.name === "code-review"), true);
+    assert.equal(childResources.instructions.some((item) => item.path === "CLAUDE.md"), false);
+    assert.equal(output.contextSegments.some((segment) => segment.segmentType === "resources" && segment.content.includes("Workspace Agents")), true);
+
+    const templateFake = new FakeLLMClient();
+    const templateRuntime = new AgentRuntime(repos, templateFake);
+    await templateRuntime.run({
+      agentId: "default-agent",
+      userId: "resource-user",
+      userRole: "creator",
+      conversationId: "conv-resource-template",
+      message: "/fix src/app.ts \"broken layout\"",
+      llm: {
+        baseUrl: "https://api.302ai.com",
+        model: "gpt-5-mini",
+        apiKey: "test-key"
+      }
+    });
+    const expandedUserMessage = templateFake.lastInput?.messages.at(-1);
+    assert.equal(expandedUserMessage?.role, "user");
+    assert.equal(expandedUserMessage?.content, "Fix src/app.ts using src/app.ts broken layout and broken layout.");
+    const storedUserMessage = repos.listMessagesDetailed("conv-resource-template").find((message) => message.role === "user");
+    assert.equal(storedUserMessage?.content, "Fix src/app.ts using src/app.ts broken layout and broken layout.");
+    const rawStoredUserMessage = JSON.parse(storedUserMessage?.rawJson ?? "{}") as { promptTemplateExpansion?: { originalMessage?: string; templateName?: string } };
+    assert.equal(rawStoredUserMessage.promptTemplateExpansion?.originalMessage, "/fix src/app.ts \"broken layout\"");
+    assert.equal(rawStoredUserMessage.promptTemplateExpansion?.templateName, "fix");
+    const templateTrace = repos.getTrace("conv-resource-template", "creator", "creator");
+    assert.equal(templateTrace.auditLogs.some((log) => log.action === "prompt_template_expanded" && log.metadataJson.includes("\"templateName\":\"fix\"")), true);
+
+    const skillFake = new FakeLLMClient();
+    const skillRuntime = new AgentRuntime(repos, skillFake);
+    await skillRuntime.run({
+      agentId: "default-agent",
+      userId: "resource-user",
+      userRole: "creator",
+      conversationId: "conv-resource-skill",
+      message: "/skill:review src/app.ts \"accessibility pass\"",
+      llm: {
+        baseUrl: "https://api.302ai.com",
+        model: "gpt-5-mini",
+        apiKey: "test-key"
+      }
+    });
+    const expandedSkillMessage = skillFake.lastInput?.messages.at(-1);
+    assert.equal(expandedSkillMessage?.role, "user");
+    assert.equal(expandedSkillMessage?.content?.includes("Apply filesystem skill: code-review"), true);
+    assert.equal(expandedSkillMessage?.content?.includes("Skill path: .zleap/skills/review/SKILL.md"), true);
+    assert.equal(expandedSkillMessage?.content?.includes("Arguments: src/app.ts accessibility pass"), true);
+    assert.equal(expandedSkillMessage?.content?.includes("Review target src/app.ts using src/app.ts accessibility pass."), true);
+    const storedSkillMessage = repos.listMessagesDetailed("conv-resource-skill").find((message) => message.role === "user");
+    const rawStoredSkillMessage = JSON.parse(storedSkillMessage?.rawJson ?? "{}") as { promptTemplateExpansion?: { originalMessage?: string; resourceKind?: string; templateName?: string; templatePath?: string } };
+    assert.equal(rawStoredSkillMessage.promptTemplateExpansion?.originalMessage, "/skill:review src/app.ts \"accessibility pass\"");
+    assert.equal(rawStoredSkillMessage.promptTemplateExpansion?.resourceKind, "filesystem_skill");
+    assert.equal(rawStoredSkillMessage.promptTemplateExpansion?.templateName, "code-review");
+    assert.equal(rawStoredSkillMessage.promptTemplateExpansion?.templatePath, ".zleap/skills/review/SKILL.md");
+    const skillTrace = repos.getTrace("conv-resource-skill", "creator", "creator");
+    assert.equal(skillTrace.auditLogs.some((log) => log.action === "filesystem_skill_expanded" && log.metadataJson.includes("\"resourceKind\":\"filesystem_skill\"")), true);
+  } finally {
+    if (previousResourceRoot === undefined) delete process.env.ZLEAP_RESOURCE_ROOT;
+    else process.env.ZLEAP_RESOURCE_ROOT = previousResourceRoot;
+    if (previousGlobalResourceRoot === undefined) delete process.env.ZLEAP_GLOBAL_RESOURCE_ROOT;
+    else process.env.ZLEAP_GLOBAL_RESOURCE_ROOT = previousGlobalResourceRoot;
+  }
+}
+
+type WorkspaceResourcesPayloadForTest = {
+  instructions: Array<{ kind: string; path: string; content: string }>;
+  promptTemplates: Array<{ name: string; description?: string; argumentHint?: string }>;
+  filesystemSkills: Array<{ name: string; description?: string; scope: string }>;
+  extensionPromptTemplates?: Array<{ name: string; description?: string; scope: string; extensionId: string }>;
+  extensionFilesystemSkills?: Array<{ name: string; description?: string; scope: string; extensionId: string }>;
+  extensionSafeContext?: Array<{ title: string; content: string; extensionId: string }>;
+};
+
+type RuntimeToolsPayloadForTest = {
+  activeWorkspaceId: string;
+  toolCount: number;
+  tools: Array<{
+    name: string;
+    summary?: string;
+    guidelines?: string[];
+    executionMode?: string;
+    riskLevel?: string;
+    bindingType?: string;
+    mcpServerId?: string;
+    mcpToolName?: string;
+    parametersJson?: unknown;
+    bindingJson?: unknown;
+  }>;
+};
+
+async function testSafeExtensionBoundaryRegistersToolsResourcesAndLifecycle() {
+  const repos = createRepos();
+  const registry = new SafeExtensionRegistry();
+  assert.throws(() => registry.register({
+    id: "reserved-extension",
+    name: "Reserved Extension",
+    tools: [{
+      name: "read",
+      workspaceId: "main",
+      description: "Attempt to override read.",
+      parametersJson: JSON.stringify({ type: "object", properties: {}, additionalProperties: false }),
+      execute: () => ({})
+    }]
+  }), /reserved runtime tool/);
+
+  const lifecycleHooks: string[] = [];
+  const lifecycleEvents: Array<{ hook: string; metadata: Record<string, unknown> }> = [];
+  registry.register({
+    id: "safe-demo",
+    name: "Safe Demo",
+    tools: [
+      {
+        name: "extensionEcho",
+        workspaceId: "main",
+        description: "Echo a short string through a safe extension tool.",
+        promptSnippet: "Echo extension input",
+        promptGuidelinesJson: JSON.stringify(["Use only when extension echo is explicitly useful."]),
+        parametersJson: JSON.stringify({
+          type: "object",
+          properties: {
+            text: { type: "string" }
+          },
+          required: ["text"],
+          additionalProperties: false
+        }),
+        execute: ({ args }) => ({ echo: String(args.text ?? "") })
+      },
+      {
+        name: "extensionSummary",
+        workspaceId: "main",
+        description: "Summarize extension input.\nUse this only for a concise custom-tool check.",
+        parametersJson: JSON.stringify({
+          type: "object",
+          properties: {
+            text: { type: "string", description: "SCHEMA_SHOULD_NOT_ENTER_RUNTIME_CONTEXT" }
+          },
+          required: ["text"],
+          additionalProperties: false
+        }),
+        execute: ({ args }) => ({ summary: String(args.text ?? "").slice(0, 24) })
+      }
+    ],
+    promptTemplates: [{ name: "extension-plan", description: "Plan through extension" }],
+    filesystemSkills: [{ name: "extension-skill", description: "Safe extension skill index" }],
+    safeContext: [{ title: "Extension Notice", content: "SAFE_EXTENSION_CONTEXT_SHOULD_ONLY_APPEAR_IN_RESOURCES", workspaceId: "main" }],
+    onLifecycleEvent: (event) => {
+      assert.equal(Object.isFrozen(event), true);
+      assert.equal(Object.isFrozen(event.metadata), true);
+      lifecycleHooks.push(event.hook);
+      lifecycleEvents.push({ hook: event.hook, metadata: { ...event.metadata } });
+      if (event.hook === "afterAgentTurn" && event.metadata.streamed !== true) {
+        return {
+          workspaceId: event.workspaceId,
+          title: "Extension lifecycle note",
+          payload: {
+            marker: "SAFE_EXTENSION_CUSTOM_SESSION_ENTRY",
+            observedHook: event.hook
+          }
+        };
+      }
+    }
+  });
+
+  let calls = 0;
+  const extensionLlm: LLMClient = {
+    async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
+      calls += 1;
+      if (calls === 1) {
+        assert.equal(input.tools.some((tool) => tool.name === "extensionEcho"), true);
+        const extensionTool = input.tools.find((tool) => tool.name === "extensionEcho");
+        assert.equal(extensionTool?.promptSnippet, "Echo extension input");
+        const summaryTool = input.tools.find((tool) => tool.name === "extensionSummary");
+        assert.equal(summaryTool?.parametersJson.includes("SCHEMA_SHOULD_NOT_ENTER_RUNTIME_CONTEXT"), true);
+        assert.equal(summaryTool?.promptSnippet, "Summarize extension input. Use this only for a concise custom-tool check.");
+        const systemMessage = input.messages.find((message) => message.role === "system");
+        assert.equal((systemMessage?.content ?? "").includes("SAFE_EXTENSION_CONTEXT_SHOULD_ONLY_APPEAR_IN_RESOURCES"), false);
+        assert.equal((systemMessage?.content ?? "").includes("- extensionEcho: Echo extension input"), true);
+        assert.equal((systemMessage?.content ?? "").includes("Use only when extension echo is explicitly useful."), true);
+        assert.equal((systemMessage?.content ?? "").includes("- extensionSummary: Summarize extension input. Use this only for a concise custom-tool check."), true);
+        assert.equal((systemMessage?.content ?? "").includes("SCHEMA_SHOULD_NOT_ENTER_RUNTIME_CONTEXT"), false);
+        assert.equal((systemMessage?.content ?? "").includes("\"parametersJson\""), false);
+        const resourcesMessage = input.messages.find((message) => message.role === "tool" && message.name === "runtime_context.resources");
+        assert.ok(resourcesMessage);
+        const resources = JSON.parse(resourcesMessage.content ?? "{}") as WorkspaceResourcesPayloadForTest;
+        assert.equal(resources.extensionPromptTemplates?.some((template) => template.name === "extension-plan" && template.extensionId === "safe-demo"), true);
+        assert.equal(resources.extensionFilesystemSkills?.some((skill) => skill.name === "extension-skill" && skill.extensionId === "safe-demo"), true);
+        assert.equal(resources.extensionSafeContext?.some((context) => context.content.includes("SAFE_EXTENSION_CONTEXT")), true);
+        const toolsMessage = input.messages.find((message) => message.role === "tool" && message.name === "runtime_context.tools");
+        assert.ok(toolsMessage);
+        const toolsPayload = JSON.parse(toolsMessage.content ?? "{}") as RuntimeToolsPayloadForTest;
+        const extensionSummaryContext = toolsPayload.tools.find((tool) => tool.name === "extensionSummary");
+        assert.equal(extensionSummaryContext?.summary, "Summarize extension input. Use this only for a concise custom-tool check.");
+        assert.equal(extensionSummaryContext?.executionMode, "parallel");
+        assert.equal(extensionSummaryContext?.bindingType, "runtime");
+        assert.equal(toolsMessage.content?.includes("SCHEMA_SHOULD_NOT_ENTER_RUNTIME_CONTEXT"), false);
+        assert.equal(toolsMessage.content?.includes("\"parametersJson\""), false);
+        assert.equal(toolsMessage.content?.includes("\"bindingJson\""), false);
+        return {
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: "call-extension-echo",
+              type: "function",
+              function: {
+                name: "extensionEcho",
+                arguments: JSON.stringify({ text: "hello extension" })
+              }
+            }]
+          },
+          raw: { step: 1 }
+        };
+      }
+      const toolMessage = input.messages.find((message) => message.role === "tool" && message.name === "extensionEcho");
+      assert.equal((toolMessage?.content ?? "").includes("hello extension"), true);
+      return {
+        message: {
+          role: "assistant",
+          content: "extension completed"
+        },
+        raw: { step: 2 }
+      };
+    }
+  };
+
+  const runtime = new AgentRuntime(repos, extensionLlm, registry);
+  const output = await runtime.run({
+    agentId: "default-agent",
+    userId: "extension-user",
+    userRole: "creator",
+    conversationId: "conv-safe-extension",
+    message: "use extension echo",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  assert.equal(output.assistantMessage, "extension completed");
+  assert.equal(lifecycleHooks.includes("beforeAgentTurn"), true);
+  assert.equal(lifecycleHooks.includes("afterAgentTurn"), true);
+  const trace = repos.getTrace("conv-safe-extension", "creator", "creator");
+  assert.equal(trace.toolCalls.some((toolCall) => toolCall.toolName === "extensionEcho" && toolCall.status === "completed"), true);
+  assert.equal(trace.auditLogs.some((log) => log.action === "extension_tool_executed" && log.resourceId === "extension:safe-demo:tool:extensionEcho"), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "resources" && segment.content.includes("SAFE_EXTENSION_CONTEXT")), true);
+  assert.equal(trace.contextSegments.some((segment) => segment.segmentType === "system" && segment.content.includes("SAFE_EXTENSION_CONTEXT")), false);
+  const customEntry = trace.sessionEntries.find((entry) => entry.type === "custom" && entry.payloadJson.includes("SAFE_EXTENSION_CUSTOM_SESSION_ENTRY"));
+  assert.equal(Boolean(customEntry), true);
+  assert.equal(customEntry?.payloadJson.includes("\"extensionId\":\"safe-demo\""), true);
+  assert.equal(customEntry?.payloadJson.includes("\"hook\":\"afterAgentTurn\""), true);
+
+  lifecycleHooks.length = 0;
+  lifecycleEvents.length = 0;
+  const streamExtensionLlm: LLMClient = {
+    async complete(): Promise<ChatCompletionOutput> {
+      throw new Error("stream extension test should not call complete");
+    },
+    async *streamEvents(): AsyncGenerator<LLMStreamEvent> {
+      yield { type: "content", text: "stream extension completed" };
+      yield { type: "done", raw: { streamed: true } };
+    }
+  };
+  const streamRuntime = new AgentRuntime(repos, streamExtensionLlm, registry);
+  const streamEvents: AgentStreamEvent[] = [];
+  for await (const event of streamRuntime.runStream({
+    agentId: "default-agent",
+    userId: "extension-user",
+    userRole: "creator",
+    conversationId: "conv-safe-extension-stream",
+    message: "stream extension lifecycle",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  })) {
+    streamEvents.push(event);
+  }
+  const streamDone = streamEvents.at(-1);
+  assert.equal(streamDone?.type, "done");
+  if (streamDone?.type === "done") assert.equal(streamDone.output.assistantMessage, "stream extension completed");
+  assert.equal(lifecycleHooks.includes("beforeAgentTurn"), true);
+  assert.equal(lifecycleHooks.includes("afterAgentTurn"), true);
+  const streamAfterLifecycle = lifecycleEvents.find((event) => event.hook === "afterAgentTurn");
+  assert.equal(streamAfterLifecycle?.metadata.streamed, true);
 }
 
 async function testMemoryRecallAuditLogsZeroHits() {
@@ -2446,13 +3209,13 @@ async function testMemoryRecallAuditLogsZeroHits() {
     vectorEnabled: boolean;
     rawHitCount: number;
     injectedHitCount: number;
-    injectedPartitionCounts: { impression: number; event: number; resultEvent: number; processEvent: number; skill: number };
+    injectedPartitionCounts: { impression: number; event: number; rollupEvent: number; resultEvent: number; processEvent: number; skill: number };
   };
   assert.equal(metadata.algorithm, "sqlite_fts_relation_version");
   assert.equal(metadata.vectorEnabled, false);
   assert.equal(metadata.rawHitCount, 0);
   assert.equal(metadata.injectedHitCount, 0);
-  assert.deepEqual(metadata.injectedPartitionCounts, { impression: 0, event: 0, resultEvent: 0, processEvent: 0, skill: 0 });
+  assert.deepEqual(metadata.injectedPartitionCounts, { impression: 0, event: 0, rollupEvent: 0, resultEvent: 0, processEvent: 0, skill: 0 });
 }
 
 async function testAuditLogsStayOutOfModelContext() {
@@ -2483,6 +3246,100 @@ async function testAuditLogsStayOutOfModelContext() {
   assert.equal(trace.auditLogs.some((log) => log.action === "audit_only_secret_marker"), true);
   assert.equal(JSON.stringify(fake.lastInput?.messages ?? []).includes("AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT"), false);
   assert.equal(trace.contextSegments.some((segment) => segment.content.includes("AUDIT_ONLY_MARKER_SHOULD_NOT_ENTER_MODEL_CONTEXT")), false);
+}
+
+async function testSessionEntriesRebuildMainHistoryAfterLegacyMessagesDeleted() {
+  const repos = createRepos();
+  const conversationId = "conv-session-entry-history";
+  repos.ensureConversation(conversationId, "default-agent", "session-entry-user");
+  const oldUserMessageId = repos.addMessage(conversationId, "user", "session-entry old user request");
+  const oldAssistantMessageId = repos.addMessage(conversationId, "assistant", "session-entry old assistant answer");
+  repos.deleteMessage(oldUserMessageId);
+  repos.deleteMessage(oldAssistantMessageId);
+
+  const reconstructed = repos.reconstructSessionEntryContext({
+    conversationId,
+    userId: "session-entry-user",
+    limit: 10
+  });
+  assert.equal(reconstructed.some((message) => message.sourceType === "message" && message.content === "session-entry old user request"), true);
+  assert.equal(reconstructed.some((message) => message.sourceType === "message" && message.content === "session-entry old assistant answer"), true);
+  assert.equal(repos.listMessages(conversationId, 20).some((message) => message.content.includes("session-entry old")), false);
+
+  const fake = new FakeLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "session-entry-user",
+    userRole: "creator",
+    conversationId,
+    message: "new request after legacy rows were removed",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+
+  const historyToolMessage = fake.lastInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.local_conversation");
+  const historyContent = historyToolMessage?.content ?? "";
+  assert.equal(historyContent.includes("session-entry old user request"), true);
+  assert.equal(historyContent.includes("session-entry old assistant answer"), true);
+  const chain = repos.listSessionEntryMainChain(conversationId, "session-entry-user");
+  assert.equal(chain.length >= 4, true);
+  assert.equal(chain.at(-1)?.parentId === chain.at(-2)?.id, true);
+}
+
+async function testSessionEntriesRecordModelChanges() {
+  const repos = createRepos();
+  const conversationId = "conv-session-model-change";
+  const fake = new FakeLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "model-change-user",
+    userRole: "creator",
+    conversationId,
+    message: "first model turn",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+  await runtime.run({
+    agentId: "default-agent",
+    userId: "model-change-user",
+    userRole: "creator",
+    conversationId,
+    message: "second model turn",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-large",
+      apiKey: "test-key"
+    }
+  });
+
+  const trace = repos.getTrace(conversationId, "creator", "creator");
+  const modelChangeEntries = trace.sessionEntries.filter((entry) => entry.type === "model_change");
+  assert.equal(modelChangeEntries.length, 1);
+  const payload = JSON.parse(modelChangeEntries[0].payloadJson) as {
+    previousLlmCallId?: string;
+    nextLlmCallId?: string;
+    from?: { model?: string; normalizedEndpoint?: string };
+    to?: { model?: string; normalizedEndpoint?: string };
+  };
+  assert.equal(payload.from?.model, "gpt-5-mini");
+  assert.equal(payload.to?.model, "gpt-5-large");
+  assert.equal(payload.from?.normalizedEndpoint, "https://api.302ai.com/v1/chat/completions");
+  assert.equal(payload.to?.normalizedEndpoint, "https://api.302ai.com/v1/chat/completions");
+  assert.equal(Boolean(payload.previousLlmCallId), true);
+  assert.equal(Boolean(payload.nextLlmCallId), true);
+  const chain = repos.listSessionEntryMainChain(conversationId, "model-change-user");
+  const modelChangeIndex = chain.findIndex((entry) => entry.id === modelChangeEntries[0].id);
+  assert.equal(modelChangeIndex > 0, true);
+  assert.equal(chain[modelChangeIndex + 1]?.type, "llm_call");
+  assert.equal(chain[modelChangeIndex + 1]?.parentId, modelChangeEntries[0].id);
 }
 
 async function testAttentionBudgetTrimsHistoryButKeepsJson() {
@@ -2615,8 +3472,8 @@ async function testWorkspaceExitReturnsToMain() {
     workspaceId: "dev",
     workspaceSessionId: "old-file-session",
     taskId: "old-file-task",
-    toolName: "searchFiles",
-    argumentsJson: JSON.stringify({ query: "old evidence" }),
+    toolName: "bash",
+    argumentsJson: JSON.stringify({ command: "rg 'old evidence' ." }),
     resultJson: JSON.stringify({ ok: true, results: ["old-result"] }),
     status: "completed"
   });
@@ -2688,7 +3545,7 @@ async function testWorkspaceExitReturnsToMain() {
   assert.equal(Boolean(autoSkill), false);
   const fileSession = output.workspaceTrace.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.result.summary, "File workspace inspected available evidence.");
-  assert.equal(fileSession?.result.observations.includes("File workspace had searchFiles available."), true);
+  assert.equal(fileSession?.result.observations.includes("File workspace had read/write/edit/bash available."), true);
 
   const trace = repos.getTrace("conv-workspace-exit", "creator", "creator");
   assert.equal(trace.llmCalls.length, 3);
@@ -2799,7 +3656,7 @@ async function testInterruptedChildWorkspaceResumesBeforeMain() {
     .find((segment) => segment.content.includes("\"id\":\"dev\"") || segment.content.includes("\"id\": \"dev\""));
   assert.equal(Boolean(firstRunWorkspaceSegment), true);
   const firstRunToolsSegment = trace.contextSegments.find((segment) => segment.llmCallId === firstRunWorkspaceSegment?.llmCallId && segment.segmentType === "tools");
-  assert.equal(firstRunToolsSegment?.content.includes("writeFile"), true);
+  assert.equal(firstRunToolsSegment?.content.includes("\"name\": \"write\""), true);
   assert.equal(firstRunToolsSegment?.content.includes("enterWorkspace"), false);
 }
 
@@ -2849,10 +3706,10 @@ async function testWorkspaceExitHookRunsOncePerSuccessfulExitToolCall() {
   const trace = repos.getTrace("conv-single-exit-hook", "creator", "creator");
   const fileSession = trace.sessions.find((session) => session.workspaceId === "dev");
   assert.equal(fileSession?.status, "completed");
-  assert.equal(trace.toolCalls.some((call) => call.toolName === "searchFiles" && call.status === "failed"), true);
-  const postExitSearch = trace.toolCalls.find((call) => call.toolName === "searchFiles");
-  assert.equal(postExitSearch?.resultJson.includes("already exited"), true);
-  assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles"), false);
+  assert.equal(trace.toolCalls.some((call) => call.toolName === "bash" && call.status === "failed"), true);
+  const postExitBash = trace.toolCalls.find((call) => call.toolName === "bash");
+  assert.equal(postExitBash?.resultJson.includes("already exited"), true);
+  assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "bash"), false);
   assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExit" && log.workspaceId === "dev").length, 1);
   assert.equal(trace.auditLogs.filter((log) => log.action === "hook.afterWorkspaceExitEventExtraction" && log.workspaceId === "dev").length, 2);
   assert.equal(trace.auditLogs.filter((log) => log.action === "skill_usage_recorded" && log.resourceId === recalledSkill.id).length, 1);
@@ -2948,7 +3805,8 @@ async function testWorkspaceSessionLocalToolCallsAreSessionScoped() {
     }
   });
 
-  assert.equal(fake.calls, 5);
+  assert.equal(fake.agentCalls, 5);
+  assert.equal(fake.rollupCalls, 1);
   assert.equal(output.workspaceTrace.filter((session) => session.workspaceId === "dev").length, 2);
   const firstFileSession = output.workspaceTrace.filter((session) => session.workspaceId === "dev")[0];
   const secondFileSession = output.workspaceTrace.filter((session) => session.workspaceId === "dev")[1];
@@ -3043,7 +3901,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
       apiKey: "test-key"
     }
   });
-  const cappedFileInput = cappedFake.inputs.find((input) => input.tools.some((tool) => tool.name === "searchFiles"));
+  const cappedFileInput = cappedFake.inputs.find((input) => input.tools.some((tool) => tool.name === "bash"));
   const cappedMemoryMessage = cappedFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const cappedMemoryPayload = JSON.parse(cappedMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceResultEvents: unknown[]; currentWorkspaceRelevantProcessEvents: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(cappedMemoryPayload.crossWorkspaceImpressionMemory.length, 1);
@@ -3071,7 +3929,7 @@ async function testWorkspaceMemoryPolicyControlsRecall() {
       apiKey: "test-key"
     }
   });
-  const disabledFileInput = disabledFake.inputs.find((input) => input.tools.some((tool) => tool.name === "searchFiles"));
+  const disabledFileInput = disabledFake.inputs.find((input) => input.tools.some((tool) => tool.name === "bash"));
   const disabledMemoryMessage = disabledFileInput?.messages.find((message) => message.role === "tool" && message.name === "runtime_context.memory");
   const disabledMemoryPayload = JSON.parse(disabledMemoryMessage?.content ?? "{}") as { crossWorkspaceImpressionMemory: unknown[]; currentWorkspaceResultEvents: unknown[]; currentWorkspaceRelevantProcessEvents: unknown[]; currentWorkspaceSkillMemory: unknown[] };
   assert.equal(disabledMemoryPayload.crossWorkspaceImpressionMemory.length, 1);
@@ -3451,10 +4309,21 @@ async function testRuntimeStreaming() {
   assert.equal(events.some((event) => event.type === "delta"), true);
   const done = events.at(-1);
   assert.equal(done?.type, "done");
-  if (done?.type === "done") assert.equal(done.output.assistantMessage, "fake stream");
+  if (done?.type === "done") {
+    assert.equal(done.output.assistantMessage, "fake stream");
+    assert.equal(done.output.finalMessages.at(-1)?.role, "assistant");
+    assert.equal(done.output.finalMessages.at(-1)?.content, "fake stream");
+  }
   const trace = repos.getTrace("conv-stream", "creator", "creator");
   assert.equal(trace.llmCalls[0].status, "completed");
   assert.equal(trace.llmCalls[0].responseJson.includes("returnedTextLength"), true);
+  const assistantDeltaEntry = trace.sessionEntries.find((entry) => entry.type === "assistant_delta");
+  assert.equal(Boolean(assistantDeltaEntry), true);
+  assert.equal(assistantDeltaEntry?.workspaceId, "main");
+  const assistantDeltaPayload = JSON.parse(assistantDeltaEntry?.payloadJson ?? "{}") as { source?: string; text?: string; textLength?: number };
+  assert.equal(assistantDeltaPayload.source, "chunkStream.final");
+  assert.equal(assistantDeltaPayload.text, "fake stream");
+  assert.equal(assistantDeltaPayload.textLength, "fake stream".length);
 }
 
 async function testMemoryLifecycleHooks() {
@@ -3653,6 +4522,18 @@ async function testConversationWindowEventExtractionUsesAbsoluteWindows() {
   });
 
   assert.equal(writes.some((memory) => memory.relationId === "event:long-window-user:agent:default-agent:main:conv-long-memory-window:window:26:result"), true);
+  const rollup = writes.find((memory) => metadataOf(memory).eventKind === "rollup");
+  assert.equal(Boolean(rollup), true);
+  assert.equal(metadataOf(rollup!).source, "eventRollup");
+  assert.equal(metadataOf(rollup!).rollupMode, "event_projection");
+  assert.equal(metadataOf(rollup!).rollupModel, "active-runtime-model");
+  assert.equal(metadataOf(rollup!).sourceEventIds.length, 12);
+  assert.equal(metadataSourceIds(rollup!, "memories").length, 12);
+  assert.equal(rollup!.detail.includes("Workspace Event Rollup"), true);
+  assert.equal(rollup!.detail.includes("Memory Links"), true);
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.equal(rollup!.metadataJson.includes(`"${key}"`), false, `rollup metadata should not contain raw payload key ${key}`);
+  }
   const resultEvent = repos.getMemoryByRelation(
     "event",
     "event:long-window-user:agent:default-agent:main:conv-long-memory-window:window:26:result",
@@ -3663,6 +4544,186 @@ async function testConversationWindowEventExtractionUsesAbsoluteWindows() {
   assert.equal(metadataSourceIds(resultEvent!, "messages").length, 20);
   assert.equal(Object.prototype.hasOwnProperty.call(metadataOf(resultEvent!), "messageCount"), false);
   assert.equal(repos.listMemories({ memoryType: "event", userId: "long-window-user", workspaceId: "main" }).filter((memory) => metadataOf(memory).eventKind === "result").length, 26);
+  const recalled = repos.recallMemories({
+    userId: "long-window-user",
+    agentId: "default-agent",
+    workspaceId: "main",
+    query: "long-window followup",
+    resultEventLimit: 0,
+    processEventLimit: 0,
+    skillLimit: 0
+  });
+  assert.equal(recalled[0]?.id, rollup!.id);
+  const recallSession = new WorkspaceRuntime(repos).run({
+    run: {
+      agentId: "default-agent",
+      userId: "long-window-user",
+      userRole: "user",
+      conversationId: "conv-long-memory-window",
+      message: "long-window followup"
+    },
+    workspaceId: "main",
+    objective: "long-window followup"
+  });
+  assert.equal(recallSession.localContext.recalledEventMemories.some((memory) => memory.id === rollup!.id), true);
+  const trace = repos.getTrace("conv-long-memory-window", "creator", "creator");
+  const auditLogs = repos.listAuditLogs({ conversationId: "conv-long-memory-window", limit: 200 });
+  assert.equal(auditLogs.some((log) => log.action === "hook.afterEventRollup" && log.resourceId === rollup!.id), true);
+  assert.equal(trace.sessionEntries.some((entry) => entry.type === "event_rollup" && entry.payloadJson.includes(rollup!.id)), true);
+}
+
+async function testRuntimeEventRollupUsesActiveModelProjectionInput() {
+  const repos = createRepos();
+  repos.ensureConversation("conv-active-model-rollup", "default-agent", "active-rollup-user");
+  for (let index = 1; index <= 4; index += 1) {
+    repos.createMemory({
+      memoryType: "event",
+      userId: "active-rollup-user",
+      agentId: "default-agent",
+      workspaceId: "main",
+      relationId: `event:active-rollup-user:agent:default-agent:main:fixture:${index}`,
+      title: `Fixture event ${index}`,
+      summary: `Projected event summary ${index}`,
+      detail: `Raw detail that must not be sent to the active rollup model ${index}`,
+      metadataJson: JSON.stringify({
+        source: "fixture",
+        eventKind: index % 2 === 0 ? "result" : "process",
+        taskId: `fixture-task-${index}`,
+        outcome: index % 2 === 0 ? "success" : "running",
+        sourceRefs: [{ table: "messages", ids: [`msg-fixture-${index}`] }]
+      })
+    }, "active-rollup-user", "creator");
+  }
+
+  const rollupInputs: ChatCompletionInput[] = [];
+  const llm: LLMClient = {
+    async complete(input: ChatCompletionInput): Promise<ChatCompletionOutput> {
+      const systemText = input.messages.find((message) => message.role === "system")?.content ?? "";
+      if (String(systemText).includes("event memory rollups")) {
+        rollupInputs.push(input);
+        return {
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              summary: "Active model rollup summary",
+              detail: [
+                "Workspace Event Rollup",
+                "",
+                "Scope",
+                "- userId: active-rollup-user",
+                "- workspaceId: main",
+                "- relation/window: fixture",
+                "",
+                "Stable Facts",
+                "- Active model saw projected process facts only.",
+                "",
+                "Recent Outcomes",
+                "- Active model saw projected result outcomes only.",
+                "",
+                "Open Threads",
+                "- running: Projected event summary 1",
+                "",
+                "Tool/File Evidence References",
+                "- messages: 4 source id reference(s)",
+                "",
+                "Memory Links",
+                "- projected source event ids"
+              ].join("\n")
+            })
+          },
+          raw: { fixture: "rollup" },
+          usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, providerUsage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }
+        };
+      }
+      return {
+        message: { role: "assistant", content: "normal assistant response" },
+        raw: { fixture: "assistant" }
+      };
+    }
+  };
+  const runtime = new AgentRuntime(repos, llm);
+  const output = await runtime.run({
+    agentId: "default-agent",
+    userId: "active-rollup-user",
+    userRole: "creator",
+    conversationId: "conv-active-model-rollup",
+    message: "continue",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+
+  assert.equal(rollupInputs.length, 1);
+  assert.equal(rollupInputs[0].tools.length, 0);
+  const rollupPromptPayload = String(rollupInputs[0].messages.find((message) => message.role === "user")?.content ?? "");
+  const projected = JSON.parse(rollupPromptPayload) as { projections: Array<Record<string, unknown>>; sourceEventIds: string[] };
+  assert.equal(projected.sourceEventIds.length, 4);
+  assert.equal(projected.projections.length, 4);
+  assert.equal(projected.projections.every((projection) => typeof projection.summary === "string" && typeof projection.id === "string"), true);
+  assert.equal(rollupPromptPayload.includes("Raw detail that must not be sent"), false);
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.equal(rollupPromptPayload.includes(`"${key}":`), false, `active rollup prompt should not contain raw payload key ${key}`);
+  }
+
+  const rollup = output.memoryWrites.find((memory) => metadataOf(memory).eventKind === "rollup");
+  assert.equal(Boolean(rollup), true);
+  assert.equal(rollup!.summary, "Active model rollup summary");
+  assert.equal(rollup!.detail.includes("Active model saw projected process facts only."), true);
+  assert.equal(metadataOf(rollup!).rollupMode, "active_model_event_projection");
+  assert.equal(metadataOf(rollup!).rollupModel, "gpt-5-mini");
+  assert.equal(metadataOf(rollup!).sourceEventIds.length, 4);
+  assert.equal(metadataSourceIds(rollup!, "memories").length, 4);
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.equal(rollup!.metadataJson.includes(`"${key}"`), false, `rollup metadata should not contain raw payload key ${key}`);
+  }
+  const service = new MemoryService(repos);
+  const readRollup = service.executeMemoryTool({
+    run: {
+      agentId: "default-agent",
+      userId: "active-rollup-user",
+      userRole: "creator",
+      conversationId: "conv-active-model-rollup",
+      message: "read rollup"
+    },
+    activeWorkspaceId: "main",
+    toolName: "readMemory",
+    argumentsJson: JSON.stringify({ memoryId: rollup!.id })
+  });
+  assert.equal(readRollup.ok, true);
+  const readRollupMemory = (readRollup.result as { memory: Record<string, any> }).memory;
+  assert.equal(readRollupMemory.eventKind, "rollup");
+  assert.equal(readRollupMemory.rollupMode, "active_model_event_projection");
+  assert.equal(readRollupMemory.rollupModel, "gpt-5-mini");
+  assert.equal(readRollupMemory.sourceEventIds.length, 4);
+  assert.equal(readRollupMemory.sourceRefs[0].table, "memories");
+  assert.equal(readRollupMemory.sourceRefs[0].ids.length, 4);
+  assert.equal(JSON.stringify(readRollupMemory).includes("Raw detail that must not be sent"), false);
+  for (const key of RAW_MEMORY_METADATA_PAYLOAD_KEYS) {
+    assert.equal(JSON.stringify(readRollupMemory).includes(`"${key}":`), false, `readMemory rollup result should not contain raw payload key ${key}`);
+  }
+  const readSourceEvent = service.executeMemoryTool({
+    run: {
+      agentId: "default-agent",
+      userId: "active-rollup-user",
+      userRole: "creator",
+      conversationId: "conv-active-model-rollup",
+      message: "read source event"
+    },
+    activeWorkspaceId: "main",
+    toolName: "readMemory",
+    argumentsJson: JSON.stringify({ memoryId: readRollupMemory.sourceEventIds[0] })
+  });
+  assert.equal(readSourceEvent.ok, true);
+  const readSourceEventMemory = (readSourceEvent.result as { memory: Record<string, any> }).memory;
+  assert.equal(readSourceEventMemory.eventKind, "process");
+  assert.equal(readSourceEventMemory.detail.includes("Raw detail that must not be sent to the active rollup model 1"), true);
+  assert.equal(readSourceEventMemory.sourceRefs[0].table, "messages");
+  assert.equal(readSourceEventMemory.sourceRefs[0].ids[0], "msg-fixture-1");
+  const auditLogs = repos.listAuditLogs({ conversationId: "conv-active-model-rollup", limit: 200 });
+  assert.equal(auditLogs.some((log) => log.action === "event_rollup_llm_completed" && log.resourceId === rollup!.id), true);
+  assert.equal(auditLogs.some((log) => log.action === "hook.afterEventRollup" && log.resourceId === rollup!.id), true);
 }
 
 async function testStreamingConversationWindowMemoryIncludesAssistantMessage() {
@@ -3935,6 +4996,8 @@ async function testMultiStepToolLoop() {
   });
 
   assert.equal(output.assistantMessage, "multi-step final");
+  assert.equal(output.finalMessages.at(-1)?.role, "assistant");
+  assert.equal(output.finalMessages.at(-1)?.content, "multi-step final");
   assert.equal(fake.calls, 3);
   assert.equal(output.memoryWrites.filter((memory) => memory.memoryType === "impression").length, 2);
   assert.equal(output.finalMessages.filter((message) => message.role === "tool" && message.name === "writeUserImpression").length, 2);
@@ -4034,6 +5097,10 @@ async function testStreamingToolRoundTextIsNotLeaked() {
   assert.equal(trace.llmCalls.some((call) => call.responseJson.includes("internal workspace routing text")), true);
   assert.equal(trace.llmCalls.every((call) => call.providerBaseUrl === "https://api.302ai.com"), true);
   assert.equal(trace.llmCalls.every((call) => call.normalizedEndpoint === "https://api.302ai.com/v1/chat/completions"), true);
+  const deltaEntries = trace.sessionEntries.filter((entry) => entry.type === "assistant_delta");
+  assert.equal(deltaEntries.length, 1);
+  assert.equal(deltaEntries[0].payloadJson.includes("final user answer"), true);
+  assert.equal(deltaEntries[0].payloadJson.includes("internal workspace routing text"), false);
 }
 
 async function testStreamingChildWorkspaceEventsAreVisible() {
@@ -4218,7 +5285,7 @@ async function testWorkspaceEntryApprovalGate() {
 
 async function testToolPolicyGates() {
   const repos = createRepos();
-  const hallucinated = new SingleToolRequestLLMClient("runCommand", { command: "npm test" });
+  const hallucinated = new SingleToolRequestLLMClient("bash", { command: "npm test" });
   const runtime = new AgentRuntime(repos, hallucinated);
   const output = await runtime.run({
     agentId: "default-agent",
@@ -4236,22 +5303,22 @@ async function testToolPolicyGates() {
   assert.equal(hallucinated.lastToolResult.includes("active workspace"), true);
   const wrongWorkspaceTrace = repos.getTrace("conv-tool-policy-wrong-workspace", "creator", "creator");
   assert.equal(wrongWorkspaceTrace.toolCalls.length, 1);
-  assert.equal(wrongWorkspaceTrace.toolCalls[0].toolName, "runCommand");
+  assert.equal(wrongWorkspaceTrace.toolCalls[0].toolName, "bash");
   assert.equal(wrongWorkspaceTrace.toolCalls[0].status, "blocked");
   const pendingToolAudit = wrongWorkspaceTrace.auditLogs.find((log) => log.action === "hook.beforeToolCall" && log.resourceId === wrongWorkspaceTrace.toolCalls[0].id);
   assert.ok(pendingToolAudit);
   const pendingToolAuditMetadata = JSON.parse(pendingToolAudit.metadataJson) as { toolName?: string; status?: string; toolCallId?: string };
-  assert.equal(pendingToolAuditMetadata.toolName, "runCommand");
+  assert.equal(pendingToolAuditMetadata.toolName, "bash");
   assert.equal(pendingToolAuditMetadata.status, "pending");
   assert.equal(pendingToolAuditMetadata.toolCallId, wrongWorkspaceTrace.toolCalls[0].id);
   const blockedToolAudit = wrongWorkspaceTrace.auditLogs.find((log) => log.action === "hook.afterToolCall" && log.resourceId === wrongWorkspaceTrace.toolCalls[0].id);
   assert.ok(blockedToolAudit);
   const blockedToolAuditMetadata = JSON.parse(blockedToolAudit.metadataJson) as { toolName?: string; status?: string; taskId?: string };
-  assert.equal(blockedToolAuditMetadata.toolName, "runCommand");
+  assert.equal(blockedToolAuditMetadata.toolName, "bash");
   assert.equal(blockedToolAuditMetadata.status, "blocked");
   assert.equal(typeof blockedToolAuditMetadata.taskId, "string");
 
-  const highRisk = new MainToCliToolRequestLLMClient("runCommand", { command: "npm test" });
+  const highRisk = new MainToCliToolRequestLLMClient("bash", { command: "npm test" });
   updateWorkspaceGate(repos, "dev", { requiresApproval: 0, riskLevel: "medium" });
   const highRiskRuntime = new AgentRuntime(repos, highRisk);
   await highRiskRuntime.run({
@@ -4271,10 +5338,10 @@ async function testToolPolicyGates() {
   const highRiskTrace = repos.getTrace("conv-tool-policy-high-risk", "creator", "creator");
   assert.equal(highRiskTrace.toolCalls.length, 2);
   assert.equal(highRiskTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
-  assert.equal(highRiskTrace.toolCalls.some((call) => call.toolName === "runCommand" && call.status === "blocked"), true);
+  assert.equal(highRiskTrace.toolCalls.some((call) => call.toolName === "bash" && call.status === "blocked"), true);
   assert.equal(highRiskTrace.approvalRequests.length, 1);
   assert.equal(highRiskTrace.approvalRequests[0].status, "pending");
-  assert.equal(highRiskTrace.approvalRequests[0].toolName, "runCommand");
+  assert.equal(highRiskTrace.approvalRequests[0].toolName, "bash");
   const resolvedApproval = repos.resolveApprovalRequest(highRiskTrace.approvalRequests[0].id, {
     status: "approved",
     resolvedBy: "creator",
@@ -5076,24 +6143,254 @@ async function testSearchMemoryToolUsesPolicyLayer() {
   assert.equal(directCreatorList.some((memory) => memory.id === agentSelf.id), true);
 }
 
+async function testBuiltinPiFileToolsBehavior() {
+  const previousRoot = process.env.ZLEAP_FILE_WORKSPACE_ROOT;
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "zleap-builtin-tools-"));
+  const conversationId = "conv-builtin-pi-tools";
+  try {
+    process.env.ZLEAP_FILE_WORKSPACE_ROOT = root;
+    const workspaceRoot = conversationWorkspaceRoot(conversationId);
+
+    const writeResult = await executeWrite(JSON.stringify({
+      path: "nested/notes.txt",
+      content: ["line1", "line2", "line3", "line4", "line5"].join("\n")
+    }), { conversationId });
+    assert.equal(writeResult.ok, true);
+    assert.equal((writeResult.result as { created?: boolean; mutationQueued?: boolean }).created, true);
+    assert.equal((writeResult.result as { mutationQueued?: boolean }).mutationQueued, true);
+    assert.equal(await pathExists(path.join(workspaceRoot, "nested", "notes.txt")), true);
+
+    const readWindow = await executeRead(JSON.stringify({ path: "nested/notes.txt", offset: 2, limit: 2 }), { conversationId });
+    assert.equal(readWindow.ok, true);
+    assert.equal((readWindow.result as { mediaType?: string }).mediaType, "text");
+    assert.equal((readWindow.result as { content?: string }).content, "line2\nline3");
+    assert.equal((readWindow.result as { continuationOffset?: number }).continuationOffset, 4);
+    assert.equal((readWindow.result as { truncated?: boolean }).truncated, true);
+
+    const readOffsetBeyondEnd = await executeRead(JSON.stringify({ path: "nested/notes.txt", offset: 99 }), { conversationId });
+    assert.equal(readOffsetBeyondEnd.ok, false);
+    assert.equal(JSON.stringify(readOffsetBeyondEnd.result).includes("beyond the end"), true);
+
+    const outsideRead = await executeRead(JSON.stringify({ path: "../outside.txt" }), { conversationId });
+    assert.equal(outsideRead.ok, false);
+    assert.equal(JSON.stringify(outsideRead.result).includes("outside the workspace root"), true);
+
+    const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64");
+    await fs.writeFile(path.join(workspaceRoot, "pixel.png"), pngBytes);
+    const imageRead = await executeRead(JSON.stringify({ path: "pixel.png" }), { conversationId });
+    assert.equal(imageRead.ok, true);
+    const imageResult = imageRead.result as { mediaType?: string; mimeType?: string; imageTooLarge?: boolean; resized?: boolean; imageContent?: { type?: string; image_url?: { url?: string } } };
+    assert.equal(imageResult.mediaType, "image");
+    assert.equal(imageResult.mimeType, "image/png");
+    assert.equal(imageResult.imageTooLarge, false);
+    assert.equal(imageResult.resized, false);
+    assert.equal(imageResult.imageContent?.type, "input_image");
+    assert.equal(imageResult.imageContent?.image_url?.url?.startsWith("data:image/png;base64,"), true);
+
+    const imageReadWithoutModelImageSupport = await executeRead(JSON.stringify({ path: "pixel.png" }), { conversationId, supportsImageContent: false });
+    assert.equal(imageReadWithoutModelImageSupport.ok, true);
+    const unsupportedImageResult = imageReadWithoutModelImageSupport.result as {
+      mediaType?: string;
+      mimeType?: string;
+      imageContent?: unknown;
+      imageContentUnsupported?: boolean;
+      note?: string;
+      width?: number;
+      height?: number;
+    };
+    assert.equal(unsupportedImageResult.mediaType, "image");
+    assert.equal(unsupportedImageResult.mimeType, "image/png");
+    assert.equal(unsupportedImageResult.imageContent, undefined);
+    assert.equal(unsupportedImageResult.imageContentUnsupported, true);
+    assert.equal(unsupportedImageResult.note?.includes("active model does not support image content"), true);
+    assert.equal(unsupportedImageResult.width, 1);
+    assert.equal(unsupportedImageResult.height, 1);
+
+    const largePngBytes = createTestPngRgba(1024, 1024);
+    assert.equal(largePngBytes.length > 1024 * 1024, true);
+    await fs.writeFile(path.join(workspaceRoot, "large.png"), largePngBytes);
+    const largeImageRead = await executeRead(JSON.stringify({ path: "large.png" }), { conversationId });
+    assert.equal(largeImageRead.ok, true);
+    const largeImageResult = largeImageRead.result as {
+      mediaType?: string;
+      mimeType?: string;
+      imageTooLarge?: boolean;
+      resized?: boolean;
+      originalBytes?: number;
+      inlineBytes?: number;
+      originalWidth?: number;
+      originalHeight?: number;
+      width?: number;
+      height?: number;
+      imageContent?: { type?: string; image_url?: { url?: string } };
+    };
+    assert.equal(largeImageResult.mediaType, "image");
+    assert.equal(largeImageResult.mimeType, "image/png");
+    assert.equal(largeImageResult.imageTooLarge, false);
+    assert.equal(largeImageResult.resized, true);
+    assert.equal(largeImageResult.originalBytes, largePngBytes.length);
+    assert.equal((largeImageResult.inlineBytes ?? 0) <= 1024 * 1024, true);
+    assert.equal((largeImageResult.inlineBytes ?? 0) < largePngBytes.length, true);
+    assert.equal(largeImageResult.originalWidth, 1024);
+    assert.equal(largeImageResult.originalHeight, 1024);
+    assert.equal((largeImageResult.width ?? 0) < 1024, true);
+    assert.equal((largeImageResult.height ?? 0) < 1024, true);
+    assert.equal(largeImageResult.imageContent?.type, "input_image");
+    assert.equal(largeImageResult.imageContent?.image_url?.url?.startsWith("data:image/png;base64,"), true);
+
+    const editPath = path.join(workspaceRoot, "fuzzy.txt");
+    await fs.writeFile(editPath, "\uFEFFfirst\r\nvalue   \r\nlast\r\n", "utf8");
+    const editResult = await executeEdit(JSON.stringify({
+      path: "fuzzy.txt",
+      edits: [{ oldText: "value\nlast", newText: "updated\nlast" }]
+    }), { conversationId });
+    assert.equal(editResult.ok, true);
+    const editPayload = editResult.result as { details?: { usedFuzzyMatch?: boolean; preservedBom?: boolean; preservedLineEndings?: string; normalizations?: string[] }; patch?: string };
+    assert.equal(editPayload.details?.usedFuzzyMatch, true);
+    assert.equal(editPayload.details?.preservedBom, true);
+    assert.equal(editPayload.details?.preservedLineEndings, "CRLF");
+    assert.equal(editPayload.details?.normalizations?.includes("line_endings"), true);
+    assert.equal(editPayload.details?.normalizations?.includes("trim_trailing_whitespace_per_line"), true);
+    assert.equal(editPayload.patch?.includes("updated"), true);
+    const editedBuffer = await fs.readFile(editPath);
+    assert.equal(editedBuffer.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), true);
+    assert.equal(editedBuffer.toString("utf8").includes("updated\r\nlast"), true);
+
+    const duplicateEdit = await executeEdit(JSON.stringify({
+      path: "nested/notes.txt",
+      edits: [{ oldText: "line", newText: "row" }]
+    }), { conversationId });
+    assert.equal(duplicateEdit.ok, false);
+    assert.equal(JSON.stringify(duplicateEdit.result).includes("exactly one location"), true);
+
+    const missingEdit = await executeEdit(JSON.stringify({
+      path: "nested/notes.txt",
+      edits: [{ oldText: "missing text", newText: "replacement" }]
+    }), { conversationId });
+    assert.equal(missingEdit.ok, false);
+    assert.equal(JSON.stringify(missingEdit.result).includes("oldText was not found"), true);
+
+    const emptyOldTextEdit = await executeEdit(JSON.stringify({
+      path: "nested/notes.txt",
+      edits: [{ oldText: "", newText: "replacement" }]
+    }), { conversationId });
+    assert.equal(emptyOldTextEdit.ok, false);
+    assert.equal(JSON.stringify(emptyOldTextEdit.result).includes("oldText cannot be empty"), true);
+
+    const noOpEdit = await executeEdit(JSON.stringify({
+      path: "nested/notes.txt",
+      edits: [{ oldText: "line1", newText: "line1" }]
+    }), { conversationId });
+    assert.equal(noOpEdit.ok, false);
+    assert.equal(JSON.stringify(noOpEdit.result).includes("would not change"), true);
+
+    await fs.writeFile(path.join(workspaceRoot, "overlap.txt"), "abcdef", "utf8");
+    const overlapEdit = await executeEdit(JSON.stringify({
+      path: "overlap.txt",
+      edits: [
+        { oldText: "abc", newText: "ABC" },
+        { oldText: "bcd", newText: "BCD" }
+      ]
+    }), { conversationId });
+    assert.equal(overlapEdit.ok, false);
+    assert.equal(JSON.stringify(overlapEdit.result).includes("overlap or nest"), true);
+
+    const queuedWrite = executeWrite(JSON.stringify({
+      path: "queue/same-file.txt",
+      content: "queued target"
+    }), { conversationId });
+    const queuedEdit = executeEdit(JSON.stringify({
+      path: "queue/same-file.txt",
+      edits: [{ oldText: "queued target", newText: "queued final" }]
+    }), { conversationId });
+    const [queuedWriteResult, queuedEditResult] = await Promise.all([queuedWrite, queuedEdit]);
+    assert.equal(queuedWriteResult.ok, true);
+    assert.equal(queuedEditResult.ok, true);
+    assert.equal(await fs.readFile(path.join(workspaceRoot, "queue", "same-file.txt"), "utf8"), "queued final");
+
+    const bashMerged = await executeBash(JSON.stringify({
+      command: "node -e \"console.log('stdout-line'); console.error('stderr-line')\"",
+      timeout: 5
+    }), { conversationId });
+    assert.equal(bashMerged.ok, true);
+    assert.equal((bashMerged.result as { output?: string }).output?.includes("stdout-line"), true);
+    assert.equal((bashMerged.result as { output?: string }).output?.includes("stderr-line"), true);
+    assert.equal((bashMerged.result as { cwd?: string }).cwd, ".");
+
+    const bashNonZero = await executeBash(JSON.stringify({
+      command: "node -e \"console.log('before-exit'); process.exit(7)\"",
+      timeout: 5
+    }), { conversationId });
+    assert.equal(bashNonZero.ok, false);
+    assert.equal(bashNonZero.status, "failed");
+    assert.equal((bashNonZero.result as { exitCode?: number }).exitCode, 7);
+    assert.equal((bashNonZero.result as { output?: string }).output?.includes("before-exit"), true);
+
+    const bashTruncated = await executeBash(JSON.stringify({
+      command: "node -e \"process.stdout.write('x'.repeat(60000))\"",
+      timeout: 5
+    }), { conversationId });
+    assert.equal(bashTruncated.ok, true);
+    assert.equal((bashTruncated.result as { truncated?: boolean }).truncated, true);
+    const fullOutputPath = (bashTruncated.result as { fullOutputPath?: string }).fullOutputPath;
+    assert.equal(typeof fullOutputPath, "string");
+    assert.equal(await pathExists(fullOutputPath ?? ""), true);
+
+    const bashTimedOut = await executeBash(JSON.stringify({
+      command: "node -e \"setTimeout(() => {}, 2000)\"",
+      timeout: 1
+    }), { conversationId });
+    assert.equal(bashTimedOut.ok, false);
+    assert.equal((bashTimedOut.result as { timedOut?: boolean }).timedOut, true);
+
+    const abortController = new AbortController();
+    const bashAbortedPromise = executeBash(JSON.stringify({
+      command: "node -e \"console.log('abort-started'); setInterval(() => {}, 1000)\"",
+      timeout: 30
+    }), { conversationId, abortSignal: abortController.signal });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    abortController.abort();
+    const bashAborted = await bashAbortedPromise;
+    assert.equal(bashAborted.ok, false);
+    assert.equal(bashAborted.status, "failed");
+    assert.equal((bashAborted.result as { aborted?: boolean }).aborted, true);
+    assert.equal((bashAborted.result as { timedOut?: boolean }).timedOut, false);
+    assert.equal((bashAborted.result as { output?: string }).output?.includes("abort-started"), true);
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.ZLEAP_FILE_WORKSPACE_ROOT;
+    } else {
+      process.env.ZLEAP_FILE_WORKSPACE_ROOT = previousRoot;
+    }
+  }
+}
+
 async function testToolBindingsAndMcpReadiness() {
   const repos = createRepos();
-  const searchFiles = repos.listTools().find((tool) => tool.name === "searchFiles");
-  const readFile = repos.listTools().find((tool) => tool.name === "readFile");
-  const writeFile = repos.listTools().find((tool) => tool.name === "writeFile");
-  const runCommand = repos.listTools().find((tool) => tool.name === "runCommand");
+  const read = repos.listTools().find((tool) => tool.name === "read");
+  const write = repos.listTools().find((tool) => tool.name === "write");
+  const edit = repos.listTools().find((tool) => tool.name === "edit");
+  const bash = repos.listTools().find((tool) => tool.name === "bash");
   const exitWorkspace = repos.listTools().find((tool) => tool.name === "exitWorkspace");
   const writeUserImpression = repos.listTools().find((tool) => tool.name === "writeUserImpression");
   const writeSkillMemory = repos.listTools().find((tool) => tool.name === "writeSkillMemory");
   const searchMemory = repos.listTools().find((tool) => tool.name === "searchMemory");
   const readMemory = repos.listTools().find((tool) => tool.name === "readMemory");
   const readSkill = repos.listTools().find((tool) => tool.name === "readSkill");
-  assert.equal(searchFiles?.bindingType, "runtime");
-  assert.equal(searchFiles?.mcpServerId, null);
-  assert.equal(readFile?.bindingType, "runtime");
-  assert.equal(writeFile?.bindingType, "runtime");
-  assert.equal(runCommand?.bindingType, "runtime");
-  assert.equal(runCommand?.mcpToolName, null);
+  assert.equal(repos.listTools().some((tool) => tool.name === "searchFiles"), false);
+  assert.equal(repos.listTools().some((tool) => tool.name === "readFile"), false);
+  assert.equal(repos.listTools().some((tool) => tool.name === "writeFile"), false);
+  assert.equal(repos.listTools().some((tool) => tool.name === "runCommand"), false);
+  assert.equal(repos.listTools().some((tool) => tool.name === "editFile"), false);
+  assert.equal(read?.bindingType, "runtime");
+  assert.equal(read?.promptSnippet, "Read file contents");
+  assert.equal(write?.bindingType, "runtime");
+  assert.equal(edit?.bindingType, "runtime");
+  assert.equal(edit?.promptGuidelinesJson.includes("oldText"), true);
+  assert.equal(bash?.bindingType, "runtime");
+  assert.equal(bash?.mcpToolName, null);
+  assert.equal(bash?.riskLevel, "high");
+  assert.equal(bash?.executionMode, "sequential");
   assert.equal(exitWorkspace?.bindingType, "runtime");
   assert.equal(writeUserImpression?.bindingType, "runtime");
   assert.equal(writeSkillMemory?.bindingType, "runtime");
@@ -5115,8 +6412,6 @@ async function testToolBindingsAndMcpReadiness() {
   for (const field of ["status", "summary", "artifacts", "observations", "errors", "suggestedNextSteps"]) {
     assert.equal(exitWorkspaceSchema.required?.includes(field), true);
   }
-  const searchFilesSchema = JSON.parse(searchFiles?.parametersJson ?? "{}") as { required?: string[] };
-  assert.equal(searchFilesSchema.required?.includes("reason"), true);
   const searchMemorySchema = JSON.parse(searchMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
   assert.equal(searchMemorySchema.required?.includes("reason"), true);
   assert.equal(Boolean(searchMemorySchema.properties?.memoryType), true);
@@ -5136,16 +6431,27 @@ async function testToolBindingsAndMcpReadiness() {
   const writeSkillMemorySchema = JSON.parse(writeSkillMemory?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
   assert.equal(Boolean(writeSkillMemorySchema.properties?.workspaceId), false);
   assert.equal(writeSkillMemorySchema.required?.includes("workspaceId"), false);
-  const runCommandSchema = JSON.parse(runCommand?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
-  assert.equal(runCommandSchema.required?.includes("reason"), true);
-  assert.equal(Boolean(runCommandSchema.properties?.cwd), true);
-  assert.equal(Boolean(runCommandSchema.properties?.timeoutMs), true);
-  const readFileSchema = JSON.parse(readFile?.parametersJson ?? "{}") as { required?: string[] };
-  const writeFileSchema = JSON.parse(writeFile?.parametersJson ?? "{}") as { required?: string[] };
-  assert.equal(readFileSchema.required?.includes("reason"), true);
-  assert.equal(writeFileSchema.required?.includes("reason"), true);
+  const bashSchema = JSON.parse(bash?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  assert.equal(bashSchema.required?.includes("command"), true);
+  assert.equal(bashSchema.required?.includes("reason"), false);
+  assert.equal(Boolean(bashSchema.properties?.timeout), true);
+  assert.equal(Boolean(bashSchema.properties?.timeoutMs), false);
+  assert.equal(Boolean(bashSchema.properties?.cwd), false);
+  const readSchema = JSON.parse(read?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  const writeSchema = JSON.parse(write?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  const editSchema = JSON.parse(edit?.parametersJson ?? "{}") as { required?: string[]; properties?: Record<string, unknown> };
+  assert.equal(readSchema.required?.includes("path"), true);
+  assert.equal(readSchema.required?.includes("reason"), false);
+  assert.equal(Boolean(readSchema.properties?.offset), true);
+  assert.equal(Boolean(readSchema.properties?.limit), true);
+  assert.equal(writeSchema.required?.includes("path"), true);
+  assert.equal(writeSchema.required?.includes("content"), true);
+  assert.equal(writeSchema.required?.includes("reason"), false);
+  assert.equal(Boolean(writeSchema.properties?.createDirs), false);
+  assert.equal(editSchema.required?.includes("path"), true);
+  assert.equal(editSchema.required?.includes("edits"), true);
 
-  const builtinFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "searchFiles", { reason: "验证 runtime 文件是否存在", query: "runtime" });
+  const builtinFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "bash", { command: "node -e \"console.log('zleap-bash-search-ok')\"" });
   const runtime = new AgentRuntime(repos, builtinFileTool);
   await runtime.run({
     agentId: "default-agent",
@@ -5159,24 +6465,22 @@ async function testToolBindingsAndMcpReadiness() {
       apiKey: "test-key"
     }
   });
-  assert.equal(builtinFileTool.lastToolResult.includes("\"count\""), true);
+  assert.equal(builtinFileTool.lastToolResult.includes("zleap-bash-search-ok"), true);
   const fileTrace = repos.getTrace("conv-tool-binding-file-runtime", "creator", "creator");
   assert.equal(fileTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
-  assert.equal(fileTrace.toolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
+  assert.equal(fileTrace.toolCalls.some((call) => call.toolName === "bash" && call.status === "completed"), true);
   const fileSession = fileTrace.sessions.find((session) => session.workspaceId === "dev");
-  assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "searchFiles" && call.status === "completed"), true);
-  assert.equal(fileSession?.result.observations.some((item) => item.includes("Tool searchFiles finished with status completed")), true);
+  assert.equal(fileSession?.localContext.recentToolCalls.some((call) => call.toolName === "bash" && call.status === "completed"), true);
+  assert.equal(fileSession?.result.observations.some((item) => item.includes("Tool bash finished with status completed")), true);
 
   const fileToolConversationId = "conv-tool-binding-file-workspace";
   const scratchDir = conversationWorkspaceRoot(fileToolConversationId);
   const oldProjectScratchDir = path.resolve("zleap-tool-scratch");
   await fs.rm(scratchDir, { recursive: true, force: true });
   await fs.rm(oldProjectScratchDir, { recursive: true, force: true });
-  const builtinWriteFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "writeFile", {
-    reason: "创建一个可被 readFile 验证的测试文件",
+  const builtinWriteFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "write", {
     path: "zleap-tool-scratch/read-write-test.txt",
-    content: "zleap file tool ok",
-    createDirs: true
+    content: "zleap file tool ok"
   });
   const writeFileRuntime = new AgentRuntime(repos, builtinWriteFileTool);
   await writeFileRuntime.run({
@@ -5198,8 +6502,7 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(defaultFileWorkspaceBaseRoot().endsWith(path.join("Documents", "Zleap", "conversations")), true);
   assert.equal(builtinWriteFileTool.lastToolResult.includes(".codex"), false);
 
-  const builtinReadFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "readFile", {
-    reason: "读取刚写入的测试文件确认专用文件工具可用",
+  const builtinReadFileTool = new MainToWorkspaceToolRequestLLMClient("dev", "read", {
     path: "zleap-tool-scratch/read-write-test.txt"
   });
   const readFileRuntime = new AgentRuntime(repos, builtinReadFileTool);
@@ -5219,7 +6522,7 @@ async function testToolBindingsAndMcpReadiness() {
   await fs.rm(scratchDir, { recursive: true, force: true });
   await fs.rm(oldProjectScratchDir, { recursive: true, force: true });
 
-  const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("dev", "runCommand", { reason: "验证命令工具只承担终端执行任务", command: "node -e \"console.log('zleap-cli-ok')\"" });
+  const builtinCliTool = new MainToWorkspaceToolRequestLLMClient("dev", "bash", { command: "node -e \"console.log('zleap-cli-ok')\"" });
   const cliRuntime = new AgentRuntime(repos, builtinCliTool);
   await cliRuntime.run({
     agentId: "default-agent",
@@ -5235,7 +6538,7 @@ async function testToolBindingsAndMcpReadiness() {
   });
   assert.equal(builtinCliTool.lastToolResult.includes("zleap-cli-ok"), true);
   const cliTrace = repos.getTrace("conv-tool-binding-cli-runtime", "creator", "creator");
-  assert.equal(cliTrace.toolCalls.some((call) => call.toolName === "runCommand" && call.status === "completed"), true);
+  assert.equal(cliTrace.toolCalls.some((call) => call.toolName === "bash" && call.status === "completed"), true);
 
   const echoServerPath = path.resolve("src/tests/fixtures/mcp-echo-server.mjs");
   const echoServer = repos.upsertMcpServer({
@@ -5292,6 +6595,24 @@ async function testToolBindingsAndMcpReadiness() {
     }
   });
   assert.equal(echoClient.lastToolResult.includes("echo:hello"), true);
+  const echoDevInput = echoClient.inputs.find((input) => input.tools.some((tool) => tool.name === "echo"));
+  assert.ok(echoDevInput);
+  const echoProviderTool = echoDevInput.tools.find((tool) => tool.name === "echo");
+  assert.equal(echoProviderTool?.bindingType, "mcp");
+  assert.equal(echoProviderTool?.parametersJson.includes("\"text\""), true);
+  assert.equal(echoProviderTool?.promptSnippet, "Echo test input.");
+  const echoToolsMessage = echoDevInput.messages.find((message) => message.role === "tool" && message.name === "runtime_context.tools");
+  assert.ok(echoToolsMessage);
+  const echoToolsPayload = JSON.parse(echoToolsMessage.content ?? "{}") as RuntimeToolsPayloadForTest;
+  const echoPromptTool = echoToolsPayload.tools.find((tool) => tool.name === "echo");
+  assert.equal(echoPromptTool?.summary, "Echo test input.");
+  assert.equal(echoPromptTool?.bindingType, "mcp");
+  assert.equal(echoPromptTool?.executionMode, "parallel");
+  assert.equal(echoPromptTool?.mcpServerId, echoServer.id);
+  assert.equal(echoPromptTool?.mcpToolName, "echo");
+  assert.equal(echoToolsMessage.content?.includes("\"parametersJson\""), false);
+  assert.equal(echoToolsMessage.content?.includes("\"bindingJson\""), false);
+  assert.equal(echoToolsMessage.content?.includes("\"properties\""), false);
   const echoTrace = repos.getTrace("conv-tool-binding-mcp-echo", "creator", "creator");
   assert.equal(echoTrace.toolCalls.some((call) => call.toolName === "echo" && call.status === "completed"), true);
 
@@ -5354,6 +6675,69 @@ async function testToolBindingsAndMcpReadiness() {
   assert.equal(runtimeMainSession?.localContext.recentToolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
 }
 
+async function testParallelToolBatchUsesExecutionModeAndPreservesResultOrder() {
+  const repos = createRepos();
+  const echoServerPath = path.resolve("src/tests/fixtures/mcp-echo-server.mjs");
+  const echoServer = repos.upsertMcpServer({
+    id: "mcp-parallel-echo",
+    workspaceId: "dev",
+    name: "Parallel Echo MCP",
+    transport: "stdio",
+    command: process.execPath,
+    argsJson: JSON.stringify([echoServerPath]),
+    envJson: "{}",
+    headersJson: "{}",
+    timeoutMs: 10000,
+    actorId: "creator",
+    actorRole: "creator"
+  });
+  const discoveredEchoTools = await new McpToolExecutor().discoverTools(mcpServerToBindingJson(echoServer));
+  const importedTools = repos.importMcpServerTools({
+    workspaceId: "dev",
+    serverId: echoServer.id,
+    tools: discoveredEchoTools,
+    actorId: "creator",
+    actorRole: "creator"
+  });
+  const sleepEcho = importedTools.find((tool) => tool.name === "sleepEcho");
+  assert.equal(sleepEcho?.executionMode, "parallel");
+
+  const fake = new ParallelMcpToolBatchLLMClient();
+  const runtime = new AgentRuntime(repos, fake);
+  const output = await runtime.run({
+    agentId: "default-agent",
+    userId: "parallel-tool-user",
+    userRole: "creator",
+    conversationId: "conv-parallel-tool-batch",
+    message: "run parallel mcp tools",
+    llm: {
+      baseUrl: "https://api.302ai.com",
+      model: "gpt-5-mini",
+      apiKey: "test-key"
+    }
+  });
+
+  assert.equal(output.assistantMessage, "parallel batch handled");
+  assert.deepEqual(fake.toolResultCallIds, ["call-sleep-first", "call-sleep-second"]);
+  assert.equal(fake.toolResultTexts[0].includes("sleepEcho:first"), true);
+  assert.equal(fake.toolResultTexts[1].includes("sleepEcho:second"), true);
+  const trace = repos.getTrace("conv-parallel-tool-batch", "creator", "creator");
+  const parallelBatch = trace.auditLogs.find((log) => {
+    if (log.action !== "tool_batch_execution") return false;
+    const metadata = JSON.parse(log.metadataJson) as { mode?: string; toolNames?: string[] };
+    return metadata.mode === "parallel" && metadata.toolNames?.filter((name) => name === "sleepEcho").length === 2;
+  });
+  assert.equal(Boolean(parallelBatch), true);
+  assert.equal(trace.toolCalls.filter((call) => call.toolName === "sleepEcho" && call.status === "completed").length, 2);
+
+  const sequentialBatch = trace.auditLogs.find((log) => {
+    if (log.action !== "tool_batch_execution") return false;
+    const metadata = JSON.parse(log.metadataJson) as { mode?: string; toolNames?: string[] };
+    return metadata.mode === "sequential" && metadata.toolNames?.includes("exitWorkspace");
+  });
+  assert.equal(Boolean(sequentialBatch), true);
+}
+
 async function testSeedRefreshesExistingToolSchemas() {
   const db = new Database(":memory:");
   migrate(db);
@@ -5401,6 +6785,7 @@ async function testLlmFailureLog() {
 async function testRuntimeConfigControlsRuntimeLimits() {
   const repos = createRepos();
   assert.equal(repos.listRuntimeConfigs("creator").some((item) => item.key === "memory.resultEventRecallLimit"), true);
+  assert.equal(repos.listRuntimeConfigs("creator").some((item) => item.key === "tools.devWorkspaceRoot"), true);
   assert.throws(() => repos.listRuntimeConfigs("user"), /creator role/);
   repos.updateRuntimeConfig({ key: "memory.impressionRecallLimit", value: 11, actorId: "creator", actorRole: "creator" });
   repos.updateRuntimeConfig({ key: "memory.resultEventRecallLimit", value: 4, actorId: "creator", actorRole: "creator" });
@@ -5430,6 +6815,38 @@ async function testRuntimeConfigControlsRuntimeLimits() {
   assert.equal(metadata.recallInput?.impressionLimit, 11);
   assert.equal(metadata.recallInput?.resultEventLimit, 4);
   assert.equal(metadata.recallInput?.processEventLimit, 2);
+
+  const configuredRoot = await fs.mkdtemp(path.join(os.tmpdir(), "zleap-configured-dev-root-"));
+  const configuredConversationId = "conv-runtime-config-dev-root";
+  const defaultRoot = conversationWorkspaceRoot(configuredConversationId);
+  try {
+    await fs.rm(defaultRoot, { recursive: true, force: true });
+    repos.updateRuntimeConfig({ key: "tools.devWorkspaceRoot", value: configuredRoot, actorId: "creator", actorRole: "creator" });
+    assert.equal(repos.getRuntimeConfigValues()["tools.devWorkspaceRoot"], configuredRoot);
+    const writeClient = new MainToWorkspaceToolRequestLLMClient("dev", "write", {
+      path: "configured-root.txt",
+      content: "configured dev root ok"
+    });
+    const writeRuntime = new AgentRuntime(repos, writeClient);
+    await writeRuntime.run({
+      agentId: "default-agent",
+      userId: "config-user",
+      userRole: "creator",
+      conversationId: configuredConversationId,
+      message: "write into configured dev root",
+      llm: {
+        baseUrl: "https://api.302ai.com",
+        model: "gpt-5-mini",
+        apiKey: "test-key"
+      }
+    });
+    assert.equal(writeClient.lastToolResult.includes(configuredRoot), true);
+    assert.equal(await fs.readFile(path.join(configuredRoot, "configured-root.txt"), "utf8"), "configured dev root ok");
+    assert.equal(await pathExists(path.join(defaultRoot, "configured-root.txt")), false);
+  } finally {
+    await fs.rm(configuredRoot, { recursive: true, force: true });
+    await fs.rm(defaultRoot, { recursive: true, force: true });
+  }
 }
 
 async function testStreamingFollowUpFailureMarksLlmCallFailed() {
@@ -5522,7 +6939,7 @@ async function testConversationDeletionLifecycle() {
     userId: "delete-user",
     conversationId: "conv-delete",
     workspaceId: "dev",
-    toolName: "runCommand",
+    toolName: "bash",
     argumentsJson: "{}",
     reason: "test approval cleanup"
   });
@@ -5737,7 +7154,7 @@ async function testWorkspaceUpsertValidatesRegisteredToolsAtomically() {
       requiresApproval: false
     },
     memoryPolicy,
-    toolIds: ["tool-search-files"],
+    toolIds: ["tool-bash"],
     actorId: "creator",
     actorRole: "creator"
   });
@@ -5774,7 +7191,7 @@ async function testWorkspaceUpsertValidatesRegisteredToolsAtomically() {
   const persisted = repos.getWorkspace("atomic-tools");
   assert.equal(persisted.name, "Atomic tools");
   assert.equal(persisted.riskLevel, "low");
-  assert.equal(persisted.tools.some((tool) => tool.id === "tool-search-files"), true);
+  assert.equal(persisted.tools.some((tool) => tool.id === "tool-bash"), true);
   assert.equal(persisted.tools.some((tool) => tool.id === "tool-not-registered"), false);
 }
 
@@ -5790,10 +7207,11 @@ async function testWorkspaceBoundary() {
   assert.equal(memoryTools.every((tool) => mainTools.includes(tool)), true);
   assert.equal(memoryTools.every((tool) => devTools.includes(tool)), true);
   assert.equal(["writeEventMemory", "updateMemory", "deleteMemory"].some((tool) => mainTools.includes(tool) || devTools.includes(tool)), false);
-  assert.equal(devTools.includes("searchFiles"), true);
-  assert.equal(devTools.includes("readFile"), true);
-  assert.equal(devTools.includes("writeFile"), true);
-  assert.equal(devTools.includes("runCommand"), true);
+  assert.equal(devTools.includes("read"), true);
+  assert.equal(devTools.includes("write"), true);
+  assert.equal(devTools.includes("edit"), true);
+  assert.equal(devTools.includes("bash"), true);
+  assert.equal(devTools.includes("searchFiles"), false);
 }
 
 async function testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound() {
@@ -5814,7 +7232,7 @@ async function testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound() {
     createdBy: file.createdBy,
     manifest: file.manifest,
     memoryPolicy: file.memoryPolicy,
-    toolIds: ["tool-search-files", "tool-enter-workspace", "tool-ask-user", "tool-finish-task"],
+    toolIds: ["tool-bash", "tool-enter-workspace", "tool-ask-user", "tool-finish-task"],
     actorId: "creator",
     actorRole: "creator"
   });
@@ -5935,6 +7353,8 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
         },
         required: ["reason"]
       }),
+      promptGuidelinesJson: "[]",
+      executionMode: "parallel",
       bindingType: "runtime",
       bindingJson: "{}",
       riskLevel: "low",
@@ -5955,7 +7375,8 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
         return new Response(JSON.stringify({ error: { message: "temporary overload" } }), { status: 500 });
       }
       return new Response(JSON.stringify({
-        choices: [{ message: { role: "assistant", content: "retried ok" } }]
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "retried ok" } }],
+        usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 }
       }), { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     const completeOutput = await client.complete(input);
@@ -5963,10 +7384,165 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
     assert.equal(completeOutput.message.content, "retried ok");
     assert.equal(completeAuthorization, "Bearer test-key");
     assert.equal(completeRequestBody.apiKey, undefined);
+    assert.equal((completeOutput.rawRequest as any).body.apiKey, undefined);
+    assert.equal((completeOutput.rawRequest as any).body.model, "gpt-5-mini");
+    assert.equal(completeOutput.normalizedRequest?.provider, "openai-compatible");
+    assert.equal(completeOutput.normalizedRequest?.stream, false);
+    assert.equal(completeOutput.normalizedRequest?.messages[0].content[0].type, "text");
+    assert.equal(completeOutput.normalizedRequest?.tools[0].executionMode, "parallel");
+    assert.equal(completeOutput.normalizedResponse?.finishReason, "stop");
+    assert.equal(completeOutput.normalizedResponse?.message?.content[0].type, "text");
+    assert.equal(completeOutput.usage?.inputTokens, 7);
+    assert.equal(completeOutput.usage?.outputTokens, 3);
+    assert.equal(completeOutput.usage?.totalTokens, 10);
     assert.equal(completeRequestBody.stream, undefined);
     assert.equal(completeRequestBody.tools[0].type, "function");
     assert.equal(completeRequestBody.tools[0].function.name, "testTool");
     assert.equal(completeRequestBody.tools[0].function.parameters.required[0], "reason");
+
+    let syntheticRequestBody: any;
+    globalThis.fetch = (async (_url: any, init?: any) => {
+      syntheticRequestBody = JSON.parse(String(init?.body ?? "{}"));
+      return new Response(JSON.stringify({
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "synthetic ok" } }],
+        usage: { prompt_tokens: 9, completion_tokens: 2, total_tokens: 11 }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const syntheticOutput = await client.complete({
+      ...input,
+      messages: [
+        { role: "user", content: "call a tool" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "missing-tool-result-call",
+            type: "function",
+            function: {
+              name: "testTool",
+              arguments: JSON.stringify({ reason: "test missing result" })
+            }
+          }]
+        },
+        { role: "user", content: "continue after missing tool result" }
+      ]
+    });
+    assert.equal(syntheticOutput.message.content, "synthetic ok");
+    assert.equal(syntheticRequestBody.messages[1].role, "assistant");
+    assert.equal(syntheticRequestBody.messages[2].role, "tool");
+    assert.equal(syntheticRequestBody.messages[2].tool_call_id, "missing-tool-result-call");
+    assert.equal(syntheticRequestBody.messages[2].name, "testTool");
+    assert.equal(String(syntheticRequestBody.messages[2].content).includes("Synthetic tool result inserted by ProviderFacade"), true);
+    assert.equal(syntheticRequestBody.messages[3].role, "user");
+    assert.equal(syntheticOutput.normalizedRequest?.messages[2].role, "tool");
+    assert.equal(syntheticOutput.normalizedRequest?.syntheticToolResults?.[0].toolCallId, "missing-tool-result-call");
+    assert.equal(syntheticOutput.normalizedRequest?.syntheticToolResults?.[0].reason, "missing_tool_result");
+
+    let imageRequestBody: any;
+    globalThis.fetch = (async (_url: any, init?: any) => {
+      imageRequestBody = JSON.parse(String(init?.body ?? "{}"));
+      return new Response(JSON.stringify({
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "image ok" } }],
+        usage: { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const imageOutput = await client.complete({
+      ...input,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "inspect image" },
+          { type: "input_image", image_url: { url: "data:image/png;base64,ZmFrZQ==", detail: "low" } }
+        ] as unknown as string
+      }]
+    });
+    assert.equal(imageOutput.message.content, "image ok");
+    assert.equal(imageRequestBody.messages[0].content[0].type, "text");
+    assert.equal(imageRequestBody.messages[0].content[1].type, "image_url");
+    assert.equal(imageRequestBody.messages[0].content[1].image_url.url, "data:image/png;base64,ZmFrZQ==");
+    assert.equal(imageOutput.normalizedRequest?.messages[0].content[1].type, "image");
+    assert.equal(imageOutput.normalizedRequest?.messages[0].content[1].mimeType, "image/png");
+    assert.equal(imageOutput.normalizedRequest?.messages[0].content[1].detail, "low");
+
+    let toolImageRequestBody: any;
+    globalThis.fetch = (async (_url: any, init?: any) => {
+      toolImageRequestBody = JSON.parse(String(init?.body ?? "{}"));
+      return new Response(JSON.stringify({
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "tool image ok" } }],
+        usage: { prompt_tokens: 12, completion_tokens: 2, total_tokens: 14 }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const toolImageOutput = await client.complete({
+      ...input,
+      messages: [
+        { role: "user", content: "read image through tool" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "read-image-call",
+            type: "function",
+            function: {
+              name: "read",
+              arguments: JSON.stringify({ path: "pixel.png" })
+            }
+          }]
+        },
+        {
+          role: "tool",
+          tool_call_id: "read-image-call",
+          name: "read",
+          content: JSON.stringify({
+            path: "pixel.png",
+            mediaType: "image",
+            mimeType: "image/png",
+            imageContent: {
+              type: "input_image",
+              image_url: {
+                url: "data:image/png;base64,ZmFrZQ==",
+                detail: "low"
+              }
+            }
+          })
+        }
+      ]
+    });
+    assert.equal(toolImageOutput.message.content, "tool image ok");
+    assert.equal(toolImageRequestBody.messages[2].role, "tool");
+    assert.equal(toolImageRequestBody.messages[2].content[0].type, "text");
+    assert.equal(toolImageRequestBody.messages[2].content[0].text.includes("routedToProviderImagePart"), true);
+    assert.equal(toolImageRequestBody.messages[2].content[0].text.includes("data:image/png;base64"), false);
+    assert.equal(toolImageRequestBody.messages[2].content[1].type, "image_url");
+    assert.equal(toolImageRequestBody.messages[2].content[1].image_url.url, "data:image/png;base64,ZmFrZQ==");
+    assert.equal(toolImageOutput.normalizedRequest?.messages[2].content[0].type, "text");
+    assert.equal(toolImageOutput.normalizedRequest?.messages[2].content[1].type, "image");
+    assert.equal(toolImageOutput.normalizedRequest?.messages[2].content[1].mimeType, "image/png");
+    assert.equal(toolImageOutput.normalizedRequest?.messages[2].content[1].detail, "low");
+
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      choices: [{
+        index: 0,
+        finish_reason: "tool_calls",
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            type: "function",
+            function: {
+              name: "testTool",
+              arguments: JSON.stringify({ reason: "missing provider id" })
+            }
+          }]
+        }
+      }],
+      usage: { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 }
+    }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+    const missingIdOutput = await client.complete(input);
+    assert.equal(missingIdOutput.message.tool_calls?.[0].id, "tool_call_0");
+    assert.equal(missingIdOutput.message.tool_calls?.[0].type, "function");
+    assert.equal(missingIdOutput.message.tool_calls?.[0].function.name, "testTool");
+    assert.equal(missingIdOutput.normalizedResponse?.finishReason, "tool_calls");
+    assert.equal(missingIdOutput.normalizedResponse?.message?.toolCalls?.[0].id, "tool_call_0");
 
     let streamAttempts = 0;
     let streamRequestBody: any;
@@ -5976,20 +7552,70 @@ async function testOpenAIClientRetriesAndDecodesErrors() {
       if (streamAttempts === 1) {
         return new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 });
       }
-      return new Response("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n", {
+      return new Response([
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}",
+        "",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}",
+        "",
+        "data: [DONE]",
+        "",
+        ""
+      ].join("\n"), {
         status: 200,
         headers: { "content-type": "text/event-stream" }
       });
     }) as typeof fetch;
     let streamed = "";
+    let streamDoneRaw: any;
     for await (const event of client.streamEvents(input)) {
       if (event.type === "content") streamed += event.text;
+      if (event.type === "done") streamDoneRaw = event.raw;
     }
     assert.equal(streamAttempts, 2);
     assert.equal(streamed, "ok");
     assert.equal(streamRequestBody.stream, true);
     assert.equal(streamRequestBody.apiKey, undefined);
     assert.equal(streamRequestBody.tools[0].function.name, "testTool");
+    assert.equal(streamDoneRaw.rawRequest.body.apiKey, undefined);
+    assert.equal(streamDoneRaw.rawRequest.body.stream, true);
+    assert.equal(streamDoneRaw.normalizedRequest.stream, true);
+    assert.equal(streamDoneRaw.normalizedResponse.finishReason, "stop");
+    assert.equal(streamDoneRaw.normalizedResponse.rawChoiceIndex, 0);
+    assert.equal(streamDoneRaw.normalizedResponse.message.content[0].text, "ok");
+    assert.equal(streamDoneRaw.normalizedResponse.usage.inputTokens, 4);
+    assert.equal(streamDoneRaw.usage.totalTokens, 6);
+    assert.equal(streamDoneRaw.rawEvents.length, 2);
+
+    globalThis.fetch = (async () => new Response([
+      "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"stream-tool-call\",\"function\":{\"name\":\"testTool\",\"arguments\":\"{\\\"reason\\\"\"}}]}}]}",
+      "",
+      "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"streamed\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
+      "",
+      "data: [DONE]",
+      "",
+      ""
+    ].join("\n"), {
+      status: 200,
+      headers: { "content-type": "text/event-stream" }
+    })) as typeof fetch;
+    let streamToolDoneRaw: any;
+    for await (const event of client.streamEvents(input)) {
+      if (event.type === "done") streamToolDoneRaw = event.raw;
+    }
+    assert.equal(streamToolDoneRaw.normalizedResponse.finishReason, "tool_calls");
+    assert.equal(streamToolDoneRaw.normalizedResponse.message.toolCalls[0].id, "stream-tool-call");
+    assert.equal(streamToolDoneRaw.normalizedResponse.message.toolCalls[0].name, "testTool");
+    assert.equal(streamToolDoneRaw.normalizedResponse.message.toolCalls[0].arguments, "{\"reason\":\"streamed\"}");
+
+    globalThis.fetch = (async () => new Response("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: {bad json}\n\n", {
+      status: 200,
+      headers: { "content-type": "text/event-stream" }
+    })) as typeof fetch;
+    await assert.rejects(async () => {
+      for await (const _event of client.streamEvents(input)) {
+        // Drain until malformed JSON is encountered.
+      }
+    }, /Malformed OpenAI-compatible stream event JSON at event 2.*data=\{bad json\}/);
 
     globalThis.fetch = (async () => {
       const body = gzipSync(Buffer.from(JSON.stringify({ error: { message: "bad request detail" } }), "utf8"));
@@ -6041,10 +7667,15 @@ async function main() {
   await testTraceAndToolLogsAreUserScoped();
   await testLlmLogsAreUserScoped();
   await testApprovalListIsUserScoped();
+  await testApprovalResolutionWritesSessionEntries();
   await testRuntimeContextAndTools();
   await testLlmMemoryContextUsesWorkspaceSessionRecall();
+  await testWorkspaceResourceLoaderInjectsZleapTemplatesAndSkills();
+  await testSafeExtensionBoundaryRegistersToolsResourcesAndLifecycle();
   await testMemoryRecallAuditLogsZeroHits();
   await testAuditLogsStayOutOfModelContext();
+  await testSessionEntriesRebuildMainHistoryAfterLegacyMessagesDeleted();
+  await testSessionEntriesRecordModelChanges();
   await testAttentionBudgetTrimsHistoryButKeepsJson();
   await testAgentSelfImpressionRecallIsAgentScoped();
   await testWorkspaceExitReturnsToMain();
@@ -6068,6 +7699,7 @@ async function main() {
   await testMainOrchestrationTools();
   await testMemoryLifecycleHooks();
   await testConversationWindowEventExtractionUsesAbsoluteWindows();
+  await testRuntimeEventRollupUsesActiveModelProjectionInput();
   await testStreamingConversationWindowMemoryIncludesAssistantMessage();
   await testSkillEvidenceFromWorkspaceEvents();
   await testEventHookSkillExtractionIsDesensitizedAndDeduplicated();
@@ -6086,7 +7718,9 @@ async function main() {
   await testRuntimeMemoryToolsAreUniversalAndPolicyGated();
   await testDirectMemoryApiUsesPolicyLayer();
   await testSearchMemoryToolUsesPolicyLayer();
+  await testBuiltinPiFileToolsBehavior();
   await testToolBindingsAndMcpReadiness();
+  await testParallelToolBatchUsesExecutionModeAndPreservesResultOrder();
   await testSeedRefreshesExistingToolSchemas();
   await testWorkspaceBoundary();
   await testChildWorkspaceCannotUseMainOnlyToolsEvenIfBound();

@@ -5,20 +5,44 @@ import { AttentionBudgetManager, DEFAULT_ATTENTION_BUDGET, estimateTokens } from
 import { createId, nowIso } from "./id";
 import { ChatCompletionOutput, LLMClient, LLMStreamEvent, normalizeChatCompletionsEndpoint, normalizeProviderBaseUrl, OpenAICompatibleClient } from "./llm-client";
 import { WorkspaceRuntime } from "./workspace-runtime";
-import { MemoryService } from "./memory-service";
+import { MemoryService, type EventRollupDraft, type EventRollupTriggerSource } from "./memory-service";
 import { PolicyEngine } from "./policy-engine";
 import { HookManager } from "./hook-manager";
 import type { ToolExecutionResult } from "./tool-registry";
 import { ToolRegistry } from "./tool-registry";
 import { runtimeConfigNumber } from "./runtime-config";
+import { expandFilesystemSkillFile, expandPromptTemplate, loadFilesystemSkillFile, loadPromptTemplateFile, loadWorkspaceResources, parseResourceCommand } from "./resource-loader";
+import { SafeExtensionLifecycleEvent, SafeExtensionRegistry } from "./extension-registry";
 
 type LLMToolCall = NonNullable<LLMMessage["tool_calls"]>[number];
 type ToolCallAccumulator = Partial<LLMToolCall> & { function: { name: string; arguments: string } };
 const TOOL_LOOP_LIMIT_USER_MESSAGE = "这一步还没有形成稳定的可交付结果。我先暂停在这里；你可以让我继续推进，或者补充更具体的目标。";
+type PromptTemplateExpansion = {
+  resourceKind: "prompt_template" | "filesystem_skill";
+  originalMessage: string;
+  expandedMessage: string;
+  templateName: string;
+  templatePath: string;
+  templateScope: "workspace" | "global";
+  args: string[];
+};
+type RuntimeRunInput = AgentRunInput & { promptTemplateExpansion?: PromptTemplateExpansion };
 
 function summarizeAssistantMessage(value: string, maxLength = 500): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}...`;
+}
+
+function finalMessagesWithAssistant(messages: LLMMessage[], assistantMessage: string): LLMMessage[] {
+  const last = messages.at(-1);
+  if (last?.role === "assistant" && !last.tool_calls?.length && last.content === assistantMessage) return messages;
+  return [
+    ...messages,
+    {
+      role: "assistant",
+      content: assistantMessage
+    }
+  ];
 }
 
 function summarizeToolResultForChat(content: string, maxLength = 700): string {
@@ -111,15 +135,54 @@ function parseJsonValue<T>(value: string, fallback: T): T {
   }
 }
 
+function parseJsonObjectFromText(value: string): Record<string, unknown> | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const candidate = fenced ? fenced[1].trim() : trimmed;
+  try {
+    const parsed = JSON.parse(candidate) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    const firstBrace = candidate.indexOf("{");
+    const lastBrace = candidate.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      try {
+        const parsed = JSON.parse(candidate.slice(firstBrace, lastBrace + 1)) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+      } catch {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
+}
+
 function llmResponseSnapshot(completion: ChatCompletionOutput, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ...(completion.raw && typeof completion.raw === "object" ? completion.raw as Record<string, unknown> : { raw: completion.raw }),
     message: completion.message,
+    provider: {
+      rawRequest: completion.rawRequest,
+      rawResponse: completion.raw,
+      normalizedRequest: completion.normalizedRequest,
+      normalizedResponse: completion.normalizedResponse,
+      usage: completion.usage
+    },
     ...extra
   };
 }
 
-function llmTokenUsage(raw: unknown): Record<string, unknown> | undefined {
+function llmTokenUsage(completion: ChatCompletionOutput): Record<string, unknown> | undefined {
+  if (completion.usage) {
+    return {
+      inputTokens: completion.usage.inputTokens,
+      outputTokens: completion.usage.outputTokens,
+      totalTokens: completion.usage.totalTokens,
+      providerUsage: completion.usage.providerUsage
+    };
+  }
+  const raw = completion.raw;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const usage = (raw as Record<string, unknown>).usage;
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) return undefined;
@@ -136,12 +199,13 @@ export class AgentRuntime {
 
   constructor(
     private readonly repos: Repositories,
-    private readonly llmClient: LLMClient = new OpenAICompatibleClient()
+    private readonly llmClient: LLMClient = new OpenAICompatibleClient(),
+    private readonly extensionRegistry: SafeExtensionRegistry = new SafeExtensionRegistry()
   ) {
     this.workspaceRuntime = new WorkspaceRuntime(repos);
     this.memoryService = new MemoryService(repos);
     this.hookManager = new HookManager(repos);
-    this.toolRegistry = new ToolRegistry(repos, this.memoryService, this.workspaceRuntime, this.policy);
+    this.toolRegistry = new ToolRegistry(repos, this.memoryService, this.workspaceRuntime, this.policy, this.extensionRegistry);
   }
 
   private maxToolRounds(): number {
@@ -154,6 +218,199 @@ export class AgentRuntime {
       maxProviderAttempts: runtimeConfigNumber(values, "llm.maxProviderAttempts"),
       providerFetchTimeoutMs: runtimeConfigNumber(values, "llm.providerFetchTimeoutMs"),
       streamIdleTimeoutMs: runtimeConfigNumber(values, "llm.streamIdleTimeoutMs")
+    };
+  }
+
+  private async afterAgentTurnMemoryWrites(input: AgentRunInput, prepared: AgentRunPrepared, assistantMessage: string): Promise<MemoryRow[]> {
+    const writes = this.memoryService.afterAgentTurn({
+      run: input,
+      activeWorkspaceId: prepared.activeWorkspaceId,
+      assistantMessage,
+      writeEventRollup: false
+    });
+    const eventRollup = await this.maybeWriteActiveModelEventRollup(input, prepared, prepared.activeWorkspaceId, "afterConversationWindow");
+    if (eventRollup) writes.push(eventRollup);
+    return writes;
+  }
+
+  private async finalizeAfterAgentTurn(
+    input: AgentRunInput,
+    prepared: AgentRunPrepared,
+    assistantMessage: string,
+    options: {
+      llmCallId: string;
+      existingMemoryWrites?: MemoryRow[];
+      metadata?: Record<string, unknown>;
+    }
+  ): Promise<MemoryRow[]> {
+    const hookWrites = await this.afterAgentTurnMemoryWrites(input, prepared, assistantMessage);
+    const memoryWrites = [...(options.existingMemoryWrites ?? []), ...hookWrites];
+    const metadata = {
+      conversationId: input.conversationId,
+      workspaceId: prepared.activeWorkspaceId,
+      llmCallId: options.llmCallId,
+      ...(options.metadata ?? {}),
+      memoryWriteCount: memoryWrites.length
+    };
+    this.hookManager.record({
+      hook: "afterAgentTurn",
+      actorId: input.userId,
+      actorRole: input.userRole,
+      metadata
+    });
+    this.emitExtensionLifecycle({
+      hook: "afterAgentTurn",
+      conversationId: input.conversationId,
+      workspaceId: prepared.activeWorkspaceId,
+      userId: input.userId,
+      userRole: input.userRole,
+      metadata: {
+        llmCallId: options.llmCallId,
+        ...(options.metadata ?? {}),
+        memoryWriteCount: memoryWrites.length
+      }
+    });
+    return memoryWrites;
+  }
+
+  private async finalizeVisibleAssistantTurn(
+    input: AgentRunInput,
+    prepared: AgentRunPrepared,
+    assistantMessage: string,
+    options: {
+      llmCallId: string;
+      finalMessages: LLMMessage[];
+      existingMemoryWrites?: MemoryRow[];
+      messageRaw?: unknown;
+      finalizeMetadata?: Record<string, unknown>;
+      mainCommitMetadata?: Record<string, unknown>;
+    }
+  ): Promise<AgentRunOutput> {
+    if (options.mainCommitMetadata) {
+      this.commitMainAssistantResponse(prepared, assistantMessage, options.mainCommitMetadata);
+    }
+    this.repos.addMessage(input.conversationId, "assistant", assistantMessage, options.messageRaw ?? {});
+    const memoryWrites = await this.finalizeAfterAgentTurn(input, prepared, assistantMessage, {
+      llmCallId: options.llmCallId,
+      existingMemoryWrites: options.existingMemoryWrites,
+      metadata: options.finalizeMetadata
+    });
+    return {
+      conversationId: prepared.conversationId,
+      assistantMessage,
+      activeWorkspaceId: prepared.activeWorkspaceId,
+      workspaceTrace: prepared.workspaceTrace,
+      contextSegments: prepared.contextSegments,
+      finalMessages: finalMessagesWithAssistant(options.finalMessages, assistantMessage),
+      memoryWrites
+    };
+  }
+
+  private async afterWorkspaceExitMemoryWrites(input: AgentRunInput, prepared: AgentRunPrepared, session: WorkspaceSession): Promise<MemoryRow[]> {
+    if (session.workspaceId === "main") return [];
+    const writes = this.memoryService.afterWorkspaceExit({
+      run: input,
+      session,
+      writeEventRollup: false
+    });
+    const eventRollup = await this.maybeWriteActiveModelEventRollup(input, prepared, session.workspaceId, "afterWorkspaceExit");
+    if (eventRollup) writes.push(eventRollup);
+    return writes;
+  }
+
+  private async maybeWriteActiveModelEventRollup(
+    input: AgentRunInput,
+    prepared: AgentRunPrepared,
+    workspaceId: string,
+    triggerSource: EventRollupTriggerSource
+  ): Promise<MemoryRow | undefined> {
+    const draft = this.memoryService.buildEventRollupDraft(input, workspaceId, triggerSource);
+    if (!draft) return undefined;
+    try {
+      const completion = await this.llmClient.complete({
+        baseUrl: prepared.llm.baseUrl,
+        apiKey: prepared.llm.apiKey,
+        model: prepared.llm.model,
+        messages: this.activeModelEventRollupMessages(draft),
+        tools: [],
+        temperature: 0,
+        signal: input.abortSignal,
+        ...this.llmRequestRuntimeConfig()
+      });
+      const generated = this.eventRollupGeneratedContent(completion.message.content ?? "", draft);
+      const memory = this.memoryService.writeEventRollupFromDraft(input, draft, {
+        ...generated,
+        rollupMode: "active_model_event_projection",
+        rollupModel: prepared.llm.model
+      });
+      if (memory) {
+        this.repos.audit(input.userId, "system", "event_rollup_llm_completed", "memory", memory.id, {
+          conversationId: input.conversationId,
+          workspaceId,
+          triggerSource,
+          model: prepared.llm.model,
+          sourceEventIds: draft.sourceEventIds,
+          projectionCount: draft.projections.length,
+          returnedTextLength: (completion.message.content ?? "").length,
+          tokenUsage: llmTokenUsage(completion)
+        });
+      }
+      return memory;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.repos.audit(input.userId, "system", "event_rollup_llm_failed", "conversation", input.conversationId, {
+        conversationId: input.conversationId,
+        workspaceId,
+        triggerSource,
+        model: prepared.llm.model,
+        sourceEventIds: draft.sourceEventIds,
+        projectionCount: draft.projections.length,
+        error: message
+      });
+      return this.memoryService.writeEventRollupFromDraft(input, draft, {
+        summary: draft.fallbackSummary,
+        detail: draft.fallbackDetail,
+        rollupMode: "event_projection_fallback",
+        rollupModel: prepared.llm.model
+      });
+    }
+  }
+
+  private activeModelEventRollupMessages(draft: EventRollupDraft): LLMMessage[] {
+    return [
+      {
+        role: "system",
+        content: [
+          "You generate Zleap event memory rollups.",
+          "Use only the supplied event memory projections and sourceRefs.",
+          "Do not use or infer raw messages, tool arguments, full tool outputs, provider payloads, or unstated facts.",
+          "Return strict JSON with string fields summary and detail.",
+          "detail must use sections: Workspace Event Rollup, Scope, Stable Facts, Recent Outcomes, Open Threads, Tool/File Evidence References, Memory Links."
+        ].join(" ")
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          workspaceId: draft.workspaceId,
+          triggerSource: draft.triggerSource,
+          sourceEventIds: draft.sourceEventIds,
+          projections: draft.projections
+        })
+      }
+    ];
+  }
+
+  private eventRollupGeneratedContent(content: string, draft: EventRollupDraft): { summary: string; detail: string } {
+    const parsed = parseJsonObjectFromText(content);
+    const parsedSummary = typeof parsed?.summary === "string" ? parsed.summary.trim() : "";
+    const parsedDetail = typeof parsed?.detail === "string" ? parsed.detail.trim() : "";
+    const textFallback = content.trim();
+    const firstLine = textFallback.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
+    const summary = parsedSummary || firstLine || draft.fallbackSummary;
+    const detail = parsedDetail || (textFallback.includes("Workspace Event Rollup") ? textFallback : draft.fallbackDetail);
+    return {
+      summary,
+      detail
     };
   }
 
@@ -171,24 +428,82 @@ export class AgentRuntime {
     };
   }
 
-  async run(input: AgentRunInput): Promise<AgentRunOutput> {
-    const prepared = this.prepare(input);
-    let completion: ChatCompletionOutput;
+  private async completeLlmRound(
+    input: AgentRunInput,
+    prepared: AgentRunPrepared,
+    llmCallId: string,
+    messages: LLMMessage[],
+    metadata: Record<string, unknown> = {}
+  ): Promise<ChatCompletionOutput> {
     try {
-      completion = await this.llmClient.complete({
+      const completion = await this.llmClient.complete({
         baseUrl: prepared.llm.baseUrl,
         apiKey: prepared.llm.apiKey,
         model: prepared.llm.model,
-        messages: prepared.finalMessages,
+        messages,
         tools: prepared.callableTools,
         temperature: prepared.llm.temperature,
         signal: input.abortSignal,
         ...this.llmRequestRuntimeConfig()
       });
-      this.repos.markLlmCallCompleted(prepared.llmCallId, llmResponseSnapshot(completion));
+      this.repos.markLlmCallCompleted(llmCallId, llmResponseSnapshot(completion, metadata));
+      return completion;
+    } catch (error) {
+      this.repos.markLlmCallFailed(llmCallId, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  private async streamLlmRound(
+    input: AgentRunInput,
+    prepared: AgentRunPrepared,
+    llmCallId: string,
+    messages: LLMMessage[],
+    streamEvents: NonNullable<LLMClient["streamEvents"]>,
+    round: number
+  ): Promise<{ roundText: string; toolCalls: LLMToolCall[]; providerStreamRaw: unknown }> {
+    let roundText = "";
+    let providerStreamRaw: unknown;
+    const toolCallDeltas = new Map<number, ToolCallAccumulator>();
+    try {
+      for await (const event of streamEvents({
+        baseUrl: prepared.llm.baseUrl,
+        apiKey: prepared.llm.apiKey,
+        model: prepared.llm.model,
+        messages,
+        tools: prepared.callableTools,
+        temperature: prepared.llm.temperature,
+        signal: input.abortSignal,
+        ...this.llmRequestRuntimeConfig()
+      })) {
+        if (event.type === "content") roundText += event.text;
+        if (event.type === "tool_call_delta") this.mergeToolCallDelta(toolCallDeltas, event);
+        if (event.type === "done") providerStreamRaw = event.raw;
+      }
+      const toolCalls = this.materializeToolCalls(toolCallDeltas);
+      this.repos.markLlmCallCompleted(llmCallId, {
+        streamed: true,
+        returnedTextLength: roundText.length,
+        assistantMessage: roundText,
+        toolCallCount: toolCalls.length,
+        toolLoopRound: round,
+        provider: providerStreamRaw
+      });
+      return { roundText, toolCalls, providerStreamRaw };
+    } catch (error) {
+      this.repos.markLlmCallFailed(llmCallId, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  async run(input: AgentRunInput): Promise<AgentRunOutput> {
+    input = this.applyPromptTemplateCommand(input);
+    const prepared = this.prepare(input);
+    let completion: ChatCompletionOutput;
+    try {
+      completion = await this.completeLlmRound(input, prepared, prepared.llmCallId, prepared.finalMessages);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.repos.markLlmCallFailed(prepared.llmCallId, message);
       this.cleanupFailedRunMessage(input, prepared, message);
       throw error;
     }
@@ -204,41 +519,20 @@ export class AgentRuntime {
     completion = loopResult.completion;
 
     const assistantMessage = completion.message.content ?? "我已经处理了这一步，但没有生成可展示的文字结果。";
-    this.commitMainAssistantResponse(prepared, assistantMessage, { source: "directAssistantMessage" });
-    this.repos.addMessage(input.conversationId, "assistant", assistantMessage, completion.raw);
-    const memoryWrites = [
-      ...loopResult.memoryWrites,
-      ...this.memoryService.afterAgentTurn({
-      run: input,
-      activeWorkspaceId: prepared.activeWorkspaceId,
-      assistantMessage
-      })
-    ];
-    this.hookManager.record({
-      hook: "afterAgentTurn",
-      actorId: input.userId,
-      actorRole: input.userRole,
-      metadata: {
-        conversationId: input.conversationId,
-        workspaceId: prepared.activeWorkspaceId,
-        llmCallId: prepared.llmCallId,
-        tokenUsage: llmTokenUsage(completion.raw),
-        memoryWriteCount: memoryWrites.length
-      }
-    });
-
-    return {
-      conversationId: prepared.conversationId,
-      assistantMessage,
-      activeWorkspaceId: prepared.activeWorkspaceId,
-      workspaceTrace: prepared.workspaceTrace,
-      contextSegments: prepared.contextSegments,
+    return this.finalizeVisibleAssistantTurn(input, prepared, assistantMessage, {
+      llmCallId: prepared.llmCallId,
+      existingMemoryWrites: loopResult.memoryWrites,
+      messageRaw: completion.raw,
+      finalizeMetadata: {
+        tokenUsage: llmTokenUsage(completion)
+      },
       finalMessages: loopResult.finalMessages,
-      memoryWrites
-    };
+      mainCommitMetadata: { source: "directAssistantMessage" }
+    });
   }
 
   async *runStream(input: AgentRunInput): AsyncGenerator<AgentStreamEvent> {
+    input = this.applyPromptTemplateCommand(input);
     const prepared = this.prepare(input);
     yield {
       type: "start",
@@ -268,30 +562,8 @@ export class AgentRuntime {
       try {
         const maxToolRounds = this.maxToolRounds();
         for (let round = 1; round <= maxToolRounds + 1; round += 1) {
-          let roundText = "";
-          const toolCallDeltas = new Map<number, ToolCallAccumulator>();
-          for await (const event of streamEvents({
-            baseUrl: prepared.llm.baseUrl,
-            apiKey: prepared.llm.apiKey,
-            model: prepared.llm.model,
-            messages,
-            tools: prepared.callableTools,
-            temperature: prepared.llm.temperature,
-            signal: input.abortSignal,
-            ...this.llmRequestRuntimeConfig()
-          })) {
-            if (event.type === "content") roundText += event.text;
-            if (event.type === "tool_call_delta") this.mergeToolCallDelta(toolCallDeltas, event);
-          }
-          const toolCalls = this.materializeToolCalls(toolCallDeltas);
+          const { roundText, toolCalls } = await this.streamLlmRound(input, prepared, currentLlmCallId, messages, streamEvents, round);
           const activeWorkspaceBeforeTools = prepared.activeWorkspaceId;
-          this.repos.markLlmCallCompleted(currentLlmCallId, {
-            streamed: true,
-            returnedTextLength: roundText.length,
-            assistantMessage: roundText,
-            toolCallCount: toolCalls.length,
-            toolLoopRound: round
-          });
 
           if (toolCalls.length === 0) {
             if (prepared.activeWorkspaceId !== "main") {
@@ -314,44 +586,24 @@ export class AgentRuntime {
               continue;
             }
             assistantMessage = roundText;
-            this.commitMainAssistantResponse(prepared, assistantMessage, { source: "streamedDirectAssistantMessage" });
-            if (assistantMessage) yield { type: "delta", text: assistantMessage };
-            this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true });
-            const hookWrites = this.memoryService.afterAgentTurn({
-              run: input,
-              activeWorkspaceId: prepared.activeWorkspaceId,
-              assistantMessage
-            });
-            this.hookManager.record({
-              hook: "afterAgentTurn",
-              actorId: input.userId,
-              actorRole: input.userRole,
-              metadata: {
-                conversationId: input.conversationId,
-                workspaceId: prepared.activeWorkspaceId,
-                llmCallId: currentLlmCallId,
-                streamed: true,
-                memoryWriteCount: memoryWrites.length + hookWrites.length
-              }
+            if (assistantMessage) {
+              this.recordAssistantDeltaEntry(input, prepared.activeWorkspaceId, currentLlmCallId, assistantMessage, "streamEvents.final");
+              yield { type: "delta", text: assistantMessage };
+            }
+            const output = await this.finalizeVisibleAssistantTurn(input, prepared, assistantMessage, {
+              llmCallId: currentLlmCallId,
+              existingMemoryWrites: memoryWrites,
+              messageRaw: { streamed: true },
+              finalizeMetadata: {
+                streamed: true
+              },
+              finalMessages: messages,
+              mainCommitMetadata: { source: "streamedDirectAssistantMessage" }
             });
             yield {
               type: "done",
-              output: {
-                conversationId: prepared.conversationId,
-                assistantMessage,
-              activeWorkspaceId: prepared.activeWorkspaceId,
-              workspaceTrace: prepared.workspaceTrace,
-              contextSegments: prepared.contextSegments,
-              finalMessages: [
-                ...messages,
-                {
-                  role: "assistant",
-                  content: assistantMessage
-                }
-              ],
-              memoryWrites: [...memoryWrites, ...hookWrites]
-            }
-          };
+              output
+            };
             return;
           }
 
@@ -364,40 +616,24 @@ export class AgentRuntime {
               streamed: true
             });
             assistantMessage = TOOL_LOOP_LIMIT_USER_MESSAGE;
-            if (prepared.activeWorkspaceId === "main") {
-              this.commitMainAssistantResponse(prepared, assistantMessage, { source: "streamedToolLoopLimit", stoppedBy: "maxToolRounds" });
-            }
+            this.recordAssistantDeltaEntry(input, prepared.activeWorkspaceId, currentLlmCallId, assistantMessage, "streamEvents.toolLoopLimit");
             yield { type: "delta", text: assistantMessage };
-            this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true, stoppedBy: "maxToolRounds" });
-            const hookWrites = this.memoryService.afterAgentTurn({
-              run: input,
-              activeWorkspaceId: prepared.activeWorkspaceId,
-              assistantMessage
-            });
-            this.hookManager.record({
-              hook: "afterAgentTurn",
-              actorId: input.userId,
-              actorRole: input.userRole,
-              metadata: {
-                conversationId: input.conversationId,
-                workspaceId: prepared.activeWorkspaceId,
-                llmCallId: currentLlmCallId,
+            const output = await this.finalizeVisibleAssistantTurn(input, prepared, assistantMessage, {
+              llmCallId: currentLlmCallId,
+              existingMemoryWrites: memoryWrites,
+              messageRaw: { streamed: true, stoppedBy: "maxToolRounds" },
+              finalizeMetadata: {
                 streamed: true,
-                memoryWriteCount: memoryWrites.length + hookWrites.length,
                 stoppedBy: "maxToolRounds"
-              }
+              },
+              finalMessages: messages,
+              mainCommitMetadata: prepared.activeWorkspaceId === "main"
+                ? { source: "streamedToolLoopLimit", stoppedBy: "maxToolRounds" }
+                : undefined
             });
             yield {
               type: "done",
-              output: {
-                conversationId: prepared.conversationId,
-                assistantMessage,
-                activeWorkspaceId: prepared.activeWorkspaceId,
-                workspaceTrace: prepared.workspaceTrace,
-                contextSegments: prepared.contextSegments,
-                finalMessages: messages,
-                memoryWrites: [...memoryWrites, ...hookWrites]
-              }
+              output
             };
             return;
           }
@@ -435,14 +671,9 @@ export class AgentRuntime {
               items: toolCallItems
             };
           }
-          const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
+          const roundAdvance = await this.executeToolRoundAndAdvance(input, prepared, messages, assistantToolMessage, toolCalls);
+          const { toolExecution, nextMessages, followUpLlmCallId, transitionLlmCallId } = roundAdvance;
           memoryWrites.push(...toolExecution.memoryWrites);
-          const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
-            ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, assistantToolMessage, toolExecution.toolMessages);
-          const nextMessages = transition?.messages ?? [...messages, assistantToolMessage, ...toolExecution.toolMessages];
-          const followUpLlmCallId = toolExecution.terminalAssistantMessage
-            ? undefined
-            : transition?.llmCallId ?? this.saveFollowUpLlmCall(input, prepared, nextMessages, toolExecution.toolMessages);
           if (activeWorkspaceBeforeTools !== "main" && toolExecution.toolMessages.length > 0) {
             const toolResultItems = toolExecution.toolMessages.map((message) => ({
               toolName: message.name ?? "tool",
@@ -468,7 +699,7 @@ export class AgentRuntime {
               eventKind: "entered",
               title: `进入 ${toolExecution.enteredWorkspaceSession.workspaceId} 工作空间`,
               text: toolExecution.enteredWorkspaceSession.objective,
-              llmCallId: transition?.llmCallId ?? currentLlmCallId,
+              llmCallId: transitionLlmCallId ?? currentLlmCallId,
               status: toolExecution.enteredWorkspaceSession.status
             };
           }
@@ -479,44 +710,28 @@ export class AgentRuntime {
               eventKind: "exit",
               title: `${toolExecution.exitedWorkspaceSession.workspaceId} 工作空间返回 main`,
               text: toolExecution.exitedWorkspaceSession.summary,
-              llmCallId: transition?.llmCallId ?? currentLlmCallId,
+              llmCallId: transitionLlmCallId ?? currentLlmCallId,
               status: toolExecution.exitedWorkspaceSession.status
             };
           }
           messages = nextMessages;
           if (toolExecution.terminalAssistantMessage) {
             assistantMessage = toolExecution.terminalAssistantMessage;
+            this.recordAssistantDeltaEntry(input, prepared.activeWorkspaceId, currentLlmCallId, assistantMessage, "streamEvents.terminalToolResult");
             yield { type: "delta", text: assistantMessage };
-            this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true, terminalToolResult: true });
-            const hookWrites = this.memoryService.afterAgentTurn({
-              run: input,
-              activeWorkspaceId: prepared.activeWorkspaceId,
-              assistantMessage
-            });
-            this.hookManager.record({
-              hook: "afterAgentTurn",
-              actorId: input.userId,
-              actorRole: input.userRole,
-              metadata: {
-                conversationId: input.conversationId,
-                workspaceId: prepared.activeWorkspaceId,
-                llmCallId: currentLlmCallId,
+            const output = await this.finalizeVisibleAssistantTurn(input, prepared, assistantMessage, {
+              llmCallId: currentLlmCallId,
+              existingMemoryWrites: memoryWrites,
+              messageRaw: { streamed: true, terminalToolResult: true },
+              finalizeMetadata: {
                 streamed: true,
-                terminalToolResult: true,
-                memoryWriteCount: memoryWrites.length + hookWrites.length
-              }
+                terminalToolResult: true
+              },
+              finalMessages: messages
             });
             yield {
               type: "done",
-              output: {
-                conversationId: prepared.conversationId,
-                assistantMessage,
-                activeWorkspaceId: prepared.activeWorkspaceId,
-                workspaceTrace: prepared.workspaceTrace,
-                contextSegments: prepared.contextSegments,
-                finalMessages: messages,
-                memoryWrites: [...memoryWrites, ...hookWrites]
-              }
+              output
             };
             return;
           }
@@ -530,49 +745,26 @@ export class AgentRuntime {
             streamed: true
           });
           assistantMessage = "当前步骤还没有形成可靠的可交付结果。请确认是否继续推进，或补充下一步要求。";
+          this.recordAssistantDeltaEntry(input, prepared.activeWorkspaceId, currentLlmCallId, assistantMessage, "streamEvents.missingWorkspaceExit");
           yield { type: "delta", text: assistantMessage };
-          this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true, stoppedBy: "missingWorkspaceExit" });
-          const hookWrites = this.memoryService.afterAgentTurn({
-            run: input,
-            activeWorkspaceId: prepared.activeWorkspaceId,
-            assistantMessage
-          });
-          this.hookManager.record({
-            hook: "afterAgentTurn",
-            actorId: input.userId,
-            actorRole: input.userRole,
-            metadata: {
-              conversationId: input.conversationId,
-              workspaceId: prepared.activeWorkspaceId,
-              llmCallId: currentLlmCallId,
+          const output = await this.finalizeVisibleAssistantTurn(input, prepared, assistantMessage, {
+            llmCallId: currentLlmCallId,
+            existingMemoryWrites: memoryWrites,
+            messageRaw: { streamed: true, stoppedBy: "missingWorkspaceExit" },
+            finalizeMetadata: {
               streamed: true,
-              memoryWriteCount: memoryWrites.length + hookWrites.length,
               stoppedBy: "missingWorkspaceExit"
-            }
+            },
+            finalMessages: messages
           });
           yield {
             type: "done",
-            output: {
-              conversationId: prepared.conversationId,
-              assistantMessage,
-              activeWorkspaceId: prepared.activeWorkspaceId,
-              workspaceTrace: prepared.workspaceTrace,
-              contextSegments: prepared.contextSegments,
-              finalMessages: [
-                ...messages,
-                {
-                  role: "assistant",
-                  content: assistantMessage
-                }
-              ],
-              memoryWrites: [...memoryWrites, ...hookWrites]
-            }
+            output
           };
           return;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.repos.markLlmCallFailed(currentLlmCallId, message);
         this.cleanupFailedRunMessage(input, prepared, message);
         throw error;
       }
@@ -596,6 +788,7 @@ export class AgentRuntime {
           returnedTextLength: assistantMessage.length,
           assistantMessage
         });
+        this.recordAssistantDeltaEntry(input, prepared.activeWorkspaceId, prepared.llmCallId, assistantMessage, "chunkStream.final");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         this.repos.markLlmCallFailed(prepared.llmCallId, message);
@@ -604,40 +797,98 @@ export class AgentRuntime {
       }
     }
 
-    this.commitMainAssistantResponse(prepared, assistantMessage, { source: "chunkStreamAssistantMessage" });
-    this.repos.addMessage(input.conversationId, "assistant", assistantMessage, { streamed: true });
-    const memoryWrites = this.memoryService.afterAgentTurn({
-      run: input,
-      activeWorkspaceId: prepared.activeWorkspaceId,
-      assistantMessage
-    });
-    this.hookManager.record({
-      hook: "afterAgentTurn",
-      actorId: input.userId,
-      actorRole: input.userRole,
-      metadata: {
-        conversationId: input.conversationId,
-        workspaceId: prepared.activeWorkspaceId,
-        llmCallId: prepared.llmCallId,
-        streamed: true,
-        memoryWriteCount: memoryWrites.length
-      }
+    const output = await this.finalizeVisibleAssistantTurn(input, prepared, assistantMessage, {
+      llmCallId: prepared.llmCallId,
+      messageRaw: { streamed: true },
+      finalizeMetadata: {
+        streamed: true
+      },
+      finalMessages: prepared.finalMessages,
+      mainCommitMetadata: { source: "chunkStreamAssistantMessage" }
     });
     yield {
       type: "done",
-      output: {
-        conversationId: prepared.conversationId,
-        assistantMessage,
-        activeWorkspaceId: prepared.activeWorkspaceId,
-        workspaceTrace: prepared.workspaceTrace,
-        contextSegments: prepared.contextSegments,
-        finalMessages: prepared.finalMessages,
-        memoryWrites
+      output
+    };
+  }
+
+  private recordAssistantDeltaEntry(input: AgentRunInput, workspaceId: string, llmCallId: string, text: string, source: string): void {
+    if (!text.trim()) return;
+    this.repos.appendSessionEntry({
+      conversationId: input.conversationId,
+      workspaceId,
+      type: "assistant_delta",
+      payload: {
+        llmCallId,
+        workspaceId,
+        source,
+        text,
+        textLength: text.length,
+        streamed: true
+      }
+    });
+  }
+
+  private emitExtensionLifecycle(event: SafeExtensionLifecycleEvent): void {
+    const emission = this.extensionRegistry.emitLifecycleEvent(event);
+    for (const failure of emission.failures) {
+      this.repos.audit(event.userId, "system", "extension_lifecycle_failed", "extension", failure.extensionId, {
+        conversationId: event.conversationId,
+        workspaceId: event.workspaceId,
+        extensionId: failure.extensionId,
+        hook: event.hook,
+        error: failure.error
+      });
+    }
+    for (const entry of emission.customSessionEntries) {
+      this.repos.appendSessionEntry({
+        conversationId: event.conversationId,
+        workspaceId: entry.workspaceId ?? event.workspaceId,
+        type: "custom",
+        payload: {
+          source: "extension",
+          extensionId: entry.extensionId,
+          hook: event.hook,
+          title: entry.title,
+          payload: entry.payload
+        }
+      });
+    }
+  }
+
+  private applyPromptTemplateCommand(input: AgentRunInput): RuntimeRunInput {
+    const command = parseResourceCommand(input.message);
+    if (!command) return input;
+    const resource = command.kind === "filesystem_skill"
+      ? loadFilesystemSkillFile({
+        conversationId: input.conversationId,
+        name: command.name
+      })
+      : loadPromptTemplateFile({
+        conversationId: input.conversationId,
+        name: command.name
+      });
+    if (!resource) return input;
+    const expandedMessage = command.kind === "filesystem_skill"
+      ? expandFilesystemSkillFile(resource, command.args).trim()
+      : expandPromptTemplate(resource.body, command.args).trim();
+    if (!expandedMessage) return input;
+    return {
+      ...input,
+      message: expandedMessage,
+      promptTemplateExpansion: {
+        resourceKind: command.kind,
+        originalMessage: input.message,
+        expandedMessage,
+        templateName: resource.name,
+        templatePath: resource.path,
+        templateScope: resource.scope,
+        args: command.args
       }
     };
   }
 
-  private prepare(input: AgentRunInput): AgentRunPrepared {
+  private prepare(input: RuntimeRunInput): AgentRunPrepared {
     const agent = this.repos.getAgent(input.agentId);
     const baseUrl = normalizeProviderBaseUrl(input.llm?.baseUrl || process.env.ZLEAP_LLM_API_URL || agent.defaultBaseUrl);
     const apiKey = input.llm?.apiKey || process.env.ZLEAP_LLM_API_KEY;
@@ -659,13 +910,56 @@ export class AgentRuntime {
         resumedWorkspaceSessionId: resumableSession?.id
       }
     });
-    const userMessageId = this.repos.addMessage(input.conversationId, "user", input.message);
+    this.emitExtensionLifecycle({
+      hook: "beforeAgentTurn",
+      conversationId: input.conversationId,
+      workspaceId: resumableSession?.workspaceId,
+      userId: input.userId,
+      userRole: input.userRole,
+      metadata: {
+        agentId: input.agentId,
+        model,
+        resumedWorkspaceId: resumableSession?.workspaceId,
+        resumedWorkspaceSessionId: resumableSession?.id
+      }
+    });
+    const userMessageId = this.repos.addMessage(
+      input.conversationId,
+      "user",
+      input.message,
+      input.promptTemplateExpansion ? { promptTemplateExpansion: input.promptTemplateExpansion } : {}
+    );
     this.repos.audit(input.userId, input.userRole, "user_message_received", "message", userMessageId, {
       conversationId: input.conversationId,
       agentId: input.agentId,
       messageId: userMessageId,
-      contentLength: input.message.length
+      contentLength: input.message.length,
+      promptTemplate: input.promptTemplateExpansion ? {
+        resourceKind: input.promptTemplateExpansion.resourceKind,
+        templateName: input.promptTemplateExpansion.templateName,
+        templatePath: input.promptTemplateExpansion.templatePath,
+        templateScope: input.promptTemplateExpansion.templateScope,
+        originalContentLength: input.promptTemplateExpansion.originalMessage.length,
+        expandedContentLength: input.promptTemplateExpansion.expandedMessage.length
+      } : undefined
     });
+    if (input.promptTemplateExpansion) {
+      const expansionAction = input.promptTemplateExpansion.resourceKind === "filesystem_skill"
+        ? "filesystem_skill_expanded"
+        : "prompt_template_expanded";
+      this.repos.audit(input.userId, "system", expansionAction, "message", userMessageId, {
+        conversationId: input.conversationId,
+        agentId: input.agentId,
+        messageId: userMessageId,
+        resourceKind: input.promptTemplateExpansion.resourceKind,
+        templateName: input.promptTemplateExpansion.templateName,
+        templatePath: input.promptTemplateExpansion.templatePath,
+        templateScope: input.promptTemplateExpansion.templateScope,
+        argumentCount: input.promptTemplateExpansion.args.length,
+        originalContentLength: input.promptTemplateExpansion.originalMessage.length,
+        expandedContentLength: input.promptTemplateExpansion.expandedMessage.length
+      });
+    }
 
     if (resumableSession) {
       const activeSession = this.resumeWorkspaceSession(input, resumableSession);
@@ -844,11 +1138,33 @@ export class AgentRuntime {
       history,
       toolsJson
     });
-    const baseMessages = this.promptAssembler.assemble(baseSegments, input.input.message);
+    const workspaceResources = loadWorkspaceResources({
+      conversationId: input.input.conversationId,
+      workspaceId: input.workspaceId
+    });
+    const extensionResources = this.extensionRegistry.resources(input.workspaceId);
+    const resourceContent = this.attentionBudgetManager().fitSegment("resources", JSON.stringify({
+      ...workspaceResources,
+      extensionPromptTemplates: extensionResources.promptTemplates,
+      extensionFilesystemSkills: extensionResources.filesystemSkills,
+      extensionSafeContext: extensionResources.safeContext
+    }, null, 2));
+    const resourceSegment: ContextSegment = {
+      id: createId("ctx"),
+      llmCallId: input.llmCallId,
+      conversationId: input.input.conversationId,
+      segmentType: "resources",
+      title: "Workspace Resources",
+      content: resourceContent,
+      tokenEstimate: estimateTokens(resourceContent),
+      sortOrder: 35
+    };
+    const contextSegments = [...baseSegments, resourceSegment].sort((a, b) => a.sortOrder - b.sortOrder);
+    const baseMessages = this.promptAssembler.assemble(contextSegments, input.input.message);
     const messages = input.assistantToolMessage && input.toolMessages?.length
       ? [...baseMessages, input.assistantToolMessage, ...input.toolMessages]
       : baseMessages;
-    const segments = [...baseSegments];
+    const segments = [...contextSegments];
     if (input.toolMessages?.length) {
       const toolResultContent = this.attentionBudgetManager().fitSegment("tool_result", JSON.stringify(input.toolMessages, null, 2));
       segments.push({
@@ -922,10 +1238,36 @@ export class AgentRuntime {
   }
 
   private selectLocalHistory(conversationId: string, workspaceId: string, userId: string, userRole: AgentRunInput["userRole"]): Array<{ role: string; content: string }> {
-    if (workspaceId === "main") return this.repos.listMessages(conversationId, 20).map((message) => ({
-      role: message.role,
-      content: message.content
-    }));
+    if (workspaceId === "main") {
+      const entryMessages = this.repos.reconstructSessionEntryContext({
+        conversationId,
+        userId: userRole === "creator" ? undefined : userId,
+        limit: 40
+      }).filter((message) => message.sourceType === "message").slice(-20);
+      if (entryMessages.length > 0) {
+        return entryMessages.map((message) => ({
+          role: message.role,
+          content: message.content
+        }));
+      }
+      return this.repos.listMessages(conversationId, 20).map((message) => ({
+        role: message.role,
+        content: message.content
+      }));
+    }
+
+    const entryLocalHistory = this.repos.reconstructSessionEntryContext({
+      conversationId,
+      userId: userRole === "creator" ? undefined : userId,
+      workspaceId,
+      limit: 20
+    });
+    if (entryLocalHistory.length > 0) {
+      return entryLocalHistory.map((message) => ({
+        role: message.role,
+        content: message.content
+      }));
+    }
 
     const trace = this.repos.getTrace(conversationId, userId, userRole);
     const localToolNames = this.localWorkspaceToolNames(workspaceId);
@@ -1183,6 +1525,64 @@ export class AgentRuntime {
   }
 
   private async executeToolCalls(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): Promise<{ toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string }> {
+    const sequential = this.shouldExecuteToolBatchSequential(prepared, toolCalls);
+    this.repos.audit(input.userId, "system", "tool_batch_execution", "conversation", input.conversationId, {
+      conversationId: input.conversationId,
+      workspaceId: prepared.activeWorkspaceId,
+      mode: sequential ? "sequential" : "parallel",
+      toolNames: toolCalls.map((toolCall) => toolCall.function.name),
+      toolCount: toolCalls.length
+    });
+    return sequential
+      ? this.executeToolCallsSequential(input, prepared, toolCalls)
+      : this.executeToolCallsParallel(input, prepared, toolCalls);
+  }
+
+  private async executeToolRoundAndAdvance(
+    input: AgentRunInput,
+    prepared: AgentRunPrepared,
+    messages: LLMMessage[],
+    assistantToolMessage: LLMMessage,
+    toolCalls: LLMToolCall[]
+  ): Promise<{
+    toolExecution: Awaited<ReturnType<AgentRuntime["executeToolCalls"]>>;
+    nextMessages: LLMMessage[];
+    followUpLlmCallId?: string;
+    transitionLlmCallId?: string;
+  }> {
+    const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
+    const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, assistantToolMessage, toolExecution.toolMessages)
+      ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, assistantToolMessage, toolExecution.toolMessages);
+    const nextMessages = transition?.messages ?? [...messages, assistantToolMessage, ...toolExecution.toolMessages];
+    const followUpLlmCallId = toolExecution.terminalAssistantMessage
+      ? undefined
+      : transition?.llmCallId ?? this.saveFollowUpLlmCall(input, prepared, nextMessages, toolExecution.toolMessages);
+    return {
+      toolExecution,
+      nextMessages,
+      followUpLlmCallId,
+      transitionLlmCallId: transition?.llmCallId
+    };
+  }
+
+  private shouldExecuteToolBatchSequential(prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): boolean {
+    if (toolCalls.length <= 1) return true;
+    const transitionTools = new Set(["enterWorkspace", "exitWorkspace", "askUser", "finishTask"]);
+    const allTools = new Map([
+      ...prepared.callableTools.map((tool) => [tool.name, tool] as const),
+      ...this.repos.listTools().map((tool) => [tool.name, tool] as const)
+    ]);
+    return toolCalls.some((toolCall) => {
+      const toolName = toolCall.function.name;
+      const tool = allTools.get(toolName);
+      return transitionTools.has(toolName)
+        || !tool
+        || tool.executionMode === "sequential"
+        || tool.riskLevel === "high";
+    });
+  }
+
+  private async executeToolCallsSequential(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): Promise<{ toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string }> {
     const memoryWrites: MemoryRow[] = [];
     const toolMessages: LLMMessage[] = [];
     let enteredWorkspaceSession: WorkspaceSession | undefined;
@@ -1275,10 +1675,7 @@ export class AgentRuntime {
         }
       });
       if (justExitedWorkspaceSession) {
-        memoryWrites.push(...this.memoryService.afterWorkspaceExit({
-          run: input,
-          session: justExitedWorkspaceSession
-        }));
+        memoryWrites.push(...await this.afterWorkspaceExitMemoryWrites(input, prepared, justExitedWorkspaceSession));
         workspaceExitedInBatch = true;
       }
       toolMessages.push({
@@ -1288,6 +1685,110 @@ export class AgentRuntime {
         content: JSON.stringify(result.result)
       });
     }
+    return { toolMessages, memoryWrites, enteredWorkspaceSession, exitedWorkspaceSession, terminalAssistantMessage };
+  }
+
+  private async executeToolCallsParallel(input: AgentRunInput, prepared: AgentRunPrepared, toolCalls: LLMToolCall[]): Promise<{ toolMessages: LLMMessage[]; memoryWrites: MemoryRow[]; enteredWorkspaceSession?: WorkspaceSession; exitedWorkspaceSession?: WorkspaceSession; terminalAssistantMessage?: string }> {
+    const activeWorkspaceId = prepared.activeWorkspaceId;
+    const activeSession = this.findActiveWorkspaceSession(prepared);
+    const pending = toolCalls.map((toolCall) => {
+      const toolName = toolCall.function.name;
+      const pendingToolCall = this.repos.saveToolCall({
+        conversationId: input.conversationId,
+        userId: input.userId,
+        workspaceId: activeWorkspaceId,
+        workspaceSessionId: activeSession?.id,
+        taskId: activeSession?.taskId,
+        toolName,
+        argumentsJson: toolCall.function.arguments,
+        resultJson: "{}",
+        status: "pending"
+      });
+      this.hookManager.record({
+        hook: "beforeToolCall",
+        actorId: input.userId,
+        actorRole: input.userRole,
+        resourceKind: "tool",
+        resourceId: pendingToolCall.id,
+        metadata: {
+          conversationId: input.conversationId,
+          workspaceId: activeWorkspaceId,
+          workspaceSessionId: activeSession?.id,
+          taskId: activeSession?.taskId,
+          toolCallId: pendingToolCall.id,
+          status: "pending",
+          toolName
+        }
+      });
+      return { toolCall, toolName, activeSession, pendingToolCall };
+    });
+
+    const executed = await Promise.all(pending.map(async (item) => {
+      const result = await this.toolRegistry.execute({
+        run: input,
+        activeWorkspaceId,
+        activeWorkspaceSession: item.activeSession,
+        callableTools: prepared.callableTools,
+        toolName: item.toolName,
+        argumentsJson: item.toolCall.function.arguments
+      });
+      return { ...item, result };
+    }));
+
+    const memoryWrites: MemoryRow[] = [];
+    const toolMessages: LLMMessage[] = [];
+    let enteredWorkspaceSession: WorkspaceSession | undefined;
+    let exitedWorkspaceSession: WorkspaceSession | undefined;
+    let terminalAssistantMessage: string | undefined;
+
+    for (const item of executed) {
+      let justExitedWorkspaceSession: WorkspaceSession | undefined;
+      const result = item.result;
+      if (result.memory) memoryWrites.push(result.memory);
+      if (result.workspaceSession) enteredWorkspaceSession = result.workspaceSession;
+      if (result.exitedWorkspaceResult) {
+        justExitedWorkspaceSession = this.applyExitWorkspaceResult(prepared, result.exitedWorkspaceResult);
+        exitedWorkspaceSession = justExitedWorkspaceSession;
+      }
+      if (result.mainWorkspaceResult) {
+        this.applyMainWorkspaceResult(prepared, result.mainWorkspaceResult);
+      }
+      if (result.terminalAssistantMessage) {
+        terminalAssistantMessage = result.terminalAssistantMessage;
+      }
+      const savedToolCall = this.repos.updateToolCallResult(item.pendingToolCall.id, {
+        resultJson: JSON.stringify(result.result),
+        status: result.status
+      });
+      this.recordToolCallInActiveWorkspaceSession(prepared, savedToolCall);
+      this.hookManager.record({
+        hook: "afterToolCall",
+        actorId: input.userId,
+        actorRole: input.userRole,
+        resourceKind: "tool",
+        resourceId: savedToolCall.id,
+        metadata: {
+          conversationId: input.conversationId,
+          workspaceId: activeWorkspaceId,
+          workspaceSessionId: item.activeSession?.id,
+          taskId: item.activeSession?.taskId,
+          toolCallId: savedToolCall.id,
+          toolName: item.toolName,
+          status: result.status,
+          batchMode: "parallel"
+        }
+      });
+      if (justExitedWorkspaceSession) {
+        memoryWrites.push(...await this.afterWorkspaceExitMemoryWrites(input, prepared, justExitedWorkspaceSession));
+      }
+      toolMessages.push({
+        role: "tool",
+        tool_call_id: item.toolCall.id,
+        name: item.toolName,
+        content: JSON.stringify(result.result)
+      });
+    }
+
     return { toolMessages, memoryWrites, enteredWorkspaceSession, exitedWorkspaceSession, terminalAssistantMessage };
   }
 
@@ -1418,6 +1919,7 @@ export class AgentRuntime {
       handoffContext,
       ...(session.localContext.handoffContext ?? [])
     ].slice(0, 6);
+    this.recordWorkspaceHandoffEntry(input, handoffContext);
     this.repos.updateWorkspaceSessionLocalContext(session);
     const context = this.buildLlmContext({
       input,
@@ -1465,6 +1967,7 @@ export class AgentRuntime {
       handoffContext,
       ...(mainSession.localContext.handoffContext ?? [])
     ].slice(0, 8);
+    this.recordWorkspaceHandoffEntry(input, handoffContext);
     this.repos.updateWorkspaceSessionLocalContext(mainSession);
     const context = this.buildLlmContext({
       input,
@@ -1493,6 +1996,30 @@ export class AgentRuntime {
       status: session.status
     });
     return { llmCallId, messages: context.messages };
+  }
+
+  private recordWorkspaceHandoffEntry(input: AgentRunInput, handoff: WorkspaceHandoffContext): void {
+    this.repos.appendSessionEntry({
+      conversationId: input.conversationId,
+      workspaceId: handoff.toWorkspaceId,
+      type: "workspace_handoff",
+      payload: {
+        handoffId: handoff.id,
+        direction: handoff.direction,
+        fromWorkspaceId: handoff.fromWorkspaceId,
+        toWorkspaceId: handoff.toWorkspaceId,
+        reason: handoff.reason,
+        itemCount: handoff.items.length,
+        items: handoff.items.map((item) => ({
+          kind: item.kind,
+          role: item.role,
+          title: item.title,
+          workspaceId: item.workspaceId,
+          toolName: item.toolName,
+          contentLength: item.content.length
+        }))
+      }
+    });
   }
 
   private saveFollowUpLlmCall(input: AgentRunInput, prepared: AgentRunPrepared, messages: LLMMessage[], toolMessages: LLMMessage[] = []): string {
@@ -1578,36 +2105,19 @@ export class AgentRuntime {
         if (prepared.activeWorkspaceId !== "main") {
           const exitRequest = this.requireChildWorkspaceExit(input, prepared, messages, completion.message, { toolLoopRound: round });
           messages = exitRequest.messages;
-          try {
-            completion = await this.llmClient.complete({
-              baseUrl: prepared.llm.baseUrl,
-              apiKey: prepared.llm.apiKey,
-              model: prepared.llm.model,
-              messages,
-              tools: prepared.callableTools,
-              temperature: prepared.llm.temperature,
-              signal: input.abortSignal,
-              ...this.llmRequestRuntimeConfig()
-            });
-            this.repos.markLlmCallCompleted(exitRequest.llmCallId, llmResponseSnapshot(completion, {
-              toolLoopRound: round,
-              afterRequiredWorkspaceExit: true
-            }));
-            continue;
-          } catch (error) {
-            const errorText = error instanceof Error ? error.message : String(error);
-            this.repos.markLlmCallFailed(exitRequest.llmCallId, errorText);
-            throw error;
-          }
+          completion = await this.completeLlmRound(input, prepared, exitRequest.llmCallId, messages, {
+            toolLoopRound: round,
+            afterRequiredWorkspaceExit: true
+          });
+          continue;
         }
         return { completion, memoryWrites, finalMessages: messages };
       }
 
-      const toolExecution = await this.executeToolCalls(input, prepared, toolCalls);
+      const roundAdvance = await this.executeToolRoundAndAdvance(input, prepared, messages, completion.message, toolCalls);
+      const { toolExecution, nextMessages, followUpLlmCallId } = roundAdvance;
       memoryWrites.push(...toolExecution.memoryWrites);
-      const transition = this.applyWorkspaceTransition(input, prepared, toolExecution.enteredWorkspaceSession, completion.message, toolExecution.toolMessages)
-        ?? this.applyWorkspaceExitTransition(input, prepared, toolExecution.exitedWorkspaceSession, completion.message, toolExecution.toolMessages);
-      messages = transition?.messages ?? [...messages, completion.message, ...toolExecution.toolMessages];
+      messages = nextMessages;
       if (toolExecution.terminalAssistantMessage) {
         const terminalMessage: LLMMessage = {
           role: "assistant",
@@ -1625,27 +2135,12 @@ export class AgentRuntime {
           finalMessages: [...messages, terminalMessage]
         };
       }
-      const llmCallId = transition?.llmCallId ?? this.saveFollowUpLlmCall(input, prepared, messages, toolExecution.toolMessages);
+      const llmCallId = followUpLlmCallId;
+      if (!llmCallId) throw new Error("Tool round did not produce a follow-up LLM call id.");
 
-      try {
-        completion = await this.llmClient.complete({
-          baseUrl: prepared.llm.baseUrl,
-          apiKey: prepared.llm.apiKey,
-          model: prepared.llm.model,
-          messages,
-          tools: prepared.callableTools,
-          temperature: prepared.llm.temperature,
-          signal: input.abortSignal,
-          ...this.llmRequestRuntimeConfig()
-        });
-        this.repos.markLlmCallCompleted(llmCallId, llmResponseSnapshot(completion, {
-          toolLoopRound: round
-        }));
-      } catch (error) {
-        const errorText = error instanceof Error ? error.message : String(error);
-        this.repos.markLlmCallFailed(llmCallId, errorText);
-        throw error;
-      }
+      completion = await this.completeLlmRound(input, prepared, llmCallId, messages, {
+        toolLoopRound: round
+      });
     }
 
     if ((completion.message.tool_calls ?? []).length > 0) {
