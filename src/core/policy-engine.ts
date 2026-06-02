@@ -3,13 +3,6 @@ import type { MemoryRow, PolicyDecision, ToolDefinition, UserRole, WorkspaceDefi
 export class PolicyEngine {
   canEnterWorkspace(input: { role: UserRole; workspace: WorkspaceDefinition }): PolicyDecision {
     if (input.workspace.id === "main") return { allowed: true };
-    if ((input.workspace.requiresApproval || input.workspace.riskLevel === "high") && input.role !== "creator") {
-      return {
-        allowed: false,
-        requiresApproval: true,
-        reason: `Entering workspace ${input.workspace.id} requires creator approval.`
-      };
-    }
     return { allowed: true };
   }
 
@@ -18,13 +11,6 @@ export class PolicyEngine {
       return {
         allowed: false,
         reason: "Tool is not available in the active workspace."
-      };
-    }
-    if (input.tool.riskLevel === "high" && input.role !== "creator") {
-      return {
-        allowed: false,
-        requiresApproval: true,
-        reason: "High-risk tools require creator approval."
       };
     }
     return { allowed: true };

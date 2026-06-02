@@ -5221,7 +5221,7 @@ async function testStreamingToolLoopStopsAtLimit() {
   assert.equal(trace.auditLogs.some((log) => log.action === "tool_loop_stopped"), true);
 }
 
-async function testWorkspaceEntryApprovalGate() {
+async function testWorkspaceEntryDoesNotRequireApproval() {
   const repos = createRepos();
   updateWorkspaceGate(repos, "dev", { requiresApproval: 1, riskLevel: "high" });
   const enterArgs = { workspaceId: "dev", objective: "run tests in terminal" };
@@ -5239,50 +5239,16 @@ async function testWorkspaceEntryApprovalGate() {
       apiKey: "test-key"
     }
   });
-  assert.equal(firstOutput.activeWorkspaceId, "main");
-  assert.equal(firstFake.lastToolResult.includes("requiresApproval"), true);
-  assert.equal(firstFake.lastToolResult.includes("approvalRequestId"), true);
-  const blockedTrace = repos.getTrace("conv-workspace-entry-approval", "creator", "creator");
-  assert.equal(blockedTrace.sessions.some((session) => session.workspaceId === "dev"), false);
-  assert.equal(blockedTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "blocked"), true);
-  assert.equal(blockedTrace.approvalRequests.length, 1);
-  assert.equal(blockedTrace.approvalRequests[0].workspaceId, "dev");
-  assert.equal(blockedTrace.approvalRequests[0].toolName, "enterWorkspace");
-  assert.equal(blockedTrace.auditLogs.some((log) => log.action === "workspace_enter_rejected" && log.workspaceId === "dev"), true);
-
-  assert.throws(() => repos.resolveApprovalRequest(blockedTrace.approvalRequests[0].id, {
-    status: "approved",
-    resolvedBy: "workspace-approval-user",
-    resolverRole: "user",
-    resolutionReason: "ordinary users cannot approve workspace entry"
-  }), /creator role/);
-
-  repos.resolveApprovalRequest(blockedTrace.approvalRequests[0].id, {
-    status: "approved",
-    resolvedBy: "creator",
-    resolverRole: "creator",
-    resolutionReason: "allow cli entry for this test"
-  });
-  const retryFake = new SingleToolRequestLLMClient("enterWorkspace", enterArgs);
-  const retryRuntime = new AgentRuntime(repos, retryFake);
-  const retryOutput = await retryRuntime.run({
-    agentId: "default-agent",
-    userId: "workspace-approval-user",
-    userRole: "user",
-    conversationId: "conv-workspace-entry-approval",
-    message: "run the approved cli check",
-    llm: {
-      baseUrl: "https://api.302ai.com",
-      model: "gpt-5-mini",
-      apiKey: "test-key"
-    }
-  });
-  assert.equal(retryOutput.activeWorkspaceId, "dev");
-  assert.equal(retryFake.lastToolResult.includes("workspaceResult"), true);
-  const approvedTrace = repos.getTrace("conv-workspace-entry-approval", "creator", "creator");
-  assert.equal(approvedTrace.sessions.some((session) => session.workspaceId === "dev"), true);
-  assert.equal(approvedTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
-  assert.equal(approvedTrace.approvalRequests.some((request) => request.workspaceId === "dev" && request.status === "approved"), true);
+  assert.equal(firstOutput.activeWorkspaceId, "dev");
+  assert.equal(firstFake.lastToolResult.includes("workspaceResult"), true);
+  assert.equal(firstFake.lastToolResult.includes("requiresApproval"), false);
+  assert.equal(firstFake.lastToolResult.includes("approvalRequestId"), false);
+  const trace = repos.getTrace("conv-workspace-entry-approval", "creator", "creator");
+  assert.equal(trace.sessions.some((session) => session.workspaceId === "dev"), true);
+  assert.equal(trace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
+  assert.equal(trace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "blocked"), false);
+  assert.equal(trace.approvalRequests.length, 0);
+  assert.equal(trace.auditLogs.some((log) => log.action === "workspace_enter_rejected" && log.workspaceId === "dev"), false);
 }
 
 async function testToolPolicyGates() {
@@ -5320,7 +5286,7 @@ async function testToolPolicyGates() {
   assert.equal(blockedToolAuditMetadata.status, "blocked");
   assert.equal(typeof blockedToolAuditMetadata.taskId, "string");
 
-  const highRisk = new MainToCliToolRequestLLMClient("bash", { command: "npm test" });
+  const highRisk = new MainToCliToolRequestLLMClient("bash", { command: "node -e \"console.log('high-risk tool ran')\"" });
   updateWorkspaceGate(repos, "dev", { requiresApproval: 0, riskLevel: "medium" });
   const highRiskRuntime = new AgentRuntime(repos, highRisk);
   await highRiskRuntime.run({
@@ -5335,23 +5301,15 @@ async function testToolPolicyGates() {
       apiKey: "test-key"
     }
   });
-  assert.equal(highRisk.lastToolResult.includes("requiresApproval"), true);
-  assert.equal(highRisk.lastToolResult.includes("approvalRequestId"), true);
+  assert.equal(highRisk.lastToolResult.includes("high-risk tool ran"), true);
+  assert.equal(highRisk.lastToolResult.includes("requiresApproval"), false);
+  assert.equal(highRisk.lastToolResult.includes("approvalRequestId"), false);
   const highRiskTrace = repos.getTrace("conv-tool-policy-high-risk", "creator", "creator");
   assert.equal(highRiskTrace.toolCalls.length, 2);
   assert.equal(highRiskTrace.toolCalls.some((call) => call.toolName === "enterWorkspace" && call.status === "completed"), true);
-  assert.equal(highRiskTrace.toolCalls.some((call) => call.toolName === "bash" && call.status === "blocked"), true);
-  assert.equal(highRiskTrace.approvalRequests.length, 1);
-  assert.equal(highRiskTrace.approvalRequests[0].status, "pending");
-  assert.equal(highRiskTrace.approvalRequests[0].toolName, "bash");
-  const resolvedApproval = repos.resolveApprovalRequest(highRiskTrace.approvalRequests[0].id, {
-    status: "approved",
-    resolvedBy: "creator",
-    resolverRole: "creator",
-    resolutionReason: "test approval"
-  });
-  assert.equal(resolvedApproval.status, "approved");
-  assert.equal(resolvedApproval.resolvedBy, "creator");
+  assert.equal(highRiskTrace.toolCalls.some((call) => call.toolName === "bash" && call.status === "completed"), true);
+  assert.equal(highRiskTrace.toolCalls.some((call) => call.toolName === "bash" && call.status === "blocked"), false);
+  assert.equal(highRiskTrace.approvalRequests.length, 0);
 }
 
 async function testRuntimeMemoryToolsAreUniversalAndPolicyGated() {
@@ -5374,12 +5332,13 @@ async function testRuntimeMemoryToolsAreUniversalAndPolicyGated() {
       apiKey: "test-key"
     }
   });
-  assert.equal(agentSelf.lastToolResult.includes("requiresApproval"), true);
+  assert.equal(agentSelf.lastToolResult.includes("requiresApproval"), false);
+  assert.equal(agentSelf.lastToolResult.includes("Agent self impression requires creator role"), true);
   assert.equal(repos.listMemories({ memoryType: "impression" }).some((memory) => memory.agentId === "default-agent"), false);
   const trace = repos.getTrace("conv-agent-self-policy", "creator", "creator");
   assert.equal(trace.toolCalls.length, 1);
   assert.equal(trace.toolCalls[0].toolName, "writeAgentSelfImpression");
-  assert.equal(trace.toolCalls[0].status, "blocked");
+  assert.equal(trace.toolCalls[0].status, "failed");
 }
 
 async function testDirectMemoryApiUsesPolicyLayer() {
@@ -7715,7 +7674,7 @@ async function main() {
   await testStreamingChildWorkspaceEventsAreVisible();
   await testStreamingMultiStepToolLoop();
   await testStreamingToolLoopStopsAtLimit();
-  await testWorkspaceEntryApprovalGate();
+  await testWorkspaceEntryDoesNotRequireApproval();
   await testToolPolicyGates();
   await testRuntimeMemoryToolsAreUniversalAndPolicyGated();
   await testDirectMemoryApiUsesPolicyLayer();
