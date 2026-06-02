@@ -453,8 +453,41 @@ export function createZleapServer(deps: ZleapServerDeps): http.Server {
   });
 }
 
+function listenWithPortFallback(server: http.Server, startPort: number, maxAttempts: number): void {
+  let port = startPort;
+  let attempts = 0;
+
+  const tryListen = () => {
+    attempts += 1;
+    const listenPort = port;
+    let onListening: (() => void) | undefined;
+    const onError = (error: NodeJS.ErrnoException) => {
+      if (onListening) server.off("listening", onListening);
+      if (error.code === "EADDRINUSE" && attempts < maxAttempts) {
+        const nextPort = listenPort + 1;
+        console.warn(`Port ${listenPort} is already in use; trying ${nextPort}.`);
+        port = nextPort;
+        tryListen();
+        return;
+      }
+      throw error;
+    };
+    onListening = () => {
+      server.off("error", onError);
+      console.log(`Zleap server listening on http://localhost:${listenPort}`);
+    };
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(listenPort);
+  };
+
+  tryListen();
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.ZLEAP_PORT ?? 4173);
+  const maxPortAttempts = process.env.ZLEAP_PORT ? 1 : 20;
   const db = openDatabase();
   const repos = new Repositories(db);
   repos.markPendingLlmCallsInterrupted();
@@ -463,7 +496,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const mcpToolExecutor = new McpToolExecutor();
   const server = createZleapServer({ repos, runtime, memoryService, mcpToolExecutor });
 
-  server.listen(port, () => {
-    console.log(`Zleap server listening on http://localhost:${port}`);
-  });
+  listenWithPortFallback(server, port, maxPortAttempts);
 }

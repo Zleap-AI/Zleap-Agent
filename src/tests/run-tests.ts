@@ -215,6 +215,8 @@ async function testWebUiMasterPlanContracts() {
   expectServer("request.on(\"aborted\", stopRun)");
   expectServer("response.on(\"close\", stopRun)");
   expectServer("runtime.runStream({ ...body, abortSignal: abortController.signal })");
+  expectServer("function listenWithPortFallback");
+  expectServer("Port ${listenPort} is already in use; trying ${nextPort}.");
   expectRuntime("private async finalizeVisibleAssistantTurn");
   assert.equal((runtimeSource.match(/finalizeVisibleAssistantTurn\(input, prepared/g) ?? []).length, 6);
   expectRuntime("private async executeToolRoundAndAdvance");
