@@ -92,6 +92,7 @@ export async function spawnServeDetached(options: ServeCommandOptions = {}): Pro
     stdio: ['ignore', logPath.fd, logPath.fd],
     env: process.env,
     cwd: process.cwd(),
+    windowsHide: true,
   });
   child.unref();
   await logPath.close();

@@ -77,7 +77,7 @@ export async function openOnboardingUrl(env: NodeJS.ProcessEnv = buildRuntimeEnv
 
 function runOpen(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'ignore', detached: true, shell: process.platform === 'win32' });
+    const child = spawn(command, args, { stdio: 'ignore', detached: true, shell: process.platform === 'win32', windowsHide: true });
     child.on('error', reject);
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))));
     child.unref();

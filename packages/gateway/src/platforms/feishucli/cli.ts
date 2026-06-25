@@ -183,7 +183,7 @@ export class LarkCliClient {
    */
   subscribe(eventKey: string, handlers: EventStreamHandlers): EventStreamHandle {
     const args = ['event', '+subscribe', '--event-types', eventKey, '--quiet'];
-    const child = this.spawnImpl(this.bin, args, { env: this.env(), stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = this.spawnImpl(this.bin, args, { env: this.env(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let buffer = '';
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
@@ -219,7 +219,7 @@ export class LarkCliClient {
 
   private run(args: string[], opts: { input?: string; timeoutMs?: number } = {}): Promise<RunResult> {
     return new Promise((resolve, reject) => {
-      const child = this.spawnImpl(this.bin, args, { env: this.env(), stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = this.spawnImpl(this.bin, args, { env: this.env(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
       let stdout = '';
       let stderr = '';
       const timer = setTimeout(() => child.kill('SIGTERM'), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);

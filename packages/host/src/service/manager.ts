@@ -46,6 +46,7 @@ export async function startDetachedServe(options: DetachedServeOptions = {}): Pr
     cwd: repoRoot,
     detached: true,
     stdio: ['ignore', logHandle.fd, logHandle.fd],
+    windowsHide: true,
   });
   child.unref();
   await logHandle.close();
@@ -190,7 +191,7 @@ function escapeXml(value: string): string {
 
 function runCapture(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     child.stdout?.on('data', (chunk) => {
       stdout += String(chunk);

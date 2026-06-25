@@ -149,7 +149,7 @@ async function extractArchive(archivePath: string, destination: string): Promise
 
 function run(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32' });
+    const child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32', windowsHide: true });
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))));
     child.on('error', reject);
   });

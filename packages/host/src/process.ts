@@ -25,6 +25,7 @@ export function runCapture(command: string, args: string[], options: RunOptions 
       env: options.env ?? process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: options.shell ?? false,
+      windowsHide: true,
     });
     let stdout = '';
     let stderr = '';
@@ -58,6 +59,7 @@ export function spawnDetached(
     stdio: options.stdio ?? 'inherit',
     shell: options.shell ?? false,
     detached: process.platform !== 'win32',
+    windowsHide: true,
   });
 }
 
@@ -87,6 +89,7 @@ function runProcess(command: string, args: string[], options: RunOptions & { std
       stdio: options.stdio,
       env: options.env ?? process.env,
       shell: options.shell ?? false,
+      windowsHide: true,
     });
     child.once('exit', (code) => {
       if (code === 0) {

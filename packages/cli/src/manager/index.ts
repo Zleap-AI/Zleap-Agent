@@ -440,6 +440,7 @@ function runRuntimeCli(runtime: RuntimeResolution, args: string[]): Promise<numb
   return new Promise((resolve) => {
     const child = spawn(runtime.nodeBin, [runtime.cliEntry, ...args], {
       stdio: 'inherit',
+      windowsHide: true,
       env: {
         ...process.env,
         ZLEAP_HOME: runtime.home,
@@ -461,7 +462,7 @@ function runRuntimeCli(runtime: RuntimeResolution, args: string[]): Promise<numb
 
 function run(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'ignore', shell: process.platform === 'win32' });
+    const child = spawn(command, args, { stdio: 'ignore', shell: process.platform === 'win32', windowsHide: true });
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))));
     child.on('error', reject);
   });

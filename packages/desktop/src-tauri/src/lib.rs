@@ -13,6 +13,23 @@ use tauri::{
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
 
+/// Build a `Command` that never pops a console window on Windows. The desktop
+/// shell is a GUI process, so spawning console subprocesses (node, tar,
+/// powershell) would otherwise flash a cmd window for each child.
+fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
+    let cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut cmd = cmd;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        return cmd;
+    }
+    #[cfg(not(windows))]
+    cmd
+}
+
 static WEB_PORT: OnceLock<u16> = OnceLock::new();
 const DEFAULT_WEB_PORT: u16 = 4789;
 static DESKTOP_SESSION_ID: OnceLock<String> = OnceLock::new();
@@ -299,7 +316,7 @@ fn run_desktop_bootstrap(app: &AppHandle) -> Result<String, String> {
         runtime.node_version.as_deref(),
     )?;
 
-    let mut cmd = Command::new(&node_bin);
+    let mut cmd = hidden_command(&node_bin);
     cmd.arg(&script);
     cmd.arg("--json");
     cmd.env("ZLEAP_HOME", &home);
@@ -427,7 +444,7 @@ fn stop_all_services(app: &AppHandle) {
     let node_bin = resolve_node_bin(app, &app_root, None).unwrap_or_else(|_| PathBuf::from("node"));
     let control = host_script(&app_root, "control-cli.js");
     if control.exists() {
-        let _ = Command::new(node_bin)
+        let _ = hidden_command(node_bin)
             .arg(control)
             .arg("stop")
             .arg("--desktop-session-only")
@@ -843,7 +860,7 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
         .unwrap_or_default();
     let status = if name.ends_with(".zip") {
         if cfg!(target_os = "windows") {
-            Command::new("powershell")
+            hidden_command("powershell")
                 .arg("-NoProfile")
                 .arg("-Command")
                 .arg(format!(
@@ -853,7 +870,7 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
                 ))
                 .status()
         } else {
-            Command::new("unzip")
+            hidden_command("unzip")
                 .arg("-q")
                 .arg(archive)
                 .arg("-d")
@@ -861,7 +878,7 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
                 .status()
         }
     } else {
-        Command::new("tar")
+        hidden_command("tar")
             .arg("-xzf")
             .arg(archive)
             .arg("-C")
@@ -998,7 +1015,7 @@ fn install_node_dependency(version: &str, archive: &Path) -> Result<PathBuf, Str
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
 
-    let status = Command::new("tar")
+    let status = hidden_command("tar")
         .arg("-xzf")
         .arg(archive)
         .arg("-C")
