@@ -63,6 +63,32 @@ describe('ensureRuntimeInstalled', () => {
     expect(runtime).toMatchObject({ runtimeRoot: layout.current, version: '0.3.0' });
   });
 
+  it('reuses an installed runtime instead of re-downloading the slim payload', async () => {
+    const layout = zleapLayout();
+    process.env.ZLEAP_APP_ROOT = layout.current;
+    await writeCompleteRuntime(layout.current);
+    await writeMetadata(layout.metadataPath, { version: '0.5.0', platform: 'win-x64' });
+
+    const payloadDir = await mkdtemp(join(tmpdir(), 'zleap-slim-payload-'));
+    try {
+      await writeFile(
+        join(payloadDir, 'metadata.json'),
+        JSON.stringify({ version: '0.5.0', platform: 'win-x64', builtAt: '2026-01-01T00:00:00.000Z' }),
+      );
+      // Only a download pointer is present (slim desktop bundle). If the skip
+      // logic fails it would try to fetch this URL and the test would error.
+      await writeFile(join(payloadDir, 'download.json'), JSON.stringify({ url: 'https://invalid.zleap.test/never.tar.gz' }));
+
+      const result = await ensureRuntimeInstalled({ method: 'desktop', payloadDir, downloadIfMissing: true });
+
+      expect(result.source).toBe('existing');
+      expect(result.installed).toBe(false);
+      expect(result.version).toBe('0.5.0');
+    } finally {
+      await rm(payloadDir, { recursive: true, force: true });
+    }
+  });
+
   it('fails clearly when runtime is missing and download is disabled', async () => {
     const layout = zleapLayout();
     process.env.ZLEAP_APP_ROOT = layout.current;

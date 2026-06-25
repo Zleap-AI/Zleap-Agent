@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeInstallState, type InstallMethod } from './install-method.js';
 import { installAppFromRelease, type InstallAppOptions, type InstallAppResult } from './install.js';
@@ -9,7 +9,7 @@ import { zleapLayout } from './layout.js';
 import { resolveRuntimeRoot } from './paths.js';
 import { seedAppFromBundle } from './seed-app.js';
 import { appChecks, type AppTarget } from './app-layout.js';
-import { readAppMetadata } from './upgrade.js';
+import { readAppMetadata, type AppMetadata } from './upgrade.js';
 import { writeRuntimeState } from './runtime-state.js';
 
 export type EnsureRuntimeSource = 'dev' | 'existing' | 'embedded' | 'download';
@@ -67,6 +67,34 @@ export async function ensureRuntimeInstalled(
   }
 
   if (options.payloadDir) {
+    // Skip re-materializing (and re-downloading) the payload when the runtime is
+    // already installed at the expected version. Without this, slim desktop bundles
+    // re-download the full payload from GitHub on every launch because the bundled
+    // resources only carry download.json, never the app itself.
+    const target = appTargetForMethod(options.method);
+    const expected = await readPayloadDirMetadata(options.payloadDir);
+    const installedMeta = await readAppMetadata();
+    const alreadyCurrent =
+      Boolean(expected?.version) &&
+      installedMeta?.version === expected?.version &&
+      appChecks(layout.current, target).length === 0;
+    if (alreadyCurrent) {
+      await persistRuntimeInstallState(
+        options.method ?? 'cli',
+        layout.current,
+        installedMeta?.version,
+        installedMeta?.platform,
+      );
+      return {
+        appRoot: layout.current,
+        source: 'existing',
+        installed: false,
+        repaired: false,
+        version: installedMeta?.version,
+        platform: installedMeta?.platform,
+      };
+    }
+
     const materialized = await resolvePayloadDir(options.payloadDir, options.downloadIfMissing === true);
     try {
       const installed = await installPayload({
@@ -136,6 +164,18 @@ export async function ensureRuntimeInstalled(
 
 function appTargetForMethod(method: InstallMethod | undefined): AppTarget {
   return method === 'desktop' ? 'desktop' : 'cli';
+}
+
+async function readPayloadDirMetadata(payloadDir: string): Promise<AppMetadata | undefined> {
+  for (const file of ['metadata.json', 'manifest.json']) {
+    try {
+      const raw = await readFile(join(payloadDir, file), 'utf8');
+      return JSON.parse(raw) as AppMetadata;
+    } catch {
+      // try next candidate
+    }
+  }
+  return undefined;
 }
 
 function isDevRuntimeRoot(root: string): boolean {
