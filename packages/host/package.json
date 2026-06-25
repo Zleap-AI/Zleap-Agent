@@ -1,0 +1,59 @@
+{
+  "name": "@zleap/host",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "zleap-serve": "dist/serve-cli.js",
+    "zleap-control": "dist/control-cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./serve": {
+      "types": "./dist/supervisor.d.ts",
+      "import": "./dist/supervisor.js",
+      "default": "./dist/supervisor.js"
+    },
+    "./layout": {
+      "types": "./dist/app-layout.d.ts",
+      "import": "./dist/app-layout.js",
+      "default": "./dist/app-layout.js"
+    },
+    "./deps": {
+      "types": "./dist/postgres-bundle.d.ts",
+      "import": "./dist/postgres-bundle.js",
+      "default": "./dist/postgres-bundle.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js",
+      "default": "./dist/config.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-package-dist.mjs && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@zleap/agent": "workspace:*",
+    "@zleap/ai": "workspace:*",
+    "@zleap/core": "workspace:*",
+    "@zleap/store": "workspace:*",
+    "dotenv": "^17.4.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "vitest": "^2.1.8"
+  }
+}

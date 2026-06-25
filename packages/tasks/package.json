@@ -1,0 +1,42 @@
+{
+  "name": "@zleap/tasks",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "zleap-task-worker": "dist/worker.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-package-dist.mjs && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "worker": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@zleap/avatar": "workspace:*",
+    "@zleap/agent": "workspace:*",
+    "@zleap/core": "workspace:*",
+    "@zleap/host": "workspace:*",
+    "@zleap/store": "workspace:*",
+    "dotenv": "^17.4.2",
+    "pg-boss": "^12.19.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

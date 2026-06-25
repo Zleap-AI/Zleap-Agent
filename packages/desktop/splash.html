@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zleap</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(1200px 600px at 50% -10%, #1a1a2e 0%, #0b0b0c 55%);
+        color: #f5f5f7;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .card {
+        width: min(420px, 92vw);
+        padding: 2rem 1.75rem;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+      h1 { margin: 0 0 0.35rem; font-size: 1.35rem; font-weight: 600; }
+      .sub { margin: 0 0 1.25rem; color: #a1a1aa; font-size: 0.92rem; }
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.55rem 0;
+        color: #d4d4d8;
+        font-size: 0.92rem;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #52525b;
+        flex: 0 0 auto;
+      }
+      .step.active .dot { background: #60a5fa; box-shadow: 0 0 12px #60a5fa; }
+      .step.done .dot { background: #34d399; }
+      .step.error .dot { background: #f87171; }
+      .bar {
+        margin-top: 1.25rem;
+        height: 4px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.08);
+        overflow: hidden;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        width: 35%;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa);
+        animation: pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(320%); }
+      }
+      .hint { margin-top: 1rem; color: #71717a; font-size: 0.8rem; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>正在初始化 Zleap</h1>
+      <p class="sub" id="status">检查依赖并启动本地服务…</p>
+      <div id="steps">
+        <div class="step active" data-step="init"><span class="dot"></span>初始化环境</div>
+        <div class="step" data-step="seed"><span class="dot"></span>同步运行时</div>
+        <div class="step" data-step="deps"><span class="dot"></span>检查运行时</div>
+        <div class="step" data-step="serve"><span class="dot"></span>启动本地服务</div>
+        <div class="step" data-step="connect"><span class="dot"></span>连接服务</div>
+        <div class="step" data-step="route"><span class="dot"></span>准备界面</div>
+      </div>
+      <div class="bar"><i></i></div>
+      <p class="hint">首次启动可能需要 30–60 秒。请勿关闭窗口。</p>
+    </div>
+    <script>
+      window.__zleapSetStep = (step, message) => {
+        if (message) document.getElementById('status').textContent = message;
+        const order = ['init', 'seed', 'update', 'deps', 'download', 'serve', 'connect', 'route', 'done'];
+        const idx = order.indexOf(step);
+        document.querySelectorAll('.step').forEach((el) => {
+          const s = el.getAttribute('data-step');
+          const sidx = order.indexOf(s);
+          el.classList.remove('active', 'done', 'error');
+          if (step === 'error') el.classList.add('error');
+          else if (sidx < idx) el.classList.add('done');
+          else if (s === step || (step === 'download' && s === 'deps')) el.classList.add('active');
+        });
+      };
+    </script>
+  </body>
+</html>

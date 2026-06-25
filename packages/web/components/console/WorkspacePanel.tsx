@@ -1,0 +1,118 @@
+'use client';
+
+import { PanelRightClose } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { cn } from '../../lib/utils';
+import type { ProjectView } from '../../lib/useResources';
+import type { SpaceItem } from '../../lib/spaces';
+import type { RunStatus, WorkPane } from '../../lib/types';
+import type { WorkspaceFileTarget } from '../../lib/workspaceFiles';
+import { WorkspaceFilesDrawer } from '../WorkspaceFilesDrawer';
+import { WorkConsole } from './WorkConsole';
+import { WorkConsoleTabs } from './WorkConsoleTabs';
+
+type WorkspacePanelProps = {
+  presentation?: 'inline' | 'overlay';
+  /** Whether the directory ("files") tab is the active one. */
+  filesActive: boolean;
+  onSelectFiles: () => void;
+  onSelectWorkspace: (id: string) => void;
+  onCollapse: () => void;
+  // Directory tab inputs.
+  conversationId: string;
+  conversationTitle?: string;
+  projectId?: string;
+  projects: ProjectView[];
+  fileTarget?: WorkspaceFileTarget | null;
+  filesRefreshToken?: number;
+  // Space tab inputs.
+  spaces: SpaceItem[];
+  workspaces: WorkPane[];
+  activeWorkspaceId: string | null;
+  status: RunStatus;
+};
+
+/**
+ * The shared right sidebar: one tab strip whose first tab is the directory
+ * browser and whose remaining tabs are the spaces the kernel entered. A single
+ * collapse control closes the whole panel.
+ */
+export function WorkspacePanel({
+  presentation = 'inline',
+  filesActive,
+  onSelectFiles,
+  onSelectWorkspace,
+  onCollapse,
+  conversationId,
+  conversationTitle,
+  projectId,
+  projects,
+  fileTarget,
+  filesRefreshToken,
+  spaces,
+  workspaces,
+  activeWorkspaceId,
+  status,
+}: WorkspacePanelProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background text-ink">
+      <div className="flex h-9 shrink-0 items-center border-b border-border pr-1.5">
+        <WorkConsoleTabs
+          spaces={spaces}
+          workspaces={workspaces}
+          activeWorkspaceId={activeWorkspaceId}
+          onSelect={onSelectWorkspace}
+          filesActive={filesActive}
+          onSelectFiles={onSelectFiles}
+          filesLabel={
+            projectId
+              ? t('workspace.projectTab', { defaultValue: '项目' })
+              : t('workspace.artifactsTab', { defaultValue: '产物' })
+          }
+        />
+        <button
+          type="button"
+          onClick={onCollapse}
+          className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition hover:bg-muted hover:text-ink"
+          title={t('workspace.collapse')}
+          aria-label={t('workspace.collapse')}
+        >
+          <PanelRightClose className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {/* Both views stay mounted so switching tabs keeps the open file and the
+          tree expansion (only closing the whole panel resets them). */}
+      <div className="relative min-h-0 flex-1">
+        <div className={cn('absolute inset-0 flex flex-col', filesActive ? '' : 'hidden')}>
+          <WorkspaceFilesDrawer
+            key={`${conversationId}:${projectId ?? 'conversation'}`}
+            embedded
+            open
+            onOpenChange={() => {}}
+            presentation={presentation}
+            conversationId={conversationId}
+            conversationTitle={conversationTitle}
+            projectId={projectId}
+            projects={projects}
+            target={fileTarget}
+            refreshToken={filesRefreshToken}
+          />
+        </div>
+        {workspaces.length ? (
+          <div className={cn('absolute inset-0 flex flex-col', filesActive ? 'hidden' : '')}>
+            <WorkConsole
+              hideTabs
+              spaces={spaces}
+              workspaces={workspaces}
+              activeWorkspaceId={activeWorkspaceId}
+              status={status}
+              onSelect={onSelectWorkspace}
+              onCollapse={onCollapse}
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

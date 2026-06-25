@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zleap — 初始化失败</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 2rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0b0b0c;
+        color: #f5f5f7;
+        max-width: 640px;
+      }
+      h1 { font-size: 1.35rem; margin-top: 0; }
+      .msg {
+        background: rgba(248, 113, 113, 0.12);
+        border: 1px solid rgba(248, 113, 113, 0.35);
+        padding: 1rem;
+        border-radius: 10px;
+        color: #fecaca;
+        line-height: 1.5;
+        word-break: break-word;
+      }
+      .actions { margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
+      button {
+        padding: 0.55rem 1rem;
+        border-radius: 8px;
+        border: 1px solid rgba(255,255,255,0.15);
+        background: rgba(255,255,255,0.06);
+        color: #f5f5f7;
+        cursor: pointer;
+        font-size: 0.92rem;
+      }
+      button.primary { background: #2563eb; border-color: #2563eb; }
+      .hint { margin-top: 1.25rem; color: #a1a1aa; font-size: 0.85rem; line-height: 1.6; }
+      code { background: rgba(255,255,255,0.08); padding: 0.1rem 0.35rem; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>初始化失败</h1>
+    <div class="msg" id="message">未知错误</div>
+    <div class="actions">
+      <button class="primary" id="retry">重试</button>
+      <button id="logs">打开日志目录</button>
+    </div>
+    <p class="hint">
+      详细日志：<code>~/.zleap/logs/desktop.log</code> 与 <code>serve.log</code><br />
+      终端诊断：<code>zleap doctor</code>
+    </p>
+    <script type="module">
+      const invoke = window.__TAURI__?.core?.invoke;
+      window.__zleapSetError = (text) => {
+        document.getElementById('message').textContent = text || '未知错误';
+      };
+      window.__zleapSetError(new URLSearchParams(window.location.search).get('message'));
+      if (invoke) {
+        invoke('get_bootstrap_error')
+          .then(window.__zleapSetError)
+          .catch(() => {});
+      }
+      document.getElementById('retry').addEventListener('click', () => {
+        if (invoke) invoke('retry_bootstrap');
+      });
+      document.getElementById('logs').addEventListener('click', () => {
+        if (invoke) invoke('open_logs_folder');
+      });
+    </script>
+  </body>
+</html>

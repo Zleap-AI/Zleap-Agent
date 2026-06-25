@@ -1,0 +1,53 @@
+'use client';
+
+import { ArrowUpRight, Check, Loader2, X } from 'lucide-react';
+import clsx from 'clsx';
+import type { ToolCallView } from '../lib/types';
+
+type StepChipProps = {
+  tool: ToolCallView;
+  spaceId?: string;
+  onOpen?: (spaceId: string) => void;
+};
+
+function StatusIcon({ status }: { status: ToolCallView['status'] }) {
+  if (status === 'running') {
+    return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
+  }
+  if (status === 'error') {
+    return <X className="h-3.5 w-3.5 text-rose-500" />;
+  }
+  return <Check className="h-3.5 w-3.5 text-emerald-500" />;
+}
+
+/** Brief summary for the chip — first meaningful line of the result. */
+function brief(tool: ToolCallView): string {
+  if (tool.status === 'running') {
+    return 'running…';
+  }
+  const head = (tool.result.split('\n').find((line) => line.trim()) ?? '').trim();
+  return head.length > 48 ? `${head.slice(0, 47)}…` : head;
+}
+
+/** A one-line tool step in the conversation; click opens it in the 调度台. */
+export function StepChip({ tool, spaceId, onOpen }: StepChipProps) {
+  const clickable = Boolean(spaceId && onOpen);
+  return (
+    <button
+      type="button"
+      disabled={!clickable}
+      onClick={clickable ? () => onOpen!(spaceId!) : undefined}
+      className={clsx(
+        'group inline-flex max-w-full items-center gap-2 rounded-pill border border-border bg-surface py-1.5 pl-2.5 pr-3 text-left shadow-xs transition-all duration-300 ease-out',
+        clickable ? 'hover:-translate-y-px hover:border-border-strong hover:shadow-sm' : 'cursor-default',
+      )}
+    >
+      <StatusIcon status={tool.status} />
+      <span className="font-mono text-[13px] font-medium text-ink">{tool.name}</span>
+      <span className="truncate text-xs text-muted-foreground">{brief(tool)}</span>
+      {clickable ? (
+        <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
+      ) : null}
+    </button>
+  );
+}

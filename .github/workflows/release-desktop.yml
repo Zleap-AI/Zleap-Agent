@@ -1,0 +1,732 @@
+name: Release Desktop
+
+# Configuration → build → publish, aligned with mainstream tooling:
+#   - version is a single source of truth (root package.json); CI never writes back
+#     to committed config (tauri.conf.json / distribution.json).
+#   - dependencies are reused via actions/cache only (no cross-run artifact reuse).
+#   - desktop builds + minisign updater (latest.json) come from the official
+#     tauri-apps/tauri-action.
+#   - latest.json = Tauri updater manifest; install-manifest.json = custom runtime
+#     + payload install contract (RSA-signed), produced by the release job.
+#   - jobs gate on explicit success; the release job never publishes a half build.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-cli-npm:
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Assert tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG_VERSION="$(node scripts/distribution.mjs version)"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}." >&2
+            echo "Bump root package.json (and run pnpm sync:version) in the release PR before tagging." >&2
+            exit 1
+          fi
+
+      - name: Check release readiness
+        run: pnpm check:release-readiness
+
+      - name: Smoke test install manifest validator
+        run: pnpm smoke:manifest
+
+      - name: Build thin npm CLI package
+        run: pnpm pack:cli-npm
+
+      - name: Smoke test thin npm CLI
+        run: pnpm smoke:cli-npm
+
+      - name: Verify npm package contents
+        run: npm --cache /tmp/zleap-npm-cache pack --dry-run dist/npm/cli
+
+      - name: Pack npm CLI tarball artifact
+        run: |
+          mkdir -p dist/npm/upload
+          npm --cache /tmp/zleap-npm-cache pack dist/npm/cli --pack-destination dist/npm/upload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-cli-package
+          path: |
+            dist/npm/cli
+            dist/npm/upload/*.tgz
+          if-no-files-found: error
+          compression-level: 0
+
+  build-node:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac-arm64
+          - os: windows-latest
+            platform: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Restore managed Node bundle cache
+        id: node-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: dist/node/upload
+          key: zleap-node-${{ matrix.platform }}-${{ hashFiles('distribution.json', 'scripts/package-node.mjs', 'scripts/distribution.mjs', 'scripts/lib/platforms.mjs', 'scripts/lib/archive.mjs') }}
+
+      - name: Install dependencies
+        if: steps.node-cache.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build managed Node bundle from pinned source
+        if: steps.node-cache.outputs.cache-hit != 'true'
+        run: pnpm package:node
+        env:
+          ZLEAP_RELEASE_PLATFORM: ${{ matrix.platform }}
+
+      - name: Smoke test Node bundle
+        run: pnpm smoke:node-bundle
+
+      - name: Write Node bundle checksums
+        run: node scripts/distribution.mjs write-checksums dist/node/upload
+
+      - name: Save managed Node bundle cache
+        if: steps.node-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dist/node/upload
+          key: ${{ steps.node-cache.outputs.cache-primary-key }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-${{ matrix.platform }}
+          path: dist/node/upload/*
+          if-no-files-found: error
+          compression-level: 0
+
+  build-postgres:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac-arm64
+          - os: windows-latest
+            platform: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Restore Postgres bundle cache
+        id: postgres-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: dist/postgres/upload
+          key: zleap-postgres-${{ matrix.platform }}-${{ hashFiles('distribution.json', 'scripts/package-postgres.mjs', 'scripts/distribution.mjs', 'scripts/lib/platforms.mjs', 'scripts/lib/archive.mjs') }}
+
+      - name: Configure MSVC
+        if: runner.os == 'Windows' && steps.postgres-cache.outputs.cache-hit != 'true'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Windows PostgreSQL build tools
+        if: runner.os == 'Windows' && steps.postgres-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          choco install strawberryperl winflexbison3 --no-progress -y
+          python -m pip install --upgrade meson ninja
+          python -m mesonbuild.mesonmain --version
+          "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Install dependencies
+        if: steps.postgres-cache.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build portable Postgres bundle from official source
+        if: steps.postgres-cache.outputs.cache-hit != 'true'
+        run: pnpm package:postgres
+        env:
+          ZLEAP_RELEASE_PLATFORM: ${{ matrix.platform }}
+
+      - name: Smoke test Postgres bundle
+        run: pnpm smoke:postgres-bundle
+
+      - name: Write Postgres bundle checksums
+        run: node scripts/distribution.mjs write-checksums dist/postgres/upload
+
+      - name: Save Postgres bundle cache
+        if: steps.postgres-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: dist/postgres/upload
+          key: ${{ steps.postgres-cache.outputs.cache-primary-key }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: postgres-${{ matrix.platform }}
+          path: dist/postgres/upload/*
+          if-no-files-found: error
+          compression-level: 0
+
+  build-runtime:
+    needs: [build-node, build-postgres]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac-arm64
+          - os: windows-latest
+            platform: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Relax Windows for pnpm deploy (Defender + symlinks)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          # pnpm deploy intermittently fails creating node_modules/.bin shims when
+          # Defender real-time protection scans the freshly written .cmd/.exe files.
+          Add-MpPreference -ExclusionPath "${{ github.workspace }}" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath "$env:TEMP" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess "node.exe" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionProcess "pnpm.exe" -ErrorAction SilentlyContinue
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check release readiness
+        run: pnpm check:release-readiness
+
+      - name: Download Node bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: node-*
+          merge-multiple: true
+          path: dist/node/upload
+
+      - name: Download Postgres bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: postgres-*
+          merge-multiple: true
+          path: dist/postgres/upload
+
+      - name: Build release bundle
+        run: node scripts/package-release.mjs
+
+      - name: Smoke test app runtime
+        run: node tests/smoke-app-runtime.mjs dist/app/${{ matrix.platform }}/app
+
+      - name: Smoke test install manifest path
+        if: runner.os != 'Windows'
+        run: pnpm smoke:install
+
+      - name: Archive CLI runtime + payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node scripts/distribution.mjs version)"
+          mkdir -p dist/release/upload
+          cp dist/release/${{ matrix.platform }}/distribution.env dist/release/upload/distribution-${VERSION}-${{ matrix.platform }}.env
+          cp dist/release/${{ matrix.platform }}/cli/zleap-runtime-${VERSION}-${{ matrix.platform }}.tar.gz dist/release/upload/
+          cp dist/release/${{ matrix.platform }}/payload/zleap-payload-${VERSION}-${{ matrix.platform }}.tar.gz dist/release/upload/
+
+      - name: Write runtime + payload checksums
+        run: node scripts/distribution.mjs write-checksums dist/release/upload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.platform }}
+          path: dist/release/upload/*
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Stage slim desktop resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/prepare-desktop-resources.mjs ${{ matrix.platform }} --out dist/app/upload/desktop-resources
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.platform }}
+          path: dist/app/upload/desktop-resources/**
+          if-no-files-found: error
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: payload-${{ matrix.platform }}
+          path: dist/payload/${{ matrix.platform }}/payload/**
+          if-no-files-found: error
+          compression-level: 0
+
+  build-npm-platforms:
+    needs: build-runtime
+    strategy:
+      matrix:
+        include:
+          - platform: mac-arm64
+          - platform: win-x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download platform payload
+        uses: actions/download-artifact@v4
+        with:
+          name: payload-${{ matrix.platform }}
+          path: dist/payload/${{ matrix.platform }}/payload
+
+      - name: Build npm platform package
+        run: pnpm pack:npm-platforms -- ${{ matrix.platform }}
+
+      - name: Verify npm platform package contents
+        shell: bash
+        run: |
+          case "${{ matrix.platform }}" in
+            mac-arm64) DIR=app-darwin-arm64 ;;
+            win-x64) DIR=app-win32-x64 ;;
+          esac
+          npm --cache /tmp/zleap-npm-cache pack --dry-run "dist/npm/${DIR}"
+
+      - name: Pack npm platform tarball artifact
+        shell: bash
+        run: |
+          mkdir -p dist/npm/upload
+          case "${{ matrix.platform }}" in
+            mac-arm64) DIR=app-darwin-arm64 ;;
+            win-x64) DIR=app-win32-x64 ;;
+          esac
+          npm --cache /tmp/zleap-npm-cache pack "dist/npm/${DIR}" --pack-destination dist/npm/upload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-platform-${{ matrix.platform }}
+          path: |
+            dist/npm/app-*/**
+            dist/npm/upload/*.tgz
+          if-no-files-found: error
+          compression-level: 0
+
+  publish-npm:
+    needs: [build-cli-npm, build-npm-platforms]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Require npm token for tag release
+        if: env.NPM_TOKEN == ''
+        run: |
+          echo "NPM_TOKEN is required for tag releases"
+          exit 1
+
+      - name: Download npm CLI package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-package
+          path: dist/npm
+
+      - name: Download npm platform package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: npm-platform-*
+          merge-multiple: true
+          path: dist/npm
+
+      - name: Publish npm platform packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in dist/npm/app-darwin-arm64 dist/npm/app-win32-x64; do
+            name="$(node -p "require('./$dir/package.json').name")"
+            version="$(node -p "require('./$dir/package.json').version")"
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published; skipping (re-runs are idempotent)"
+            else
+              npm publish "$dir" --access public --provenance
+            fi
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish npm CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./dist/npm/cli/package.json').name")"
+          version="$(node -p "require('./dist/npm/cli/package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version already published; skipping (re-runs are idempotent)"
+          else
+            npm publish dist/npm/cli --access public --provenance
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    needs: build-runtime
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create draft GitHub Release
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const body = [
+              `Release ${tag}`,
+              '',
+              'macOS artifacts are Developer ID-signed and notarized when Apple credentials are configured.',
+              'Windows win-x64 artifacts are currently unsigned for this release and may show OS security warnings.',
+            ].join('\n');
+            const existing = await github.rest.repos.listReleases({ owner: context.repo.owner, repo: context.repo.repo });
+            const found = existing.data.find((release) => release.tag_name === tag);
+            const release = found ?? (await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Release ${tag}`,
+              body,
+              draft: true,
+              prerelease: false,
+            })).data;
+            core.setOutput('release_id', release.id);
+
+  tauri:
+    needs: [build-runtime, create-release]
+    if: ${{ !cancelled() && needs.build-runtime.result == 'success' && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac-arm64
+          - os: windows-latest
+            platform: win-x64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check strict release readiness
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node tests/check-release-readiness.mjs --strict-release
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          ZLEAP_MANIFEST_PRIVATE_KEY: ${{ secrets.ZLEAP_MANIFEST_PRIVATE_KEY }}
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - name: Download desktop app payload
+        uses: actions/download-artifact@v4
+        with:
+          name: app-${{ matrix.platform }}
+          path: dist/app/upload
+
+      - name: Embed slim desktop resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf packages/desktop/src-tauri/resources
+          mkdir -p packages/desktop/src-tauri/resources
+          SRC="dist/app/upload/desktop-resources"
+          if [ ! -d "$SRC" ]; then
+            SRC="dist/app/upload"
+          fi
+          cp -R "$SRC"/. packages/desktop/src-tauri/resources/
+
+      - name: Render desktop frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf packages/desktop/dist
+          mkdir -p packages/desktop/dist
+          cp packages/desktop/index.html packages/desktop/splash.html packages/desktop/error.html packages/desktop/dist/
+
+      - name: Smoke test desktop resources
+        run: node tests/smoke-desktop-resources.mjs packages/desktop/src-tauri/resources
+
+      - name: Import Apple certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY_SECRET: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE_BASE64" ]; then
+            echo "APPLE_CERTIFICATE_BASE64 is not set; macOS build will use unsigned/ad-hoc behavior."
+            exit 0
+          fi
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
+          IDENTITIES="$(security find-identity -v -p codesigning build.keychain)"
+          echo "$IDENTITIES"
+          DETECTED_IDENTITY="$(printf '%s\n' "$IDENTITIES" | awk -F'"' '/Developer ID Application|Apple Distribution|Apple Development/ { print $2; exit }')"
+          SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY_SECRET:-$DETECTED_IDENTITY}"
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "No valid Apple code signing identity found in build.keychain"
+            exit 1
+          fi
+          if ! printf '%s\n' "$IDENTITIES" | grep -F "$SIGNING_IDENTITY" >/dev/null; then
+            echo "APPLE_SIGNING_IDENTITY does not match an imported codesigning identity: $SIGNING_IDENTITY"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Sign compressed desktop resources
+        if: runner.os == 'macOS'
+        run: node scripts/sign-macos-desktop-resources.mjs packages/desktop/src-tauri/resources
+
+      - name: Build desktop app (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: packages/desktop
+          tauriScript: pnpm tauri
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          includeUpdaterJson: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  release:
+    needs: [build-runtime, build-npm-platforms, tauri]
+    if: ${{ !cancelled() && needs.build-runtime.result == 'success' && needs.build-npm-platforms.result == 'success' && needs.tauri.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      ZLEAP_MANIFEST_PRIVATE_KEY: ${{ secrets.ZLEAP_MANIFEST_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download runtime + payload artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-*
+          merge-multiple: true
+          path: dist/upload
+
+      - name: Download Postgres bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: postgres-*
+          merge-multiple: true
+          path: dist/postgres/upload
+
+      - name: Download npm CLI package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-package
+          path: dist/npm
+
+      - name: Download npm platform package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: npm-platform-*
+          merge-multiple: true
+          path: dist/npm
+
+      - name: Preflight - assert every expected artifact is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node scripts/distribution.mjs version)"
+          PLATFORMS="mac-arm64 win-x64"
+          missing=0
+          require() {
+            if [ ! -f "$1" ]; then
+              echo "MISSING: $1" >&2
+              missing=1
+            fi
+          }
+          for p in $PLATFORMS; do
+            require "dist/upload/zleap-runtime-${VERSION}-${p}.tar.gz"
+            require "dist/upload/zleap-payload-${VERSION}-${p}.tar.gz"
+            require "dist/postgres/upload/zleap-postgres-"*"-${p}.tar.gz"
+          done
+          if ! ls dist/npm/upload/*.tgz >/dev/null 2>&1; then
+            echo "MISSING: dist/npm/upload/*.tgz" >&2
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Release preflight failed; artifact tree:" >&2
+            find dist -maxdepth 4 -type f | sort >&2
+            exit 1
+          fi
+          echo "Preflight OK for v${VERSION} (${PLATFORMS})"
+
+      - name: Write install manifest
+        run: node scripts/distribution.mjs write-install-manifest dist/upload
+
+      - name: Validate install manifest
+        run: node scripts/distribution.mjs validate-install-manifest dist/upload/install-manifest.json
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release-assets
+          find dist/upload dist/postgres/upload dist/npm/upload -type f \
+            ! -name 'postgres-bundle.env' \
+            ! -name 'node-bundle.env' \
+            -exec cp {} dist/release-assets/ \;
+          node scripts/distribution.mjs write-checksums dist/release-assets
+
+      - name: Upload install assets to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          gh release upload "$TAG" dist/release-assets/* --clobber
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const releases = await github.rest.repos.listReleases({ owner: context.repo.owner, repo: context.repo.repo });
+            const release = releases.data.find((item) => item.tag_name === tag);
+            if (!release) {
+              throw new Error(`Release ${tag} not found while publishing`);
+            }
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.id,
+              draft: false,
+            });

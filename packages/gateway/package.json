@@ -1,0 +1,46 @@
+{
+  "name": "@zleap/gateway",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "zleap-gateway": "dist/worker.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-package-dist.mjs && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "worker": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@larksuite/cli": "1.0.56",
+    "@larksuiteoapi/node-sdk": "^1.51.0",
+    "@zleap/avatar": "workspace:*",
+    "@zleap/ai": "workspace:*",
+    "@zleap/agent": "workspace:*",
+    "@zleap/core": "workspace:*",
+    "@zleap/host": "workspace:*",
+    "@zleap/store": "workspace:*",
+    "dotenv": "^17.4.2",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "vitest": "^2.1.8"
+  }
+}
