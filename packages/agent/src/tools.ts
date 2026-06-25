@@ -4,7 +4,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { ToolDefinition, ToolExecutionContext } from '@zleap/core';
 import { formatDiff } from './diff.js';
-import { read302IntegrationConfig, resolve302ApiBaseUrl, resolve302ApiKey } from './integration302.js';
+import { resolveIntegration302 } from './integration302.js';
 import { runSideEffect } from './sideEffects.js';
 
 /**
@@ -789,12 +789,12 @@ function prepareReadWebpageArgs(input: unknown): ReadWebpageArgs {
 }
 
 async function post302Json(path: string, body: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  const config = await read302IntegrationConfig();
-  const apiKey = resolve302ApiKey(config);
+  const config = await resolveIntegration302();
+  const apiKey = config.apiKey;
   if (!apiKey) {
     throw new Error('web_search_api_key_required: configure the web search API key in general settings or set ZLEAP_302_API_KEY.');
   }
-  const baseUrl = resolve302ApiBaseUrl(config).replace(/\/+$/, '');
+  const baseUrl = config.apiBaseUrl.replace(/\/+$/, '');
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     signal,

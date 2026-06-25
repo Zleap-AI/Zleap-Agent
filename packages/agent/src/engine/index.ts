@@ -84,7 +84,7 @@ import {
 import type { PersistenceConfig } from '../config.js';
 import { sessionEntriesToModelMessages } from '../conversation/history.js';
 import { Kernel } from '../kernel/kernel.js';
-import { resolve302ApiKey, resolve302ModelBaseUrl } from '../integration302.js';
+import { resolve302ApiKey, resolve302ModelBaseUrl, setIntegration302Store } from '../integration302.js';
 import {
   parseMemoryDreamExtraction,
   runLazyMemoryDream,
@@ -3214,6 +3214,7 @@ export class ChatEngine {
     if (!store) {
       return null;
     }
+    setIntegration302Store(store);
     try {
       // Seed the default agent (avatar persona + global spaces/capabilities) on
       // first run — straight via the store seed, no avatar SDK. core.md §6.

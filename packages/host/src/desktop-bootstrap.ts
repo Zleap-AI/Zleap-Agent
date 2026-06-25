@@ -13,6 +13,7 @@ import { readAppMetadata as readInstalledAppMetadata, type AppMetadata } from '.
 import { webUrl } from './env.js';
 import { ensureRuntimeInstalled } from './setup-runtime.js';
 import { readServeState, stopServe, stopWebPortListeners } from './supervisor.js';
+import { DEFAULT_WEB_PORT } from './constants.js';
 
 export type BootstrapStep = {
   step: string;
@@ -232,13 +233,13 @@ async function reconcileRunningServe(
   }
 
   if (service === 'zleap-web') {
-    const port = Number(env.ZLEAP_WEB_PORT ?? env.PORT ?? '3000');
+    const port = Number(env.ZLEAP_WEB_PORT ?? env.PORT ?? DEFAULT_WEB_PORT);
     progress(options, 'serve', '检测到失联的旧 Zleap 服务，正在替换…', false);
     await stopWebPortListeners(port);
     return false;
   }
 
-  throw new Error(`端口 ${env.ZLEAP_WEB_PORT ?? env.PORT ?? '3000'} 已被其他服务占用，请释放端口后重试。`);
+  throw new Error(`端口 ${env.ZLEAP_WEB_PORT ?? env.PORT ?? DEFAULT_WEB_PORT} 已被其他服务占用，请释放端口后重试。`);
 }
 
 function samePath(left: string, right: string): boolean {

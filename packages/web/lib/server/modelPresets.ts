@@ -1,7 +1,7 @@
 import type { ModelConfigRecord } from '@zleap/core';
 import type { ZleapStore } from '@zleap/store';
 import { modelKind } from '../models';
-import { DEFAULT_302_MODEL_BASE_URL, read302IntegrationConfig, resolve302ApiKey } from './integration302Config';
+import { DEFAULT_302_MODEL_BASE_URL, read302IntegrationConfig, resolve302ApiKey, resolve302ModelBaseUrl } from './integration302Config';
 import { listFileModelConfigs, replaceFileModelConfigs } from './modelConfigFileStore';
 
 type StoreLike = Pick<ZleapStore, 'models'> | null;
@@ -43,16 +43,20 @@ export const DEFAULT_302_MODEL_CONFIGS: Default302Model[] = [
 export async function ensureDefault302ModelConfigs(store: StoreLike): Promise<ModelConfigRecord[]> {
   const config = await read302IntegrationConfig();
   const apiKey = resolve302ApiKey(config);
+  const modelBaseUrl = resolve302ModelBaseUrl(config);
   if (!store) {
     const existing = await listFileModelConfigs();
-    return mergeDefault302Models(existing, apiKey).models;
+    return mergeDefault302Models(existing, apiKey, modelBaseUrl).models;
   }
-  return upsertDefault302ModelConfigs(store, { apiKey });
+  return upsertDefault302ModelConfigs(store, { apiKey, modelBaseUrl });
 }
 
-export async function upsertDefault302ModelConfigs(store: StoreLike, options: { apiKey?: string } = {}): Promise<ModelConfigRecord[]> {
+export async function upsertDefault302ModelConfigs(
+  store: StoreLike,
+  options: { apiKey?: string; modelBaseUrl?: string } = {},
+): Promise<ModelConfigRecord[]> {
   const existing = store ? await store.models.listModelConfigs() : await listFileModelConfigs();
-  const { models, changedIds, replaceFile } = mergeDefault302Models(existing, options.apiKey);
+  const { models, changedIds, replaceFile } = mergeDefault302Models(existing, options.apiKey, options.modelBaseUrl);
   if (store) {
     await Promise.all(models.filter((model) => changedIds.has(model.id)).map((model) => store.models.saveModelConfig(model)));
   } else if (replaceFile) {
@@ -61,7 +65,7 @@ export async function upsertDefault302ModelConfigs(store: StoreLike, options: { 
   return models;
 }
 
-export function createDefault302ModelConfigRecords(options: { apiKey?: string } = {}): ModelConfigRecord[] {
+export function createDefault302ModelConfigRecords(options: { apiKey?: string; modelBaseUrl?: string } = {}): ModelConfigRecord[] {
   const now = new Date();
   return DEFAULT_302_MODEL_CONFIGS.map((preset, index) => ({
     id: preset.id,
@@ -71,6 +75,7 @@ export function createDefault302ModelConfigRecords(options: { apiKey?: string } 
     config: {
       ...preset.config,
       ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+      baseUrl: options.modelBaseUrl ?? DEFAULT_302_MODEL_BASE_URL,
       isDefault: true,
     },
     createdAt: new Date(now.getTime() + index),
@@ -87,6 +92,7 @@ export async function resetFileDefault302ModelConfigs(): Promise<ModelConfigReco
 function mergeDefault302Models(
   models: ModelConfigRecord[],
   apiKey: string | undefined,
+  modelBaseUrl = DEFAULT_302_MODEL_BASE_URL,
 ): { models: ModelConfigRecord[]; changedIds: Set<string>; replaceFile: boolean } {
   const now = new Date();
   const next = [...models];
@@ -98,6 +104,7 @@ function mergeDefault302Models(
     const kindHasDefault = next.some((model) => modelKind(model) === kind && model.config?.isDefault === true);
     const config = defaultModelConfig(preset.config, existingIndex >= 0 ? next[existingIndex]!.config : undefined, {
       ...(apiKey ? { apiKey } : {}),
+      baseUrl: modelBaseUrl,
       isDefault: existingIndex >= 0 ? next[existingIndex]!.config?.isDefault === true || !kindHasDefault : !kindHasDefault,
     });
     const record: ModelConfigRecord =

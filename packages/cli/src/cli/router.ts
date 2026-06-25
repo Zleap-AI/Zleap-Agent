@@ -16,7 +16,7 @@ function printHelp(): void {
   zleap init                  首次配置向导（CLI，兼容旧版）
   zleap doctor [--json]       环境体检
   zleap uninstall [--full]    卸载 App runtime（保留数据）；--full 删除全部 ~/.zleap
-  zleap config <子命令>       管理 ~/.zleap/config.json
+  zleap config <子命令>       管理配置；302 写入数据库通用配置
   zleap channels <子命令>     IM 频道连接
   zleap connect <channel>     连接频道（channels connect 别名）
 
@@ -42,6 +42,11 @@ export async function runCli(argv: string[]): Promise<void> {
   }
   if (argv.includes('--version') || argv.includes('-v')) {
     process.stdout.write(`${readCliVersion()}\n`);
+    return;
+  }
+  if (argv[0] === 'config') {
+    const { runConfigCommand } = await import('./config-cmd.js');
+    await runConfigCommand(argv.slice(1));
     return;
   }
 
@@ -169,10 +174,37 @@ export async function runCli(argv: string[]): Promise<void> {
       process.exitCode = await runUninstallCommand(options);
     });
 
-  cli.command('config <subcommand...>', '管理 ~/.zleap/config.json').action(async (subcommand: string[]) => {
+  cli
+    .command('config 302 setup', '配置 302 API Key / Base URL（写入数据库）')
+    .option('--api-key <key>', '302 API Key')
+    .option('--api-base-url <url>', 'Web Search API Base URL')
+    .option('--model-base-url <url>', 'Model Base URL')
+    .action(async (options: { apiKey?: string; apiBaseUrl?: string; modelBaseUrl?: string }) => {
+      const { runConfigCommand } = await import('./config-cmd.js');
+      const args = ['302', 'setup'];
+      if (options.apiKey) args.push('--api-key', options.apiKey);
+      if (options.apiBaseUrl) args.push('--api-base-url', options.apiBaseUrl);
+      if (options.modelBaseUrl) args.push('--model-base-url', options.modelBaseUrl);
+      await runConfigCommand(args);
+    });
+
+  cli.command('config 302 status', '查看 302 通用配置来源').action(async () => {
     const { runConfigCommand } = await import('./config-cmd.js');
-    await runConfigCommand(subcommand);
+    await runConfigCommand(['302', 'status']);
   });
+
+  cli.command('config 302 clear', '清除数据库中的 302 通用配置').action(async () => {
+    const { runConfigCommand } = await import('./config-cmd.js');
+    await runConfigCommand(['302', 'clear']);
+  });
+
+  cli
+    .command('config <subcommand...>', '管理配置；302 写入数据库通用配置')
+    .allowUnknownOptions()
+    .action(async (subcommand: string[]) => {
+      const { runConfigCommand } = await import('./config-cmd.js');
+      await runConfigCommand(subcommand);
+    });
 
   cli.command('channels <subcommand...>', 'IM 频道连接（feishu / wechat / feishu-cli）').action(async (subcommand: string[]) => {
     const { runChannelsCommand } = await import('./channels.js');

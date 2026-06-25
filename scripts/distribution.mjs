@@ -33,6 +33,7 @@ import {
 import { sha256File, writeChecksumSidecar } from './lib/archive.mjs';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const DEFAULT_WEB_PORT = 4789;
 const DIST_PATH = join(REPO_ROOT, 'distribution.json');
 const INSTALL_MANIFEST_FILE = 'install-manifest.json';
 
@@ -152,7 +153,7 @@ export function postgresDownloadUrl(version, platform, dist = loadDistribution()
 export function shellEnv(dist = loadDistribution()) {
   const version = readReleaseVersion();
   const platform = platformTag();
-  const webPort = dist.runtime.webPort ?? 3000;
+  const webPort = dist.runtime.webPort ?? DEFAULT_WEB_PORT;
   return {
     ZLEAP_VERSION: version,
     ZLEAP_PLATFORM: platform,

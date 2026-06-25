@@ -25,7 +25,7 @@ import {
   zleapLayout,
 } from '@zleap/host';
 import { CONFIG_PATH, loadConfigWithMeta, resolvePersistence } from '@zleap/host';
-import { resolve302ApiKey } from '@zleap/agent';
+import { resolveIntegration302Detailed, setIntegration302Store, type ResolvedIntegration302 } from '@zleap/agent';
 import { resolveCliContext, modelSourceLabel } from './context.js';
 import { formatChannelsStatusSummary } from './channels.js';
 import { ConnectionsService } from '@zleap/agent/conversation';
@@ -160,6 +160,7 @@ export async function collectDoctorChecks(): Promise<DoctorCheck[]> {
   }
 
   loadProjectEnv();
+  let integration302: ResolvedIntegration302 | undefined;
   checks.push({
     name: '.env 加载',
     ok: true,
@@ -238,7 +239,9 @@ export async function collectDoctorChecks(): Promise<DoctorCheck[]> {
           critical: false,
         });
       }
+      integration302 = await resolveIntegration302Detailed();
       await store.close().catch(() => undefined);
+      setIntegration302Store(undefined);
     }
   } else {
     checks.push({
@@ -250,6 +253,8 @@ export async function collectDoctorChecks(): Promise<DoctorCheck[]> {
     });
   }
 
+  integration302 ??= await resolveIntegration302Detailed();
+
   const embedModel = persistence.embedding?.model ?? process.env.ZLEAP_EMBED_MODEL;
   checks.push({
     name: 'Embedding',
@@ -259,12 +264,13 @@ export async function collectDoctorChecks(): Promise<DoctorCheck[]> {
     critical: false,
   });
 
-  const webSearchKey = resolve302ApiKey();
   checks.push({
     name: 'Web Search',
-    ok: Boolean(webSearchKey),
-    detail: webSearchKey ? '302 API Key 已配置' : '未配置 ZLEAP_302_API_KEY',
-    fix: webSearchKey ? undefined : '设置 ZLEAP_302_API_KEY 或在 Web 通用配置填写',
+    ok: Boolean(integration302.apiKey),
+    detail: integration302.apiKey
+      ? `302 API Key 已配置（${integration302SourceLabel(integration302.source.apiKey)}） · ${integration302.apiBaseUrl}`
+      : `未配置 302 API Key · ${integration302.apiBaseUrl}（${integration302SourceLabel(integration302.source.apiBaseUrl)}）`,
+    fix: integration302.apiKey ? undefined : '运行 zleap config 302 setup 或在 Web 通用配置填写',
     critical: false,
   });
 
@@ -359,6 +365,7 @@ async function probeGateway(): Promise<{ alive: boolean; detail: string }> {
     return { alive: false, detail: '30s 内无频道状态更新（gateway 可能未运行）' };
   } finally {
     await store.close().catch(() => undefined);
+    setIntegration302Store(undefined);
   }
 }
 
@@ -372,6 +379,7 @@ async function isFeishuCliEnabled(): Promise<boolean> {
     return false;
   } finally {
     await store.close().catch(() => undefined);
+    setIntegration302Store(undefined);
   }
 }
 
@@ -383,6 +391,21 @@ function resolveLarkCliBin(): string | null {
     return existsSync(runJs) ? runJs : null;
   } catch {
     return null;
+  }
+}
+
+function integration302SourceLabel(source: string): string {
+  switch (source) {
+    case 'db':
+      return 'DB';
+    case 'env':
+      return 'env';
+    case 'file':
+      return 'legacy file';
+    case 'default':
+      return 'default';
+    default:
+      return 'none';
   }
 }
 

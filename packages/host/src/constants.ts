@@ -5,5 +5,6 @@ export const DEFAULT_PG_PORT = '5433';
 export const DEFAULT_PG_USER = 'zleap';
 export const DEFAULT_PG_PASSWORD = 'zleap';
 export const DEFAULT_PG_DATABASE = 'zleap';
-export const DEFAULT_WEB_PORT = 3000;
+export const DEFAULT_WEB_PORT = 4789;
+export const DEFAULT_DEV_WEB_PORT = 3000;
 export const STATE_FILE = 'serve.json';

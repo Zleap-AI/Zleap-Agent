@@ -21,7 +21,7 @@ describe('@zleap/host distribution', () => {
     const config = loadDistributionConfig();
     expect(config.github.owner).toBe('Zleap-AI');
     expect(config.github.repo).toBe('Zleap-Agent');
-    expect(config.runtime.webPort).toBe(3000);
+    expect(config.runtime.webPort).toBe(4789);
   });
 
   it('normalizes version tags', () => {
@@ -73,8 +73,8 @@ describe('@zleap/host distribution', () => {
 
   it('derives local URLs from webPort', () => {
     resetDistributionConfigCache();
-    expect(webPort()).toBe(3000);
-    expect(onboardingUrl()).toBe('http://127.0.0.1:3000/onboarding');
-    expect(healthLiveUrl()).toBe('http://127.0.0.1:3000/api/health/live');
+    expect(webPort()).toBe(4789);
+    expect(onboardingUrl()).toBe('http://127.0.0.1:4789/onboarding');
+    expect(healthLiveUrl()).toBe('http://127.0.0.1:4789/api/health/live');
   });
 });

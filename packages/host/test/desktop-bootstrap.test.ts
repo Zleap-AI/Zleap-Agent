@@ -135,7 +135,7 @@ describe('runDesktopBootstrap', () => {
     const result = await runDesktopBootstrap({ autoUpdate: false });
 
     expect(result.ok).toBe(true);
-    expect(mocks.stopWebPortListeners).toHaveBeenCalledWith(3000);
+    expect(mocks.stopWebPortListeners).toHaveBeenCalledWith(4789);
     expect(mocks.startDetachedServe).toHaveBeenCalled();
   });
 

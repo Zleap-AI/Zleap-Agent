@@ -14,6 +14,7 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
 
 static WEB_PORT: OnceLock<u16> = OnceLock::new();
+const DEFAULT_WEB_PORT: u16 = 4789;
 static DESKTOP_SESSION_ID: OnceLock<String> = OnceLock::new();
 static BOOTSTRAP_ERROR: LazyLock<Arc<Mutex<Option<String>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
@@ -470,7 +471,7 @@ fn resolve_web_port(app_root: &Path) -> u16 {
     load_distribution(app_root)
         .runtime
         .and_then(|runtime| runtime.web_port)
-        .unwrap_or(3000)
+        .unwrap_or(DEFAULT_WEB_PORT)
 }
 
 fn zleap_home() -> PathBuf {
@@ -705,13 +706,13 @@ fn resolve_resources_root(app: &AppHandle) -> Option<PathBuf> {
     })
 }
 
-fn resolve_web_port_from_metadata(meta: &AppMetadata) -> u16 {
+fn resolve_web_port_from_metadata(_meta: &AppMetadata) -> u16 {
     if let Ok(port) = std::env::var("ZLEAP_WEB_PORT") {
         if let Ok(parsed) = port.parse::<u16>() {
             return parsed;
         }
     }
-    3000
+    DEFAULT_WEB_PORT
 }
 
 fn ensure_bootstrap_root(app: &AppHandle, resources: &Path) -> Result<PathBuf, String> {
@@ -725,8 +726,8 @@ fn ensure_bootstrap_root(app: &AppHandle, resources: &Path) -> Result<PathBuf, S
     let meta = read_metadata_file(&resources.join("metadata.json")).unwrap_or_default();
     let cache_key = format!(
         "{}-{}",
-        meta.version.unwrap_or_else(|| "unknown".to_string()),
-        meta.built_at.unwrap_or_else(|| "unknown".to_string())
+        safe_path_component(&meta.version.unwrap_or_else(|| "unknown".to_string())),
+        safe_path_component(&meta.built_at.unwrap_or_else(|| "unknown".to_string()))
     );
     let cache = zleap_home().join("bootstrap").join(cache_key);
     if host_script(&cache, "desktop-bootstrap-cli.js").exists() {
@@ -741,6 +742,23 @@ fn ensure_bootstrap_root(app: &AppHandle, resources: &Path) -> Result<PathBuf, S
         ));
     }
     Ok(cache)
+}
+
+fn safe_path_component(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '-',
+            ch if ch.is_control() => '-',
+            ch => ch,
+        })
+        .collect();
+    let trimmed = sanitized.trim_matches([' ', '.']).trim();
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn resolve_bundled_payload_dir(app: &AppHandle) -> Option<PathBuf> {

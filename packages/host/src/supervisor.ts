@@ -17,6 +17,7 @@ import { sleep, spawnDetached } from './process.js';
 import { acquireRuntimeLock, reclaimStaleRuntimeLock } from './lock.js';
 import { readAppMetadata } from './upgrade.js';
 import { writeRuntimeState } from './runtime-state.js';
+import { DEFAULT_WEB_PORT } from './constants.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -84,7 +85,7 @@ export async function runServe(options: ServeOptions = {}): Promise<number> {
   const nodeBin = nodeExecPath(env);
 
   try {
-    const webPort = env.ZLEAP_WEB_PORT ?? '3000';
+    const webPort = env.ZLEAP_WEB_PORT ?? String(DEFAULT_WEB_PORT);
     if (mode === 'dev') {
       await prepareDevServe(Number(webPort));
     } else {
@@ -494,7 +495,7 @@ function normalizeServeState(raw: Partial<ServeState>): ServeState {
     startedBy,
     sessionId: raw.sessionId ?? 'legacy',
     stopPolicy: raw.stopPolicy ?? inferStopPolicy(process.env, startedBy),
-    webPort: raw.webPort ?? '3000',
+    webPort: raw.webPort ?? String(DEFAULT_WEB_PORT),
     webUrl: raw.webUrl ?? webUrl(),
     services: (raw.services ?? []).map((service) => ({ ...service, status: service.status ?? 'running' })),
   };

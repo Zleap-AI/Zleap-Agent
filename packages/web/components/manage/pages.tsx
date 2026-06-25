@@ -947,15 +947,25 @@ function FeishuCliIntegrationCard({ presentation = 'card', onSaved, registerActi
 function ModelApi302KeyCard({ onSaved }: { onSaved: () => void }) {
   const { t } = useTranslation();
   const [api302Key, setApi302Key] = useState('');
+  const [api302BaseUrl, setApi302BaseUrl] = useState('');
+  const [api302ModelBaseUrl, setApi302ModelBaseUrl] = useState('');
   const [api302Configured, setApi302Configured] = useState(false);
   const [saving302, setSaving302] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void webApiFetch('/api/integrations/302')
-      .then(async (response) => (response.ok ? ((await response.json()) as { configured?: boolean }) : null))
+      .then(async (response) =>
+        response.ok
+          ? ((await response.json()) as { configured?: boolean; apiBaseUrl?: string; modelBaseUrl?: string })
+          : null,
+      )
       .then((body) => {
-        if (!cancelled && body) setApi302Configured(body.configured === true);
+        if (!cancelled && body) {
+          setApi302Configured(body.configured === true);
+          setApi302BaseUrl(body.apiBaseUrl ?? '');
+          setApi302ModelBaseUrl(body.modelBaseUrl ?? '');
+        }
       })
       .catch(() => {});
     return () => {
@@ -965,16 +975,22 @@ function ModelApi302KeyCard({ onSaved }: { onSaved: () => void }) {
 
   const save302ApiKey = async () => {
     const key = api302Key.trim();
-    if (!key) {
+    if (!key && !api302Configured) {
       toast.error(t('model.api302KeyRequired', { defaultValue: '请先填写 302.AI API Key' }));
       return;
     }
     setSaving302(true);
     try {
-      await postJson('/api/integrations/302', { apiKey: key });
-      setApi302Configured(true);
+      const body = (await postJson('/api/integrations/302', {
+        ...(key ? { apiKey: key } : {}),
+        apiBaseUrl: api302BaseUrl,
+        modelBaseUrl: api302ModelBaseUrl,
+      })) as { configured?: boolean; apiBaseUrl?: string; modelBaseUrl?: string };
+      setApi302Configured(body.configured === true);
+      setApi302BaseUrl(body.apiBaseUrl ?? api302BaseUrl);
+      setApi302ModelBaseUrl(body.modelBaseUrl ?? api302ModelBaseUrl);
       setApi302Key('');
-      toast.success(t('model.api302Saved', { defaultValue: '302.AI API Key 已保存' }));
+      toast.success(t('model.api302Saved', { defaultValue: '302.AI 通用配置已保存' }));
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -991,7 +1007,7 @@ function ModelApi302KeyCard({ onSaved }: { onSaved: () => void }) {
         </span>
         <div className="min-w-0 flex-1 space-y-3">
           <div className="flex items-center gap-2">
-            <div className="text-sm font-semibold text-foreground">302.AI API Key</div>
+            <div className="text-sm font-semibold text-foreground">302.AI</div>
             <Badge variant={api302Configured ? 'secondary' : 'outline'} className="h-5 px-1.5 text-[10px] font-normal">
               {api302Configured
                 ? t('model.api302Configured', { defaultValue: '已配置' })
@@ -1001,21 +1017,50 @@ function ModelApi302KeyCard({ onSaved }: { onSaved: () => void }) {
           <p className="text-xs leading-5 text-muted-foreground">
             {t('model.api302Hint', {
               defaultValue:
-                '填一次 302.AI API Key，会自动补齐 qwen3.6-flash、Qwen/Qwen3-Embedding-0.6B 和 web-search 工具。Key 只保存在本地后端，不会展示给模型。',
+                '默认使用 302 官方地址；只填 Key 就能启用 qwen3.6-flash、Qwen/Qwen3-Embedding-0.6B 和 web-search。Key 只保存在本地后端，不会回显。',
             })}
           </p>
-          <div className="flex gap-2">
-            <Input
-              type="password"
-              value={api302Key}
-              onChange={(event) => setApi302Key(event.target.value)}
-              placeholder="sk-..."
-              className="h-8 font-mono text-xs"
-              autoComplete="off"
-            />
-            <Button size="sm" onClick={save302ApiKey} disabled={saving302}>
-              {saving302 ? t('common.saving', { defaultValue: '保存中' }) : t('common.save', { defaultValue: '保存' })}
-            </Button>
+          <div className="grid gap-2">
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              API Key
+              <Input
+                type="password"
+                value={api302Key}
+                onChange={(event) => setApi302Key(event.target.value)}
+                placeholder={api302Configured ? t('model.api302KeyKeep', { defaultValue: '已配置，留空保留' }) : 'sk-...'}
+                className="h-8 font-mono text-xs"
+                autoComplete="off"
+              />
+            </label>
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                API Base URL
+                <Input
+                  type="url"
+                  value={api302BaseUrl}
+                  onChange={(event) => setApi302BaseUrl(event.target.value)}
+                  placeholder="https://api.302.ai"
+                  className="h-8 font-mono text-xs"
+                  autoComplete="off"
+                />
+              </label>
+              <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                Model Base URL
+                <Input
+                  type="url"
+                  value={api302ModelBaseUrl}
+                  onChange={(event) => setApi302ModelBaseUrl(event.target.value)}
+                  placeholder="https://api.302.ai/v1"
+                  className="h-8 font-mono text-xs"
+                  autoComplete="off"
+                />
+              </label>
+            </div>
+            <div className="flex justify-end">
+              <Button size="sm" onClick={save302ApiKey} disabled={saving302}>
+                {saving302 ? t('common.saving', { defaultValue: '保存中' }) : t('common.save', { defaultValue: '保存' })}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

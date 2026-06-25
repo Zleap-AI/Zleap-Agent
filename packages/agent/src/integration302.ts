@@ -14,6 +14,19 @@ export type Integration302Config = {
   modelBaseUrl?: string;
 };
 
+export type Integration302ValueSource = 'db' | 'env' | 'file' | 'default' | 'none';
+
+export type ResolvedIntegration302 = {
+  apiKey?: string;
+  apiBaseUrl: string;
+  modelBaseUrl: string;
+  source: {
+    apiKey: Exclude<Integration302ValueSource, 'default'>;
+    apiBaseUrl: Exclude<Integration302ValueSource, 'none'>;
+    modelBaseUrl: Exclude<Integration302ValueSource, 'none'>;
+  };
+};
+
 /**
  * Minimal store surface needed to read the persisted 302 config. Injected once at
  * process boot (see `createSharedStore`) so the file-less, cwd-agnostic DB row is
@@ -104,15 +117,45 @@ export function resolve302ModelBaseUrl(config: Integration302Config = {}): strin
 
 /** One-shot async resolution (DB → env → file) for callers without a config in hand. */
 export async function resolveIntegration302(): Promise<{ apiKey?: string; apiBaseUrl: string; modelBaseUrl: string }> {
+  const resolved = await resolveIntegration302Detailed();
+  return {
+    apiKey: resolved.apiKey,
+    apiBaseUrl: resolved.apiBaseUrl,
+    modelBaseUrl: resolved.modelBaseUrl,
+  };
+}
+
+/** One-shot async resolution with source labels for status/doctor output. */
+export async function resolveIntegration302Detailed(): Promise<ResolvedIntegration302> {
   const db = await read302IntegrationConfig();
   const file = await read302FileConfigAsync();
+  const apiKey = pickWithSource(
+    ['db', db.apiKey],
+    ['env', process.env.ZLEAP_302_API_KEY],
+    ['env', process.env['302_API_KEY']],
+    ['file', file.apiKey],
+  );
+  const apiBaseUrl = pickWithSource(
+    ['db', db.apiBaseUrl],
+    ['env', process.env.ZLEAP_302_API_BASE_URL],
+    ['file', file.apiBaseUrl],
+    ['default', DEFAULT_302_API_BASE_URL],
+  );
+  const modelBaseUrl = pickWithSource(
+    ['db', db.modelBaseUrl],
+    ['env', process.env.ZLEAP_302_MODEL_BASE_URL],
+    ['file', file.modelBaseUrl],
+    ['default', DEFAULT_302_MODEL_BASE_URL],
+  );
   return {
-    apiKey: firstNonEmpty(db.apiKey, process.env.ZLEAP_302_API_KEY, process.env['302_API_KEY'], file.apiKey),
-    apiBaseUrl:
-      firstNonEmpty(db.apiBaseUrl, process.env.ZLEAP_302_API_BASE_URL, file.apiBaseUrl) ?? DEFAULT_302_API_BASE_URL,
-    modelBaseUrl:
-      firstNonEmpty(db.modelBaseUrl, process.env.ZLEAP_302_MODEL_BASE_URL, file.modelBaseUrl) ??
-      DEFAULT_302_MODEL_BASE_URL,
+    apiKey: apiKey.value,
+    apiBaseUrl: apiBaseUrl.value ?? DEFAULT_302_API_BASE_URL,
+    modelBaseUrl: modelBaseUrl.value ?? DEFAULT_302_MODEL_BASE_URL,
+    source: {
+      apiKey: apiKey.source === 'default' ? 'none' : apiKey.source,
+      apiBaseUrl: apiBaseUrl.source === 'none' ? 'default' : apiBaseUrl.source,
+      modelBaseUrl: modelBaseUrl.source === 'none' ? 'default' : modelBaseUrl.source,
+    },
   };
 }
 
@@ -134,6 +177,16 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
     if (trimmed) return trimmed;
   }
   return undefined;
+}
+
+function pickWithSource(
+  ...entries: Array<[Integration302ValueSource, string | undefined]>
+): { value?: string; source: Integration302ValueSource } {
+  for (const [source, value] of entries) {
+    const trimmed = value?.trim();
+    if (trimmed) return { value: trimmed, source };
+  }
+  return { source: 'none' };
 }
 
 function stringValue(value: unknown): string | undefined {

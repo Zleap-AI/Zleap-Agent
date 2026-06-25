@@ -1,4 +1,5 @@
 import type { CustomModelConfig } from '@zleap/ai';
+import { setIntegration302Store } from '@zleap/agent';
 import { modelFromEnv, resolveModelFromStore, toEngineModel, type ModelResolution } from '@zleap/agent/conversation';
 import { createSharedStore } from '@zleap/agent/conversation';
 import { loadConfigWithMeta, resolvePersistence, type CliConfig, type PersistenceConfig } from '@zleap/host';
@@ -49,6 +50,7 @@ export async function resolveCliContext(options: ResolveCliContextOptions = {}):
       if (store) {
         dbReachable = true;
         await store.close().catch(() => undefined);
+        setIntegration302Store(undefined);
       }
     }
     return {
@@ -83,6 +85,7 @@ export async function resolveCliContext(options: ResolveCliContextOptions = {}):
         }
       } finally {
         await store.close().catch(() => undefined);
+        setIntegration302Store(undefined);
       }
     }
   }
@@ -129,6 +132,7 @@ export async function resolveModelConfigById(modelConfigId: string): Promise<Cus
     return record ? toEngineModel(record) : undefined;
   } finally {
     await store.close().catch(() => undefined);
+    setIntegration302Store(undefined);
   }
 }
 

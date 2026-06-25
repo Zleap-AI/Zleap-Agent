@@ -19,7 +19,7 @@
   },
   "runtime": {
     "nodeVersion": "20.18.1",
-    "webPort": 3000,
+    "webPort": 4789,
     "authMode": "localhost",
     "serveMode": "production",
     "schemaVersion": 1,

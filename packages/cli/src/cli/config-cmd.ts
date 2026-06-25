@@ -1,4 +1,13 @@
 import { spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline/promises';
+import {
+  DEFAULT_302_API_BASE_URL,
+  DEFAULT_302_MODEL_BASE_URL,
+  INTEGRATION_302_CHANNEL,
+  resolveIntegration302Detailed,
+  setIntegration302Store,
+} from '@zleap/agent';
+import { createSharedStore } from '@zleap/agent/conversation';
 import {
   CONFIG_PATH,
   envKeyForConfigPath,
@@ -11,6 +20,7 @@ import {
   trackedEnvEntries,
 } from '@zleap/host';
 import { resolveCliContext, modelSourceLabel } from './context.js';
+import { loadProjectEnv } from '../dotenv.js';
 
 export async function runConfigCommand(argv: string[]): Promise<void> {
   const [sub, ...rest] = argv;
@@ -36,6 +46,10 @@ export async function runConfigCommand(argv: string[]): Promise<void> {
   }
   if (sub === 'edit') {
     runConfigEdit();
+    return;
+  }
+  if (sub === '302') {
+    await run302ConfigCommand(rest);
     return;
   }
   process.stderr.write(`未知子命令：config ${sub}\n`);
@@ -132,6 +146,247 @@ function runConfigEdit(): void {
   }
 }
 
+async function run302ConfigCommand(argv: string[]): Promise<void> {
+  const [sub = 'status', ...rest] = argv;
+  if (sub === 'help' || sub === '--help') {
+    print302ConfigHelp();
+    return;
+  }
+  if (sub === 'setup') {
+    await reportConfigError(() => run302Setup(rest));
+    return;
+  }
+  if (sub === 'status') {
+    await reportConfigError(run302Status);
+    return;
+  }
+  if (sub === 'clear') {
+    await reportConfigError(run302Clear);
+    return;
+  }
+  process.stderr.write(`未知子命令：config 302 ${sub}\n`);
+  print302ConfigHelp();
+  process.exitCode = 1;
+}
+
+async function reportConfigError(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+}
+
+async function run302Setup(argv: string[]): Promise<void> {
+  const options = parseFlagOptions([...argv, ...currentConfig302Args()]);
+  const existing = await with302Store(async () => resolveIntegration302Detailed());
+  const interactive = process.stdin.isTTY && process.stdout.isTTY;
+
+  if (!interactive && !options.apiKey && !existing.apiKey) {
+    process.stderr.write('非交互环境请传入 --api-key <key>。\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  const apiBaseUrl = normalizeBaseUrl(
+    options.apiBaseUrl ?? (interactive ? await promptLine('API Base URL', existing.apiBaseUrl || DEFAULT_302_API_BASE_URL) : undefined),
+    DEFAULT_302_API_BASE_URL,
+  );
+  const apiKey =
+    options.apiKey ??
+    (interactive
+      ? await promptHidden(existing.apiKey ? 'API Key [已配置，直接 Enter 保留]: ' : 'API Key: ')
+      : undefined) ??
+    '';
+  const modelBaseUrl = normalizeBaseUrl(
+    options.modelBaseUrl ?? (interactive ? await promptLine('Model Base URL', existing.modelBaseUrl || DEFAULT_302_MODEL_BASE_URL) : undefined),
+    DEFAULT_302_MODEL_BASE_URL,
+  );
+  const finalApiKey = apiKey.trim() || existing.apiKey;
+  if (!finalApiKey) {
+    process.stderr.write('API Key 不能为空。\n');
+    process.exitCode = 1;
+    return;
+  }
+
+  await with302Store(async (store) => {
+    await store.integrations.saveIntegration({
+      channel: INTEGRATION_302_CHANNEL,
+      config: {
+        apiKey: finalApiKey,
+        apiBaseUrl,
+        modelBaseUrl,
+      },
+      updatedAt: new Date(),
+    });
+  });
+
+  process.stdout.write('302 通用配置已保存。\n');
+  process.stdout.write(`  API Key        ${maskKey(finalApiKey)}\n`);
+  process.stdout.write(`  API Base URL   ${apiBaseUrl}\n`);
+  process.stdout.write(`  Model Base URL ${modelBaseUrl}\n`);
+}
+
+async function run302Status(): Promise<void> {
+  loadProjectEnv();
+  const store = await createSharedStore({ onWarn: () => undefined });
+  let resolved;
+  try {
+    resolved = await resolveIntegration302Detailed();
+  } finally {
+    await store?.close().catch(() => undefined);
+    setIntegration302Store(undefined);
+  }
+  process.stdout.write('302 通用配置：\n');
+  process.stdout.write(`  API Key        ${resolved.apiKey ? `已配置 (${sourceLabel(resolved.source.apiKey)})` : '未配置'}\n`);
+  process.stdout.write(`  API Base URL   ${resolved.apiBaseUrl} (${sourceLabel(resolved.source.apiBaseUrl)})\n`);
+  process.stdout.write(`  Model Base URL ${resolved.modelBaseUrl} (${sourceLabel(resolved.source.modelBaseUrl)})\n`);
+}
+
+async function run302Clear(): Promise<void> {
+  await with302Store(async (store) => {
+    await store.integrations.deleteIntegration(INTEGRATION_302_CHANNEL);
+  });
+  process.stdout.write('已清除 DB 中的 302 通用配置；环境变量和 legacy 文件不会被修改。\n');
+}
+
+async function with302Store<T>(fn: (store: NonNullable<Awaited<ReturnType<typeof createSharedStore>>>) => Promise<T>): Promise<T> {
+  loadProjectEnv();
+  const store = await createSharedStore({ onWarn: () => undefined });
+  if (!store) {
+    throw new Error('无法连接本地数据库，不能读写 302 通用配置。请先运行 zleap setup 或 zleap serve。');
+  }
+  try {
+    return await fn(store);
+  } finally {
+    await store.close().catch(() => undefined);
+    setIntegration302Store(undefined);
+  }
+}
+
+function parseFlagOptions(argv: string[]): { apiKey?: string; apiBaseUrl?: string; modelBaseUrl?: string } {
+  const options: { apiKey?: string; apiBaseUrl?: string; modelBaseUrl?: string } = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const next = argv[i + 1];
+    if (arg === '--api-key' && next) {
+      options.apiKey = next;
+      i += 1;
+    } else if (arg === '--api-base-url' && next) {
+      options.apiBaseUrl = next;
+      i += 1;
+    } else if (arg === '--model-base-url' && next) {
+      options.modelBaseUrl = next;
+      i += 1;
+    }
+  }
+  return options;
+}
+
+function currentConfig302Args(): string[] {
+  const args = process.argv.slice(2);
+  const configIndex = args.indexOf('config');
+  if (configIndex < 0 || args[configIndex + 1] !== '302') {
+    return [];
+  }
+  return args.slice(configIndex + 2);
+}
+
+async function promptLine(label: string, defaultValue: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(`${label} [${defaultValue}]: `);
+    return answer.trim() || defaultValue;
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptHidden(label: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY || typeof process.stdin.setRawMode !== 'function') {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      return (await rl.question(label)).trim();
+    } finally {
+      rl.close();
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    const chars: string[] = [];
+    const cleanup = () => {
+      stdin.off('data', onData);
+      stdin.setRawMode(wasRaw);
+      stdin.pause();
+      process.stdout.write('\n');
+    };
+    const onData = (chunk: Buffer) => {
+      for (const byte of chunk) {
+        if (byte === 3) {
+          cleanup();
+          reject(new Error('已取消'));
+          return;
+        }
+        if (byte === 13 || byte === 10) {
+          cleanup();
+          resolve(chars.join('').trim());
+          return;
+        }
+        if (byte === 8 || byte === 127) {
+          if (chars.length > 0) {
+            chars.pop();
+            process.stdout.write('\b \b');
+          }
+          continue;
+        }
+        if (byte >= 32 && byte <= 126) {
+          chars.push(String.fromCharCode(byte));
+          process.stdout.write('*');
+        }
+      }
+    };
+    process.stdout.write(label);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on('data', onData);
+  });
+}
+
+function normalizeBaseUrl(value: string | undefined, fallback: string): string {
+  const raw = value?.trim() || fallback;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('invalid protocol');
+    }
+    return raw.replace(/\/+$/, '');
+  } catch {
+    throw new Error(`无效 URL：${raw}`);
+  }
+}
+
+function maskKey(value: string): string {
+  if (value.length <= 10) return '***';
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function sourceLabel(source: string): string {
+  switch (source) {
+    case 'db':
+      return 'DB';
+    case 'env':
+      return 'env';
+    case 'file':
+      return 'legacy file';
+    case 'default':
+      return 'default';
+    default:
+      return 'none';
+  }
+}
+
 function maskSecret(value: string): string {
   return /:([^:@/]+)@/.test(value) ? value.replace(/:([^:@/]+)@/, ':***@') : value;
 }
@@ -145,5 +400,23 @@ function printConfigHelp(): void {
   get <path>        读取配置项（如 model.baseUrl）
   set <path> <val>  写入 config.json
   edit              用 $EDITOR 打开 config.json
+  302 setup         配置 302 API Key / Base URL（写入数据库）
+  302 status        查看 302 通用配置来源
+  302 clear         清除数据库里的 302 通用配置
+`);
+}
+
+function print302ConfigHelp(): void {
+  process.stdout.write(`用法：zleap config 302 <子命令>
+
+子命令：
+  setup             交互式写入 302 通用配置
+  status            查看 Key / API Base URL / Model Base URL 及来源
+  clear             清除数据库中的 302 配置（不修改 env / legacy file）
+
+选项：
+  --api-key <key>
+  --api-base-url <url>
+  --model-base-url <url>
 `);
 }

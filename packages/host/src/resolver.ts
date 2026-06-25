@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   DEFAULT_DATABASE_URL,
+  DEFAULT_DEV_WEB_PORT,
   DEFAULT_EMBED_DIM,
 } from './constants.js';
 import {
@@ -157,13 +158,16 @@ export function buildRuntimeEnv(
     DEFAULT_DATABASE_URL;
   const embedDim =
     overrides.ZLEAP_EMBED_DIM ?? process.env.ZLEAP_EMBED_DIM ?? DEFAULT_EMBED_DIM;
-  const port = String(overrides.ZLEAP_WEB_PORT ?? process.env.ZLEAP_WEB_PORT ?? webPort(config));
   const nodeBin = resolveNodeBin(repoRoot);
   const pgBin = resolvePostgresBin(repoRoot);
   const serveMode =
     overrides.ZLEAP_SERVE_MODE ??
     process.env.ZLEAP_SERVE_MODE ??
     (bundled || method !== 'dev' ? config.runtime.serveMode : undefined);
+  const defaultPort = !bundled && method === 'dev' && serveMode !== 'production'
+    ? DEFAULT_DEV_WEB_PORT
+    : webPort(config);
+  const port = String(overrides.ZLEAP_WEB_PORT ?? process.env.ZLEAP_WEB_PORT ?? defaultPort);
   const authMode =
     overrides.ZLEAP_AUTH_MODE ??
     process.env.ZLEAP_AUTH_MODE ??

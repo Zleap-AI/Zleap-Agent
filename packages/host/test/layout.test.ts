@@ -19,6 +19,8 @@ describe('@zleap/host layout', () => {
     delete process.env.ZLEAP_DESKTOP;
     delete process.env.ZLEAP_SKIP_BUILD;
     delete process.env.ZLEAP_SERVE_MODE;
+    delete process.env.ZLEAP_WEB_PORT;
+    delete process.env.PORT;
   });
 
   it('exposes canonical paths under ZLEAP_HOME', () => {
@@ -42,6 +44,16 @@ describe('@zleap/host layout', () => {
   it('buildRuntimeEnv includes database url', () => {
     const env = buildRuntimeEnv();
     expect(env.ZLEAP_DATABASE_URL).toContain('postgres://');
+  });
+
+  it('keeps the dev web port on 3000 by default', () => {
+    const env = buildRuntimeEnv();
+    expect(env.ZLEAP_WEB_PORT).toBe('3000');
+  });
+
+  it('uses the runtime web port for production serve', () => {
+    const env = buildRuntimeEnv({ ZLEAP_SERVE_MODE: 'production' });
+    expect(env.ZLEAP_WEB_PORT).toBe('4789');
   });
 
   it('resolveNodeBin falls back to process execPath', () => {
