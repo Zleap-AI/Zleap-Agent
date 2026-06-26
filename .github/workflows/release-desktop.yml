@@ -697,9 +697,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/release-assets
-          find dist/upload dist/postgres/upload dist/npm/upload -type f \
+          # Publish only end-user deliverables: desktop installers/updater (uploaded
+          # by tauri-action), the fresh-install payload, the in-place upgrade runtime,
+          # the managed Postgres bundle, and the signed install manifest + checksums.
+          # npm packages live on the npm registry (not duplicated here), and the
+          # *-bundle.env(.sha256) files are CI-internal build descriptors.
+          find dist/upload dist/postgres/upload -type f \
             ! -name 'postgres-bundle.env' \
+            ! -name 'postgres-bundle.env.sha256' \
             ! -name 'node-bundle.env' \
+            ! -name 'node-bundle.env.sha256' \
             -exec cp {} dist/release-assets/ \;
           node scripts/distribution.mjs write-checksums dist/release-assets
 

@@ -1,6 +1,6 @@
 {
   "name": "@zleap-ai/cli",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "bin": {
     "zleap": "dist/index.js"
