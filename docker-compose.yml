@@ -1,0 +1,77 @@
+# Local Postgres + pgvector for Zleap memory/recall.
+# `pnpm dev:web` starts this service, waits for readiness, runs migrations,
+# and launches the Web UI with ZLEAP_DATABASE_URL set to this database.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: zleap-postgres
+    environment:
+      POSTGRES_USER: zleap
+      POSTGRES_PASSWORD: zleap
+      POSTGRES_DB: zleap
+    ports:
+      - '5433:5432'
+    volumes:
+      - zleap_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U zleap -d zleap']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Independent task worker. Enable with: docker compose --profile worker up -d
+  # Kept behind a profile so the default `docker compose up` (Postgres only,
+  # used by `pnpm dev:web`) is unaffected.
+  worker:
+    profiles: ['worker']
+    image: node:22-bookworm
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -lc "corepack enable && pnpm install --frozen-lockfile && node scripts/tasks-worker.mjs"
+    environment:
+      ZLEAP_DATABASE_URL: postgres://zleap:zleap@postgres:5432/zleap
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # IM gateway (Feishu / WeChat / Feishu CLI). Enable with: docker compose --profile gateway up -d
+  # Connects out via long-connection (WS / long-poll / CLI subprocess), so no
+  # inbound port/webhook is required. Most config is data-first via the Web UI;
+  # the env below is the fallback. The Feishu CLI channel drives `lark-cli`, which
+  # is installed on demand (only when FEISHU_CLI_ENABLED=true) and stores its
+  # credentials under ZLEAP_GATEWAY_STATE_DIR (persisted via the state volume).
+  gateway:
+    profiles: ['gateway']
+    image: node:22-bookworm
+    working_dir: /app
+    volumes:
+      - ./:/app
+      - zleap_gateway_state:/app/.gateway-state
+    command: sh -lc '[ "$$FEISHU_CLI_ENABLED" = "true" ] && npm i -g @larksuite/cli@1.0.56; corepack enable && pnpm install --frozen-lockfile && node scripts/gateway.mjs'
+    environment:
+      ZLEAP_DATABASE_URL: postgres://zleap:zleap@postgres:5432/zleap
+      # State dir for dedup files and the Feishu CLI credential home (persisted).
+      ZLEAP_GATEWAY_STATE_DIR: /app/.gateway-state
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_DOMAIN: ${FEISHU_DOMAIN:-feishu}
+      FEISHU_GROUP_POLICY: ${FEISHU_GROUP_POLICY:-open}
+      FEISHU_ALLOWED_USERS: ${FEISHU_ALLOWED_USERS:-}
+      # Feishu CLI channel (@larksuite/cli). Opt-in; most config via the Web UI.
+      FEISHU_CLI_ENABLED: ${FEISHU_CLI_ENABLED:-false}
+      FEISHU_CLI_IDENTITY: ${FEISHU_CLI_IDENTITY:-user}
+      FEISHU_CLI_DOMAIN: ${FEISHU_CLI_DOMAIN:-feishu}
+      FEISHU_CLI_GROUP_POLICY: ${FEISHU_CLI_GROUP_POLICY:-disabled}
+      FEISHU_CLI_APP_ID: ${FEISHU_CLI_APP_ID:-}
+      FEISHU_CLI_APP_SECRET: ${FEISHU_CLI_APP_SECRET:-}
+      FEISHU_CLI_BIN: ${FEISHU_CLI_BIN:-lark-cli}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  zleap_pgdata:
+  zleap_gateway_state:

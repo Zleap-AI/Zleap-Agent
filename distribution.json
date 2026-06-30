@@ -1,0 +1,85 @@
+{
+  "product": {
+    "name": "Zleap",
+    "id": "zleap",
+    "desktopName": "Zleap"
+  },
+  "github": {
+    "owner": "Zleap-AI",
+    "repo": "Zleap-Agent"
+  },
+  "release": {
+    "provider": "github",
+    "channel": "stable",
+    "installBranch": "main",
+    "artifactBaseUrl": "https://github.com/{owner}/{repo}/releases/download/v{version}",
+    "manifestUrl": "https://github.com/{owner}/{repo}/releases/latest/download/{manifestFile}",
+    "installManifestUrl": "https://github.com/{owner}/{repo}/releases/latest/download/install-manifest.json",
+    "sourceBaseUrl": "https://raw.githubusercontent.com/{owner}/{repo}/{branch}"
+  },
+  "runtime": {
+    "nodeVersion": "20.18.1",
+    "webPort": 4789,
+    "authMode": "localhost",
+    "serveMode": "production",
+    "schemaVersion": 1,
+    "minCliVersion": "0.1.0",
+    "minDesktopVersion": "0.1.0",
+    "supportedCliRange": ">=0.1.0",
+    "supportedDesktopRange": ">=0.1.0",
+    "gateway": true,
+    "node": {
+      "version": "20.18.1",
+      "sources": {
+        "mac-arm64": {
+          "url": "https://nodejs.org/dist/v20.18.1/node-v20.18.1-darwin-arm64.tar.gz",
+          "sha256": "9e92ce1032455a9cc419fe71e908b27ae477799371b45a0844eedb02279922a4"
+        },
+        "win-x64": {
+          "url": "https://nodejs.org/dist/v20.18.1/node-v20.18.1-win-x64.zip",
+          "sha256": "56e5aacdeee7168871721b75819ccacf2367de8761b78eaceacdecd41e04ca03"
+        }
+      }
+    },
+    "postgres": {
+      "version": "17.10",
+      "pgvectorVersion": "0.8.3",
+      "source": {
+        "postgres": {
+          "url": "https://ftp.postgresql.org/pub/source/v17.10/postgresql-17.10.tar.gz",
+          "sha256": "e4b43025f32ea3d271be64365d284c8462cffd41d80db0c3df6fc62417a2d9dc"
+        },
+        "pgvector": {
+          "url": "https://github.com/pgvector/pgvector/archive/refs/tags/v0.8.3.tar.gz",
+          "sha256": "dc080c511a6354a1628eb19f9bc8e77ce880dde16c889744a6814c8c0006e36c"
+        }
+      },
+      "bundles": {
+        "win-x64": {
+          "url": "",
+          "sha256": ""
+        },
+        "mac-arm64": {
+          "url": "",
+          "sha256": ""
+        }
+      }
+    }
+  },
+  "cli": {
+    "npm": "@zleap-ai/cli",
+    "minVersion": "0.1.0"
+  },
+  "desktop": {
+    "identifier": "ai.zleap.desktop",
+    "platforms": [
+      "darwin-aarch64",
+      "windows-x86_64"
+    ]
+  },
+  "updater": {
+    "manifestFile": "latest.json",
+    "requireSignature": true,
+    "manifestPublicKey": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQm9qQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FZOEFNSUlCaWdLQ0FZRUE1VWhzc0tjalhZYXM0NUpyRGtGOApQZHF6QnJjTEY3WEthdnNHZHE2Rmp1cWJNV09sQTIzOXk2NTFkb2ovbUgvVW1QejdZNDNSYnZrRFQ1cHJBWlNDCkRUeDBVUnZCRjdPa3BKMURGamJlSktaOWdOTzlVZWg0cFJsQWVPeG00VjBQcXZEMDFsQ3hZMUdVZlp0eGdHNzYKVDFqTGQxZ0pXOEE1UmtNUGpaaVNWdHJHTGI0cUFlTndsRFlRSS9VaG9JNzdEdVB0djdTYmZxUXF5ZmVmczFHYQpKcW91bzZxR1lZNHB3MHNXT2tTb3FLMTFobFNzZ1VPMW5CL29BUThsM3FMcjBxM0hNQURNdlR4OHRMT0pydmtsClN0MVRTenFhbGFBdWlrcDlNTmhidXBkNXZyUnZzSkFSY1B4T3BTakRqa0l1WE54ZEpQU3NNcFVHQURBdGJIa04KQXU5VnlBS1U1eWtRckV4S3JZSjF0NEVDdC9wdy9peVkxTkRvL09xS2hpRkExN1F6TkFWWnVmOFVYU0ZybEhBOQpqelFtMDQ1dVd6TVZlVU8rSzRFL2Fuakd6cEZHQ1pFNDFGcFBPVW9mN2F1VVR5TEthQ25TOUZLMC9NN0NXbGhKCjN6aXJzMDFYdENGVlJGbjZEa1RMZFpBVVdha0hEamIwbnBVUHdGaTZKYVFMQWdNQkFBRT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
+  }
+}

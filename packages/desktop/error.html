@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zleap — 初始化失败</title>
+    <style>
+      /* Matches the splash: Stone base + Amber (kraft gold), adaptive light/dark. */
+      :root {
+        --bg-0: #f6f3ee;
+        --bg-glow: rgba(180, 121, 64, 0.1);
+        --text: #2c2722;
+        --text-faint: #8c8378;
+        --copper: #b47940;
+        --copper-strong: #9a6a3a;
+        --copper-foreground: #fff;
+        --surface: rgba(255, 255, 255, 0.6);
+        --border: rgba(0, 0, 0, 0.1);
+        --danger-bg: rgba(192, 73, 47, 0.1);
+        --danger-border: rgba(192, 73, 47, 0.32);
+        --danger-text: #9a3518;
+        --code-bg: rgba(44, 39, 34, 0.07);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-0: #17130e;
+          --bg-glow: rgba(210, 163, 94, 0.12);
+          --text: #f3efe9;
+          --text-faint: #a89f93;
+          --copper: #d2a35e;
+          --copper-strong: #c8924a;
+          --copper-foreground: #1c1610;
+          --surface: rgba(255, 255, 255, 0.05);
+          --border: rgba(255, 255, 255, 0.14);
+          --danger-bg: rgba(224, 101, 74, 0.13);
+          --danger-border: rgba(224, 101, 74, 0.34);
+          --danger-text: #f0a690;
+          --code-bg: rgba(255, 255, 255, 0.08);
+        }
+      }
+
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; }
+      body {
+        margin: 0;
+        padding: 2.5rem 2rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Avenir Next", "Segoe UI Variable",
+          "Segoe UI", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+          system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        background:
+          radial-gradient(900px 480px at 50% -16%, var(--bg-glow), transparent 60%),
+          var(--bg-0);
+        color: var(--text);
+      }
+      .wrap { max-width: 620px; margin: 0 auto; }
+      h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 1rem; letter-spacing: 0.01em; }
+      .msg {
+        background: var(--danger-bg);
+        border: 1px solid var(--danger-border);
+        padding: 1rem 1.1rem;
+        border-radius: 12px;
+        color: var(--danger-text);
+        line-height: 1.55;
+        font-size: 0.92rem;
+        word-break: break-word;
+      }
+      .actions { margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
+      button {
+        padding: 0.6rem 1.15rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.92rem;
+        font-weight: 500;
+        transition: filter 0.18s ease, transform 0.18s ease;
+      }
+      button:hover { filter: brightness(1.06); }
+      button:active { transform: translateY(1px); }
+      button.primary {
+        background: linear-gradient(135deg, var(--copper), var(--copper-strong));
+        border-color: transparent;
+        color: var(--copper-foreground);
+      }
+      .hint { margin-top: 1.4rem; color: var(--text-faint); font-size: 0.85rem; line-height: 1.65; }
+      code {
+        background: var(--code-bg);
+        padding: 0.12rem 0.4rem;
+        border-radius: 5px;
+        font-family: "SFMono-Regular", "Menlo", "Consolas", ui-monospace, monospace;
+        font-size: 0.85em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>初始化失败</h1>
+      <div class="msg" id="message">未知错误</div>
+      <div class="actions">
+        <button class="primary" id="retry">重试</button>
+        <button id="logs">打开日志目录</button>
+      </div>
+      <p class="hint">
+        详细日志：<code>~/.zleap/logs/desktop.log</code> 与 <code>serve.log</code><br />
+        终端诊断：<code>zleap doctor</code>
+      </p>
+    </div>
+    <script type="module">
+      const invoke = window.__TAURI__?.core?.invoke;
+      window.__zleapSetError = (text) => {
+        document.getElementById('message').textContent = text || '未知错误';
+      };
+      window.__zleapSetError(new URLSearchParams(window.location.search).get('message'));
+      if (invoke) {
+        invoke('get_bootstrap_error')
+          .then(window.__zleapSetError)
+          .catch(() => {});
+      }
+      document.getElementById('retry').addEventListener('click', () => {
+        if (invoke) invoke('retry_bootstrap');
+      });
+      document.getElementById('logs').addEventListener('click', () => {
+        if (invoke) invoke('open_logs_folder');
+      });
+    </script>
+  </body>
+</html>

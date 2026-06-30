@@ -1,0 +1,10 @@
+export const DEFAULT_DATABASE_URL = 'postgres://zleap:zleap@127.0.0.1:5433/zleap';
+export const DEFAULT_EMBED_DIM = '1536';
+export const DEFAULT_PG_HOST = '127.0.0.1';
+export const DEFAULT_PG_PORT = '5433';
+export const DEFAULT_PG_USER = 'zleap';
+export const DEFAULT_PG_PASSWORD = 'zleap';
+export const DEFAULT_PG_DATABASE = 'zleap';
+export const DEFAULT_WEB_PORT = 4789;
+export const DEFAULT_DEV_WEB_PORT = 3000;
+export const STATE_FILE = 'serve.json';

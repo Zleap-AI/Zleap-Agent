@@ -1,0 +1,15 @@
+{
+  "name": "@zleap/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "node -e \"process.exit(0)\"",
+    "build:app": "tauri build",
+    "tauri": "tauri",
+    "check": "node -e \"process.exit(0)\""
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.2.7"
+  }
+}

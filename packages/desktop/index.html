@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zleap</title>
+    <style>
+      :root {
+        --bg-0: #f6f3ee;
+        --bg-glow: rgba(180, 121, 64, 0.13);
+        --text-faint: #8c8378;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg-0: #17130e; --bg-glow: rgba(210, 163, 94, 0.15); --text-faint: #a89f93; }
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Avenir Next", "Segoe UI", "PingFang SC",
+          system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        background:
+          radial-gradient(1000px 560px at 50% -12%, var(--bg-glow), transparent 62%),
+          var(--bg-0);
+        color: var(--text-faint);
+        font-size: 0.92rem;
+      }
+    </style>
+  </head>
+  <body>
+    <p>正在启动 Zleap 本地服务…</p>
+  </body>
+</html>
