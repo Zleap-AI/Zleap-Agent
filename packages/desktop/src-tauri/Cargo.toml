@@ -1,0 +1,23 @@
+[package]
+name = "zleap-desktop"
+version = "0.2.0" # x-releaser-pleaser-version
+description = "Zleap desktop shell"
+authors = ["Zleap"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "2"
+
+[lib]
+name = "zleap_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]

@@ -1,0 +1,63 @@
+{
+  "name": "@zleap/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js",
+      "default": "./dist/engine/index.js"
+    },
+    "./conversation": {
+      "types": "./dist/conversation/index.d.ts",
+      "import": "./dist/conversation/index.js",
+      "default": "./dist/conversation/index.js"
+    },
+    "./workspaces": {
+      "types": "./dist/workspaces/index.d.ts",
+      "import": "./dist/workspaces/index.js",
+      "default": "./dist/workspaces/index.js"
+    },
+    "./sdkMcpExecutor": {
+      "types": "./dist/sdkMcpExecutor.d.ts",
+      "import": "./dist/sdkMcpExecutor.js",
+      "default": "./dist/sdkMcpExecutor.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcpRuntime.d.ts",
+      "import": "./dist/mcpRuntime.js",
+      "default": "./dist/mcpRuntime.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js",
+      "default": "./dist/config.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-package-dist.mjs && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@zleap/ai": "workspace:*",
+    "@zleap/core": "workspace:*",
+    "@zleap/store": "workspace:*",
+    "js-tiktoken": "^1.0.21"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

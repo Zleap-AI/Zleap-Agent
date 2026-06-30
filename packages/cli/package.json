@@ -1,0 +1,44 @@
+{
+  "name": "@zleap-ai/cli",
+  "version": "0.1.8",
+  "type": "module",
+  "bin": {
+    "zleap": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node ../../scripts/build-cli-package.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "pnpm --filter @zleap/ai build && pnpm --filter @zleap/core build && pnpm --filter @zleap/store build && pnpm build && node dist/index.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@zleap/ai": "workspace:*",
+    "@zleap/agent": "workspace:*",
+    "@zleap/core": "workspace:*",
+    "@zleap/host": "workspace:*",
+    "@zleap/store": "workspace:*",
+    "cac": "^7.0.0",
+    "dotenv": "^17.4.2",
+    "ink": "^5.2.1",
+    "js-tiktoken": "^1.0.21",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^18.3.30"
+  }
+}

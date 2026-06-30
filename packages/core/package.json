@@ -1,0 +1,38 @@
+{
+  "name": "@zleap/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./skill-package": {
+      "types": "./dist/skillPackage.d.ts",
+      "import": "./dist/skillPackage.js"
+    },
+    "./skill-sources": {
+      "types": "./dist/skillSources.d.ts",
+      "import": "./dist/skillSources.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-package-dist.mjs && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "eval:memory": "vitest run test/memory-recall-eval.test.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "jsonrepair": "^3.14.0",
+    "yaml": "^2.9.0"
+  }
+}
