@@ -462,7 +462,7 @@ class ConversationRuntime {
       const context = fromPane
         ? { source: fromPane.label, detail: summarizePane(fromPane) }
         : existing?.context ?? { source: spaceMeta(this.spaces, 'session').label, detail: text };
-      // The dispatched task streamed from the engine (`delta.goal`). It is THIS
+      // The dispatched task streamed from the engine (`delta.task`). It is THIS
       // dispatch's own objective — the real label to show, not the user's turn
       // message. Fall back to `text` only for the session pane (no goal handed down).
       const paneGoal = goal?.trim() || text;
@@ -506,14 +506,15 @@ class ConversationRuntime {
       this.emit();
       return spaceId;
     };
-    const recordMainDispatch = (spaceId: string, label: string, goal?: string) => {
+    const recordMainDispatch = (spaceId: string, label: string, task?: string, goal?: string) => {
       const now = Date.now();
       const targetMeta = spaceMeta(this.spaces, spaceId, label);
       const mainMeta = spaceMeta(this.spaces, MAIN_SPACE_ID, 'Main');
-      const dispatchGoal = goal?.trim() || text;
+      const dispatchGoal = goal?.trim() || text.trim() || task?.trim() || text;
+      const dispatchTask = task?.trim() || dispatchGoal || text;
       const tool: ToolCallView = {
-        name: 'enterWorkspace',
-        args: JSON.stringify({ space: spaceId, label: targetMeta.label, task: dispatchGoal }),
+        name: 'switchWorkspace',
+        args: JSON.stringify({ goal: dispatchGoal, space: spaceId, task: dispatchTask }),
         result: `已进入 ${targetMeta.label}`,
         status: 'done',
       };
@@ -776,7 +777,7 @@ class ConversationRuntime {
             this.activeTool = tool;
             this.emit();
             addRunningTool(tool);
-            if (delta.name === 'enterWorkspace' || delta.name === 'exitWorkspace') {
+            if (isWorkspaceControlTool(delta.name) || delta.name === 'exitWorkspace') {
               for (const artifact of artifactsFromExitWorkspace(delta.detail, this.activeSpace, () => this.idCounter++, this.workspaceRoot)) {
                 addArtifact(artifact);
               }
@@ -861,8 +862,9 @@ class ConversationRuntime {
         } else if (delta.type === 'space') {
           flush();
           flushSpaceText();
-          recordMainDispatch(delta.id, delta.label, delta.goal);
-          const paneId = enterSpace(delta.id, delta.label, delta.goal);
+          const task = delta.task ?? delta.goal;
+          recordMainDispatch(delta.id, delta.label, task, delta.goal);
+          const paneId = enterSpace(delta.id, delta.label, task);
           if (!this.hasPendingSpaceMessage(delta.id, paneId)) {
             this.commit({
               role: 'space',
@@ -1092,6 +1094,10 @@ function summarizePane(pane: WorkPane): string {
 function resolveResultPaneId(panes: WorkPane[], spaceId: string): string | null {
   const matching = [...panes].reverse().find((pane) => pane.spaceId === spaceId && pane.status === 'running');
   return matching?.id ?? [...panes].reverse().find((pane) => pane.spaceId === spaceId)?.id ?? null;
+}
+
+function isWorkspaceControlTool(name: string): boolean {
+  return name === 'switchWorkspace' || name === 'finishTask' || name === 'enterWorkspace';
 }
 
 function normalizeFinishedPanes(panes: WorkPane[]): WorkPane[] {

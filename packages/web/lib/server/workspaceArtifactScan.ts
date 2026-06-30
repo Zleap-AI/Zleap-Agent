@@ -1,10 +1,8 @@
 import { DEFAULT_FILE_WORKSPACE_ROOT } from '@zleap/core';
-import { readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 
-const ARTIFACT_EXTENSIONS = new Set(['.md', '.html', '.htm', '.txt', '.pdf', '.pptx', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
-const SKIP_FILENAMES = new Set(['agents.md', 'readme.md', 'package.json', 'pnpm-lock.yaml', 'components.json', 'skills-lock.json']);
-const OUTPUT_SUBDIRS = new Set(['outputs', 'artifacts', 'deliverables']);
+const ARTIFACT_REGISTRY = join('.zleap', 'artifacts.json');
 const CONVERSATION_DATE_DIR_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export type GalleryArtifactItem = {
@@ -17,31 +15,38 @@ export type GalleryArtifactItem = {
   createdAt?: string;
 };
 
-type ScannedFile = { path: string; mtimeMs: number };
+type RegisteredFile = { path: string; title?: string; kind?: string; createdAt?: string };
+type ArtifactRegistryItem = {
+  path?: unknown;
+  title?: unknown;
+  kind?: unknown;
+  source?: unknown;
+  createdAt?: unknown;
+};
 
-/** Scan agent-produced files in conversation workspaces for the artifact gallery. */
+/** Read agent-produced files registered by runtime in conversation workspaces. */
 export async function listWorkspaceFileArtifacts(limit = 150): Promise<GalleryArtifactItem[]> {
   const root = resolve(process.env.ZLEAP_FILE_WORKSPACE_ROOT ?? DEFAULT_FILE_WORKSPACE_ROOT);
-  const files: ScannedFile[] = [];
-  await collectConversationOutputs(root, files);
-  files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const files: RegisteredFile[] = [];
+  await collectConversationRegistries(root, files);
+  files.sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt));
 
   return files.slice(0, limit).map((file) => {
-    const name = basename(file.path);
+    const name = file.title || basename(file.path);
     const ext = extname(name).toLowerCase();
     return {
       id: `file:${file.path}`,
       title: name,
       summary: file.path,
-      kind: ext.replace(/^\./, '') || 'file',
+      kind: file.kind || ext.replace(/^\./, '') || 'file',
       status: 'local',
       contentUri: `file://${file.path}`,
-      createdAt: new Date(file.mtimeMs).toISOString(),
+      ...(file.createdAt ? { createdAt: file.createdAt } : {}),
     };
   });
 }
 
-async function collectConversationOutputs(baseRoot: string, out: ScannedFile[]): Promise<void> {
+async function collectConversationRegistries(baseRoot: string, out: RegisteredFile[]): Promise<void> {
   let dateEntries;
   try {
     dateEntries = await readdir(baseRoot, { withFileTypes: true });
@@ -62,38 +67,36 @@ async function collectConversationOutputs(baseRoot: string, out: ScannedFile[]):
     for (const convEntry of convEntries) {
       if (!convEntry.isDirectory() || convEntry.name.startsWith('.')) continue;
       const convPath = join(datePath, convEntry.name);
-      await collectFilesInDir(convPath, out, false);
-      for (const sub of OUTPUT_SUBDIRS) {
-        await collectFilesInDir(join(convPath, sub), out, true);
-      }
+      out.push(...await readRegistryFiles(convPath));
     }
   }
 }
 
-async function collectFilesInDir(dir: string, out: ScannedFile[], recursive: boolean): Promise<void> {
-  if (out.length > 500) return;
-  let entries;
+async function readRegistryFiles(conversationPath: string): Promise<RegisteredFile[]> {
+  let parsed;
   try {
-    entries = await readdir(dir, { withFileTypes: true });
+    parsed = JSON.parse(await readFile(join(conversationPath, ARTIFACT_REGISTRY), 'utf8')) as unknown;
   } catch {
-    return;
+    return [];
   }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item): RegisteredFile[] => {
+    const record = item && typeof item === 'object' ? (item as ArtifactRegistryItem) : undefined;
+    const rawPath = typeof record?.path === 'string' ? record.path.trim() : '';
+    if (!rawPath || record?.source === 'imported') return [];
+    const path = resolve(conversationPath, rawPath);
+    return [{
+      path,
+      ...(typeof record?.title === 'string' && record.title.trim() ? { title: record.title.trim() } : {}),
+      ...(typeof record?.kind === 'string' && record.kind.trim() ? { kind: record.kind.trim() } : {}),
+      ...(typeof record?.createdAt === 'string' && record.createdAt.trim() ? { createdAt: record.createdAt.trim() } : {}),
+    }];
+  });
+}
 
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (recursive) await collectFilesInDir(full, out, true);
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const ext = extname(entry.name).toLowerCase();
-    if (!ARTIFACT_EXTENSIONS.has(ext)) continue;
-    if (SKIP_FILENAMES.has(entry.name.toLowerCase()) || entry.name.toLowerCase().startsWith('tsconfig')) continue;
-    const info = await stat(full).catch(() => undefined);
-    if (!info) continue;
-    out.push({ path: full, mtimeMs: info.mtimeMs });
-  }
+function timestamp(value: string | undefined): number {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export function mergeGalleryArtifacts(

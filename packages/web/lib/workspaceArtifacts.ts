@@ -88,6 +88,7 @@ export function artifactsFromExitWorkspace(
   for (const item of artifacts) {
     if (!item || typeof item !== 'object') continue;
     const record = item as Record<string, unknown>;
+    if (record.source === 'imported') continue;
     const ref = typeof record.ref === 'string' ? record.ref : undefined;
     const description = typeof record.description === 'string' ? record.description.trim() : undefined;
     const kind = typeof record.kind === 'string' ? record.kind : 'file';
@@ -120,6 +121,7 @@ export function artifactsFromReferences(
   const views: ArtifactView[] = [];
   for (const ref of references) {
     if (!ref || typeof ref !== 'object') continue;
+    if (ref.source === 'imported') continue;
     const path = ref.kind === 'file' ? resolveArtifactPath(ref.path, workspaceRoot) : undefined;
     const href = ref.kind === 'url' ? ref.url?.trim() : undefined;
     if (!path && !href) continue;

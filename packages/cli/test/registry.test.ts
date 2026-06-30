@@ -31,7 +31,8 @@ describe('slash command registry', () => {
 
     expect(spaces.map((space) => space.canonicalId)).toEqual(['main', 'cli', 'web-search']);
     expect(main).toMatchObject({ id: 'session', canonicalId: 'main', kind: 'main' });
-    expect(main?.toolIds).toContain('enterWorkspace');
+    expect(main?.toolIds).toContain('switchWorkspace');
+    expect(main?.toolIds).not.toContain('enterWorkspace');
     expect(main?.toolIds).toContain('task_manage');
   });
 
@@ -43,7 +44,7 @@ describe('slash command registry', () => {
           kind: 'main',
           label: 'Main',
           routingCard: 'main routing',
-          toolIds: ['enterWorkspace'],
+          toolIds: ['switchWorkspace'],
         },
         {
           id: 'terminal',

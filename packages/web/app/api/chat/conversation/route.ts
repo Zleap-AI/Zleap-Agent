@@ -503,14 +503,15 @@ function workspaceTransitionFromPreviewEntry(
   data: Record<string, unknown> | undefined,
   fromSpace: string,
 ): WorkspaceTransitionView | undefined {
-  if (stringField(data?.toolName) !== 'enterWorkspace' || data?.isError === true) {
+  const toolName = stringField(data?.toolName);
+  if (!isWorkspaceControlTool(toolName) || data?.isError === true) {
     return undefined;
   }
   const phase = stringField(data?.phase);
   if (phase !== 'start' && phase !== 'end') {
     return undefined;
   }
-  return workspaceTransitionFromInput(objectField(parseJsonObject(entry.content)), fromSpace, entry.createdAt, entry.content?.trim());
+  return workspaceTransitionFromInput(objectField(parseJsonObject(entry.content)), fromSpace, entry.createdAt, entry.content?.trim(), toolName);
 }
 
 function workspaceTransitionFromToolEntry(
@@ -518,11 +519,12 @@ function workspaceTransitionFromToolEntry(
   data: Record<string, unknown> | undefined,
   fromSpace: string,
 ): WorkspaceTransitionView | undefined {
-  if (stringField(data?.toolId) !== 'enterWorkspace') {
+  const toolName = stringField(data?.toolId);
+  if (!isWorkspaceControlTool(toolName)) {
     return undefined;
   }
   const input = objectField(data?.input);
-  return workspaceTransitionFromInput(input, fromSpace, entry.createdAt, entry.content?.trim());
+  return workspaceTransitionFromInput(input, fromSpace, entry.createdAt, entry.content?.trim(), toolName);
 }
 
 function workspaceTransitionFromInput(
@@ -530,9 +532,10 @@ function workspaceTransitionFromInput(
   fromSpace: string,
   createdAt: Date,
   fallbackMessage?: string,
+  toolName?: string,
 ): WorkspaceTransitionView | undefined {
-  const status = workspaceTransitionStatus(stringField(input?.status));
-  const toSpace = status === 'handoff' ? stringField(input?.space) : status ? 'main' : undefined;
+  const status = workspaceTransitionStatusForTool(toolName, input);
+  const toSpace = workspaceTransitionTargetForTool(toolName, status, input);
   if (!status || !toSpace) {
     return undefined;
   }
@@ -547,6 +550,37 @@ function workspaceTransitionFromInput(
     message,
     createdAt: createdAt.toISOString(),
   };
+}
+
+function isWorkspaceControlTool(value: string | undefined): boolean {
+  return value === 'switchWorkspace' || value === 'finishTask' || value === 'enterWorkspace';
+}
+
+function workspaceTransitionStatusForTool(
+  toolName: string | undefined,
+  input: Record<string, unknown> | undefined,
+): WorkspaceTransitionView['status'] | undefined {
+  if (toolName === 'switchWorkspace') {
+    return 'handoff';
+  }
+  if (toolName === 'finishTask') {
+    return workspaceTransitionStatus(stringField(input?.status)) ?? 'completed';
+  }
+  return workspaceTransitionStatus(stringField(input?.status));
+}
+
+function workspaceTransitionTargetForTool(
+  toolName: string | undefined,
+  status: WorkspaceTransitionView['status'] | undefined,
+  input: Record<string, unknown> | undefined,
+): string | undefined {
+  if (toolName === 'switchWorkspace') {
+    return stringField(input?.space);
+  }
+  if (toolName === 'finishTask') {
+    return status ? 'main' : undefined;
+  }
+  return status === 'handoff' ? stringField(input?.space) : status ? 'main' : undefined;
 }
 
 function workspaceTransitionStatus(value: string | undefined): WorkspaceTransitionView['status'] | undefined {
@@ -889,9 +923,11 @@ function artifactFromReferenceItem(item: unknown, spaceId: string, nextId: () =>
 
 function artifactsFromText(text: string, spaceId: string, nextId: () => number, workspaceRoot?: string): ArtifactView[] {
   const matches = new Set<string>();
-  const directoryHint = singleLocalDirectoryHint(text);
+  const candidateText = mentionedArtifactCandidateText(text);
+  if (!candidateText) return [];
+  const directoryHint = singleLocalDirectoryHint(candidateText);
   const filePattern = /(?:^|[\s（(:：`"'“*])((?:\.{1,2}\/|\/)?[\w@~./\-\u4e00-\u9fff]+?\.(?:html?|css|js|mdx?|txt|json|csv|tsv|pdf|pptx?|png|jpe?g|webp|svg))(?:$|[\s（），)。,，`"'”*])/giu;
-  for (const match of text.matchAll(filePattern)) {
+  for (const match of candidateText.matchAll(filePattern)) {
     const path = normalizeMentionedArtifactPath(match[1]?.trim(), directoryHint);
     if (path && !isRemoteUrlPath(path)) {
       matches.add(path.replace(/^当前工作目录\s*[/:：]\s*/u, ''));
@@ -906,6 +942,41 @@ function artifactsFromText(text: string, spaceId: string, nextId: () => number, 
     detail: '消息中提到的文件',
     path: resolveArtifactPath(path, workspaceRoot) ?? path,
   }));
+}
+
+function mentionedArtifactCandidateText(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const selected: string[] = [];
+  let outputListLinesRemaining = 0;
+  for (const line of lines) {
+    const hasOutputContext = hasMentionedArtifactOutputContext(line);
+    if (hasOutputContext) {
+      selected.push(line);
+      outputListLinesRemaining = mentionsArtifactList(line) ? 12 : 0;
+      continue;
+    }
+    if (outputListLinesRemaining > 0 && !hasSourceInventoryContext(line)) {
+      selected.push(line);
+      outputListLinesRemaining -= 1;
+      continue;
+    }
+    if (line.trim()) {
+      outputListLinesRemaining = 0;
+    }
+  }
+  return selected.join('\n');
+}
+
+function hasMentionedArtifactOutputContext(text: string): boolean {
+  return /(生成|已生成|保存|已保存|输出|写入|创建|产物|文件路径|generated|created|saved|wrote|written|exported|output|artifact|file\s+path)/iu.test(text);
+}
+
+function mentionsArtifactList(text: string): boolean {
+  return /(files?|文件|包含|with\s+\w+\s+files?|如下|包括|folder|目录|文件夹)/iu.test(text);
+}
+
+function hasSourceInventoryContext(text: string): boolean {
+  return /(git\s+clone|clone(?:d)?|download(?:ed)?|下载|克隆|仓库|repository|repo\b|源码|source|目录结构|项目结构|file inventory|tree)/iu.test(text);
 }
 
 function singleLocalDirectoryHint(text: string): string | undefined {

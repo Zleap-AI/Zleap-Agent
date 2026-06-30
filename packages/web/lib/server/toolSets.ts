@@ -9,7 +9,7 @@ export type ToolSetView = ToolSetDefinition & {
   toolCount: number;
 };
 
-export const MAIN_SPACE_ONLY_TOOL_IDS = ['enterWorkspace', 'readMessage', 'task_manage', 'recall', 'deliver'] as const;
+export const MAIN_SPACE_ONLY_TOOL_IDS = ['switchWorkspace', 'readMessage', 'task_manage', 'recall', 'deliver'] as const;
 
 export const SUPPORTED_BUILTIN_TOOL_IDS = [
   'ls',

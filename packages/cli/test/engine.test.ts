@@ -1,6 +1,8 @@
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   fauxEmbed,
@@ -29,6 +31,7 @@ import { createStore, type ZleapStore } from '@zleap/store';
 const TEST_MODEL = 'test-model';
 const TEST_DATABASE_URL = process.env.ZLEAP_TEST_DATABASE_URL;
 const TEST_EMBED_DIM = 64;
+const execFileAsync = promisify(execFile);
 let previousFileWorkspaceRoot: string | undefined;
 let testFileWorkspaceRoot: string | undefined;
 
@@ -86,8 +89,8 @@ class ScriptedProvider implements ProviderAdapter {
 /**
  * A scripted stand-in for a real session model. The offline mock model is gone
  * from the product, so tests inject this provider to drive the real pipeline:
- *  - in `session` (tools include `enterWorkspace` + `task_manage`): route the
- *    user's text to a work space via `enterWorkspace`, or answer chit-chat directly.
+ *  - in `session` (tools include `switchWorkspace` + `task_manage`): route the
+ *    user's text to a work space via `switchWorkspace`, or answer chit-chat directly.
  *  - in a work space (tools = that space's scoped set): call a scoped tool when
  *    the text asks for one, then wrap up once its result comes back.
  */
@@ -97,21 +100,19 @@ function scriptedModel(request: ProviderRequest): ScriptedProviderResponse {
   }
   const available = new Set((request.tools ?? []).map((tool) => tool.name));
   const isMainSpace = available.has('task_manage');
-  const isWorkSpace = available.has('enterWorkspace') && !isMainSpace;
+  const isWorkSpace = available.has('finishTask') && !isMainSpace;
 
   // After any tool result, the turn wraps up with text (ends the tool loop).
   const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
   if (lastToolResult && lastToolResult.role === 'toolResult') {
-    if (isWorkSpace && lastToolResult.toolName !== 'enterWorkspace') {
+    if (isWorkSpace && !['finishTask', 'switchWorkspace'].includes(lastToolResult.toolName)) {
       return {
         toolCalls: [
           {
-            name: 'enterWorkspace',
+            name: 'finishTask',
             arguments: {
               status: 'completed',
               message: `Done — ${lastToolResult.toolName}.`,
-              artifacts: [],
-              errors: [],
             },
           },
         ],
@@ -124,10 +125,10 @@ function scriptedModel(request: ProviderRequest): ScriptedProviderResponse {
   const text = lastUser && typeof lastUser.content === 'string' ? lastUser.content : '';
 
   // Session: triage to a work space, or answer directly.
-  if (isMainSpace && available.has('enterWorkspace')) {
+  if (isMainSpace && available.has('switchWorkspace')) {
     const space = routeKeyword(text);
     if (space) {
-      return { toolCalls: [{ name: 'enterWorkspace', arguments: { space, task: text } }] };
+      return { toolCalls: [{ name: 'switchWorkspace', arguments: { space, task: text } }] };
     }
     return `Scripted response: ${text}`;
   }
@@ -166,12 +167,10 @@ function scriptedModel(request: ProviderRequest): ScriptedProviderResponse {
     return {
       toolCalls: [
         {
-          name: 'enterWorkspace',
+          name: 'finishTask',
           arguments: {
             status: 'completed',
             message: `Worked on: ${text}`,
-            artifacts: [],
-            errors: [],
           },
         },
       ],
@@ -420,6 +419,14 @@ function cliWorkspaceStore(toolIds: string[]): ZleapStore {
       })),
     },
   } as unknown as ZleapStore;
+}
+
+async function createLocalGitRepository(root: string): Promise<void> {
+  await mkdir(root, { recursive: true });
+  await execFileAsync('git', ['init'], { cwd: root });
+  await writeFile(join(root, 'README.md'), '# SAG\n');
+  await execFileAsync('git', ['add', 'README.md'], { cwd: root });
+  await execFileAsync('git', ['-c', 'user.name=Zleap Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'init'], { cwd: root });
 }
 
 function terminalWorkspaceHistoryStore(input: {
@@ -842,6 +849,79 @@ function spaceStatuses(deltas: ChatDelta[]): string[] {
 }
 
 describe('ChatEngine dispatch-as-tool', () => {
+  it('exposes switchWorkspace, not enterWorkspace, in Main', async () => {
+    const mainToolSnapshots: string[][] = [];
+    const engine = new ChatEngine(undefined, undefined, {
+      registries: injectedRegistries((request) => {
+        const tools = (request.tools ?? []).map((tool) => tool.name);
+        if (tools.includes('task_manage')) {
+          mainToolSnapshots.push(tools);
+          return 'Main answered directly.';
+        }
+        return 'Unexpected workspace request.';
+      }),
+      modelId: TEST_MODEL,
+      store: terminalWorkspaceStore(),
+    });
+
+    await drain('hello main', engine);
+
+    expect(mainToolSnapshots.length).toBeGreaterThan(0);
+    expect(mainToolSnapshots[0]).toContain('switchWorkspace');
+    expect(mainToolSnapshots[0]).not.toContain('enterWorkspace');
+  });
+
+  it('guides Main to preserve existing-artifact edit intent when switching workspaces', async () => {
+    let switchWorkspaceSchema: NonNullable<ProviderRequest['tools']>[number] | undefined;
+    const engine = new ChatEngine(undefined, undefined, {
+      registries: injectedRegistries((request) => {
+        switchWorkspaceSchema = (request.tools ?? []).find((tool) => tool.name === 'switchWorkspace');
+        return 'Main answered directly.';
+      }),
+      modelId: TEST_MODEL,
+      store: terminalWorkspaceStore(),
+    });
+
+    await drain('这个页面有个细节问题', engine);
+
+    expect(switchWorkspaceSchema?.description).toContain('existing file or artifact');
+    expect(switchWorkspaceSchema?.description).toContain('read, locate, and minimally edit');
+    expect(switchWorkspaceSchema?.description).toContain('Do not use Generate, Create, Rebuild, or Rewrite');
+    const parameters = switchWorkspaceSchema?.parameters as {
+      properties?: Record<string, { description?: string }>;
+      required?: string[];
+    };
+    expect(parameters.required).toEqual(expect.arrayContaining(['goal', 'space', 'task']));
+    expect(parameters.properties?.goal?.description).toContain('Required');
+    expect(parameters.properties?.task?.description).toContain('For feedback on an existing file or artifact');
+    expect(parameters.properties?.task?.description).toContain('read/locate/minimally edit');
+  });
+
+  it('guides Main to keep the final deliverable in switchWorkspace goal', async () => {
+    let switchWorkspaceSchema: NonNullable<ProviderRequest['tools']>[number] | undefined;
+    const engine = new ChatEngine(undefined, undefined, {
+      registries: injectedRegistries((request) => {
+        switchWorkspaceSchema = (request.tools ?? []).find((tool) => tool.name === 'switchWorkspace');
+        return 'Main answered directly.';
+      }),
+      modelId: TEST_MODEL,
+      store: terminalWorkspaceStore(),
+    });
+
+    await drain('搜索某个技术主题，写一个pdf介绍给我', engine);
+
+    expect(switchWorkspaceSchema?.description).toContain('final deliverable');
+    expect(switchWorkspaceSchema?.description).toContain('If the original user request is already clear');
+    expect(switchWorkspaceSchema?.description).toContain('Research a topic and write a PDF introduction');
+    expect(switchWorkspaceSchema?.description).not.toContain('SAG');
+    const parameters = switchWorkspaceSchema?.parameters as {
+      properties?: Record<string, { description?: string }>;
+    };
+    expect(parameters.properties?.goal?.description).toContain('final deliverable');
+    expect(parameters.properties?.goal?.description).toContain('PDF');
+    expect(parameters.properties?.goal?.description).not.toContain('SAG');
+  });
+
   it('preserves toolCallId on streamed tool deltas', async () => {
     let calls = 0;
     const engine = new ChatEngine(undefined, undefined, {
@@ -921,7 +1001,7 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const tools = (request.tools ?? []).map((tool) => tool.name);
-        if (tools.includes('enterWorkspace') && !tools.includes('task_manage')) {
+        if (tools.includes('finishTask') && !tools.includes('task_manage')) {
           workToolNames.push(tools);
         }
         return scriptedModel(request);
@@ -946,7 +1026,7 @@ describe('ChatEngine dispatch-as-tool', () => {
         const tools = (request.tools ?? []).map((tool) => tool.name);
         if (tools.includes('task_manage')) {
           mainRequests.push({ tools, systemPrompt: request.systemPrompt });
-        } else if (tools.includes('enterWorkspace')) {
+        } else if (tools.includes('finishTask')) {
           workRequests.push({ tools, systemPrompt: request.systemPrompt });
         }
         return scriptedModel(request);
@@ -1142,7 +1222,7 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const tools = (request.tools ?? []).map((tool) => tool.name);
-        if (tools.includes('enterWorkspace') && !tools.includes('task_manage')) {
+        if (tools.includes('finishTask') && !tools.includes('task_manage')) {
           workTools = tools;
         }
         return scriptedModel(request);
@@ -1153,9 +1233,10 @@ describe('ChatEngine dispatch-as-tool', () => {
 
     await drain('write a file', engine, { targetSpace: 'terminal' });
 
-    expect(workTools).toEqual(expect.arrayContaining(['get_time', 'write', 'enterWorkspace']));
+    expect(workTools).toEqual(expect.arrayContaining(['get_time', 'write', 'switchWorkspace', 'finishTask']));
     expect(workTools).toEqual(expect.arrayContaining(['read']));
     expect(workTools).not.toEqual(expect.arrayContaining(['task_manage']));
+    expect(workTools).not.toEqual(expect.arrayContaining(['enterWorkspace']));
   });
 
   it('re-enters the same workspace with structured historical tool traces', async () => {
@@ -1207,18 +1288,14 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const tools = new Set((request.tools ?? []).map((tool) => tool.name));
-        if (tools.has('enterWorkspace') && !tools.has('task_manage')) {
+        if (tools.has('finishTask') && !tools.has('task_manage')) {
           workspaceRequests.push(request);
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: 'completed',
                 message: 'second terminal answer',
-                artifacts: [],
-                observations: [],
-                errors: [],
-                suggestedNextSteps: [],
               },
             }],
           };
@@ -1286,9 +1363,9 @@ describe('ChatEngine dispatch-as-tool', () => {
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
         if (tools.has('task_manage') && (!lastToolResult || lastToolResult.role !== 'toolResult')) {
-          return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'work needs original task' } }] };
+          return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'work needs original task' } }] };
         }
-        if (tools.has('enterWorkspace') && !lastToolResult) {
+        if (tools.has('finishTask') && !lastToolResult) {
           expect(tools.has('readMessage')).toBe(true);
           const messageId = entries.find((entry) => entry.content === 'work needs original task')?.id;
           return { toolCalls: [{ name: 'readMessage', arguments: { id: messageId } }] };
@@ -1305,14 +1382,10 @@ describe('ChatEngine dispatch-as-tool', () => {
           sawWorkspaceRead = true;
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: 'completed',
                 message: 'read own workspace messages',
-                artifacts: [],
-                observations: [],
-                errors: [],
-                suggestedNextSteps: [],
               },
             }],
           };
@@ -1407,18 +1480,14 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workspaceRequest = request;
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: 'completed',
                 message: 'Workspace finished.',
-                artifacts: [],
-                observations: [],
-                errors: [],
-                suggestedNextSteps: [],
               },
             }],
           };
@@ -1426,7 +1495,7 @@ describe('ChatEngine dispatch-as-tool', () => {
 
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
         if (!lastToolResult || lastToolResult.role !== 'toolResult') {
-          return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'write a file' } }] };
+          return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'write a file' } }] };
         }
         return 'done';
       }),
@@ -1512,7 +1581,8 @@ describe('ChatEngine dispatch-as-tool', () => {
     const deltas = await drain('看看有什么技能', engine);
     expect(providerCalls).toBe(2);
     expect(mainTools).toContain('findSkill');
-    expect(mainTools).toContain('enterWorkspace');
+    expect(mainTools).toContain('switchWorkspace');
+    expect(mainTools).not.toContain('enterWorkspace');
     expect(mainTools).toContain('recall');
     expect(mainTools).not.toContain('memory_list');
     expect(mainTools).not.toContain('memory_detail');
@@ -1745,18 +1815,14 @@ describe('ChatEngine dispatch-as-tool', () => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'finishTask',
                 arguments: {
                   status: 'completed',
                   message: 'workspace source summary',
-                  artifacts: [],
-                  observations: ['workspace produced detail'],
-                  errors: [],
-                  suggestedNextSteps: [],
                 },
               },
             ],
@@ -1764,10 +1830,10 @@ describe('ChatEngine dispatch-as-tool', () => {
         }
 
         if (!lastToolResult || lastToolResult.role !== 'toolResult') {
-          return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'collect source details' } }] };
+          return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'collect source details' } }] };
         }
 
-        if (lastToolResult.toolName === 'enterWorkspace') {
+        if (lastToolResult.toolName === 'switchWorkspace') {
           const historyId = /historyId:\s*(\S+)/.exec(lastToolResult.content)?.[1];
           return { toolCalls: [{ name: 'readMessage', arguments: { id: historyId } }] };
         }
@@ -1814,13 +1880,13 @@ describe('ChatEngine dispatch-as-tool', () => {
       registries: injectedRegistries((request) => {
         const tools = new Set((request.tools ?? []).map((tool) => tool.name));
         const isMain = tools.has('task_manage');
-        const isWorkspace = tools.has('enterWorkspace') && !isMain;
+        const isWorkspace = tools.has('finishTask') && !isMain;
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
         if (isWorkspace) {
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: 'completed',
                 message: longWorkspaceResult,
@@ -1832,7 +1898,7 @@ describe('ChatEngine dispatch-as-tool', () => {
           mainFollowupRequests.push(request);
           return 'finished from full workspace result';
         }
-        return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'terminal subtask' } }] };
+        return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'terminal subtask' } }] };
       }),
       modelId: TEST_MODEL,
       store: terminalAndCliWorkspaceStore(),
@@ -1864,11 +1930,11 @@ describe('ChatEngine dispatch-as-tool', () => {
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
         if (phase === 'first') {
-          if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
-            return { toolCalls: [{ name: 'enterWorkspace', arguments: { status: 'completed', message: 'old workspace result' } }] };
+          if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
+            return { toolCalls: [{ name: 'finishTask', arguments: { status: 'completed', message: 'old workspace result' } }] };
           }
           if (!lastToolResult || lastToolResult.role !== 'toolResult') {
-            return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'collect old details' } }] };
+            return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'collect old details' } }] };
           }
           return 'old run done';
         }
@@ -1935,7 +2001,7 @@ describe('ChatEngine dispatch-as-tool', () => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workStep += 1;
           const visibleText = request.messages.map((message) => {
             if (message.role === 'assistant') return message.content.map((part) => part.type === 'text' ? part.text : '').join('');
@@ -1953,14 +2019,10 @@ describe('ChatEngine dispatch-as-tool', () => {
           return {
             text: workStep === 1 ? 'I will install dependencies before producing the final answer.' : '',
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: 'completed',
                 message: workStep === 1 ? 'facts summary' : 'final summary',
-                artifacts: [],
-                observations: [],
-                errors: [],
-                suggestedNextSteps: [],
               },
             }],
           };
@@ -1968,11 +2030,11 @@ describe('ChatEngine dispatch-as-tool', () => {
 
         if (!lastToolResult || lastToolResult.role !== 'toolResult') {
           mainStep = 1;
-          return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'gather facts' } }] };
+          return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'gather facts' } }] };
         }
-        if (lastToolResult.toolName === 'enterWorkspace' && mainStep === 1) {
+        if (lastToolResult.toolName === 'switchWorkspace' && mainStep === 1) {
           mainStep = 2;
-          return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'write final' } }] };
+          return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'write final' } }] };
         }
         return 'done';
       }),
@@ -2017,18 +2079,14 @@ describe('ChatEngine dispatch-as-tool', () => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           return {
             text: fullResearch,
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: 'completed',
                 message: 'short research summary',
-                artifacts: [],
-                observations: [],
-                errors: [],
-                suggestedNextSteps: [],
               },
             }],
           };
@@ -2037,13 +2095,13 @@ describe('ChatEngine dispatch-as-tool', () => {
         if (!lastToolResult || lastToolResult.role !== 'toolResult') {
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'switchWorkspace',
               arguments: { space: 'terminal', task: 'research details for downstream writing' },
             }],
           };
         }
 
-        if (lastToolResult.toolName === 'enterWorkspace') {
+        if (lastToolResult.toolName === 'switchWorkspace') {
           const visibleText = request.messages.map((message) => {
             if (message.role === 'assistant') return message.content.map((part) => part.type === 'text' ? part.text : '').join('');
             return typeof message.content === 'string' ? message.content : '';
@@ -2078,7 +2136,7 @@ describe('ChatEngine dispatch-as-tool', () => {
           .map((message) => typeof message.content === 'string' ? message.content : '')
           .join('\n');
 
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage') && task.includes('Generate the GLM-5.2 PDF report')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage') && task.includes('Generate the GLM-5.2 PDF report')) {
           const visibleText = request.messages.map((message) => {
             if (message.role === 'assistant') return message.content.map((part) => part.type === 'text' ? part.text : '').join('');
             return typeof message.content === 'string' ? message.content : '';
@@ -2090,37 +2148,30 @@ describe('ChatEngine dispatch-as-tool', () => {
           sawCliHandoffContext = true;
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
-                  status: 'completed',
-                  message: 'Generated GLM-5.2 PDF report.',
-                  artifacts: [{ kind: 'file', ref: '/tmp/glm-5.2.pdf', description: 'GLM-5.2 PDF' }],
-                observations: [],
-                errors: [],
-                suggestedNextSteps: [],
+                status: 'completed',
+                message: 'Generated GLM-5.2 PDF report.',
               },
             }],
           };
         }
 
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage') && task.includes('collect GLM-5.2 sources')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage') && task.includes('collect GLM-5.2 sources')) {
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'switchWorkspace',
               arguments: {
-                status: 'handoff',
                 space: 'cli',
                 task: 'Generate the GLM-5.2 PDF report from the collected sources.',
                 message: 'Collected sources for GLM-5.2. PDF generation requires scripts and local files.',
-                artifacts: [],
-                errors: [],
               },
             }],
           };
         }
 
         if (!lastToolResult || lastToolResult.role !== 'toolResult') {
-          return { toolCalls: [{ name: 'enterWorkspace', arguments: { goal: 'WRONG MODEL GOAL', space: 'terminal', task: 'collect GLM-5.2 sources' } }] };
+          return { toolCalls: [{ name: 'switchWorkspace', arguments: { goal: 'WRONG MODEL GOAL', space: 'terminal', task: 'collect GLM-5.2 sources' } }] };
         }
 
         expect(lastToolResult.content).toContain('Automatic workspace switch chain');
@@ -2147,18 +2198,14 @@ describe('ChatEngine dispatch-as-tool', () => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workspaceRuns += 1;
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: 'completed',
                 message: 'GLM research summary',
-                artifacts: [],
-                observations: [],
-                errors: [],
-                suggestedNextSteps: [],
               },
             }],
           };
@@ -2167,22 +2214,22 @@ describe('ChatEngine dispatch-as-tool', () => {
         if (!lastToolResult || lastToolResult.role !== 'toolResult') {
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'switchWorkspace',
               arguments: { space: 'terminal', task: 'Search GLM-5.2 public information' },
             }],
           };
         }
 
-        if (lastToolResult.toolName === 'enterWorkspace' && !lastToolResult.content.includes('Skipped duplicate enterWorkspace')) {
+        if (lastToolResult.toolName === 'switchWorkspace' && !lastToolResult.content.includes('Skipped duplicate switchWorkspace')) {
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'switchWorkspace',
               arguments: { space: 'terminal', task: 'Search GLM-5.2 public information, official website, GitHub, benchmarks' },
             }],
           };
         }
 
-        if (lastToolResult.content.includes('Skipped duplicate enterWorkspace')) {
+        if (lastToolResult.content.includes('Skipped duplicate switchWorkspace')) {
           duplicateGuards += 1;
           return 'use existing research result';
         }
@@ -2198,7 +2245,7 @@ describe('ChatEngine dispatch-as-tool', () => {
     expect(workspaceRuns).toBe(1);
     expect(duplicateGuards).toBe(1);
     expect(spaces(deltas).filter((space) => space === 'terminal')).toHaveLength(1);
-    expect(textOf(deltas)).toContain('Skipped duplicate enterWorkspace to terminal.');
+    expect(textOf(deltas)).toContain('Skipped duplicate switchWorkspace to terminal.');
 
     const rerunDeltas = await drain('research GLM-5.2 again', engine);
 
@@ -2215,7 +2262,7 @@ describe('ChatEngine dispatch-as-tool', () => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
         const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
 
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workspaceRuns += 1;
           if (workspaceRuns === 2) {
             const visibleText = request.messages.map((message) => {
@@ -2229,14 +2276,10 @@ describe('ChatEngine dispatch-as-tool', () => {
           }
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'finishTask',
               arguments: {
                 status: workspaceRuns === 1 ? 'failed' : 'completed',
                 message: workspaceRuns === 1 ? 'Target file was missing.' : 'Retried with prior failure context.',
-                artifacts: [],
-                observations: [],
-                errors: workspaceRuns === 1 ? ['missing file'] : [],
-                suggestedNextSteps: [],
               },
             }],
           };
@@ -2245,22 +2288,22 @@ describe('ChatEngine dispatch-as-tool', () => {
         if (!lastToolResult || lastToolResult.role !== 'toolResult') {
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'switchWorkspace',
               arguments: { space: 'terminal', task: 'Fix Markdown report rendering' },
             }],
           };
         }
 
-        if (lastToolResult.toolName === 'enterWorkspace' && lastToolResult.content.includes('Target file was missing.')) {
+        if (lastToolResult.toolName === 'switchWorkspace' && lastToolResult.content.includes('Target file was missing.')) {
           return {
             toolCalls: [{
-              name: 'enterWorkspace',
+              name: 'switchWorkspace',
               arguments: { space: 'terminal', task: 'Fix Markdown report rendering in the same file' },
             }],
           };
         }
 
-        if (lastToolResult.toolName === 'enterWorkspace' && lastToolResult.content.includes('Retried with prior failure context.')) {
+        if (lastToolResult.toolName === 'switchWorkspace' && lastToolResult.content.includes('Retried with prior failure context.')) {
           return 'retry finished';
         }
 
@@ -2275,7 +2318,7 @@ describe('ChatEngine dispatch-as-tool', () => {
     expect(workspaceRuns).toBe(2);
     expect(sawFailedContextOnRetry).toBe(true);
     expect(spaces(deltas).filter((space) => space === 'terminal')).toHaveLength(2);
-    expect(textOf(deltas)).not.toContain('Skipped duplicate enterWorkspace');
+    expect(textOf(deltas)).not.toContain('Skipped duplicate switchWorkspace');
   });
 
   it('mounts selected skills as per-turn skills inside dispatched workspaces', async () => {
@@ -2283,19 +2326,15 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workspaceRequest = request;
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'finishTask',
                 arguments: {
                   status: 'completed',
                   message: 'Workspace finished.',
-                  artifacts: [],
-                  observations: [],
-                  errors: [],
-                  suggestedNextSteps: [],
                 },
               },
             ],
@@ -2375,18 +2414,18 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workspaceRequest = request;
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'finishTask',
                 arguments: { status: 'completed', message: 'Created concise PPT outline.' },
               },
             ],
           };
         }
-        return { toolCalls: [{ name: 'enterWorkspace', arguments: { space: 'terminal', task: 'create concise PPT outline' } }] };
+        return { toolCalls: [{ name: 'switchWorkspace', arguments: { space: 'terminal', task: 'create concise PPT outline' } }] };
       }),
       modelId: TEST_MODEL,
       store,
@@ -2429,12 +2468,12 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workspaceRequest = request;
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'finishTask',
                 arguments: {
                   status: 'completed',
                   message: 'Workspace finished.',
@@ -2486,12 +2525,12 @@ describe('ChatEngine dispatch-as-tool', () => {
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has('enterWorkspace') && !toolNames.has('task_manage')) {
+        if (toolNames.has('finishTask') && !toolNames.has('task_manage')) {
           workspaceRequest = request;
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'finishTask',
                 arguments: {
                   status: 'completed',
                   message: 'Workspace finished.',
@@ -2530,9 +2569,136 @@ describe('ChatEngine dispatch-as-tool', () => {
     expect(JSON.stringify(payload)).not.toContain('Check diffs, risks, and missing tests.');
   });
 
+  it('excludes files introduced by git clone from workspace artifacts', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'zleap-cli-artifacts-'));
+    const sourceRepo = await mkdtemp(join(tmpdir(), 'zleap-source-repo-'));
+    const clonedReadme = join(workspaceRoot, 'SAG', 'README.md');
+    const finalized: Array<{ workspaceResult?: { artifacts?: Array<{ ref?: string; kind?: string; source?: string }> } }> = [];
+    await createLocalGitRepository(sourceRepo);
+    const engine = new ChatEngine(undefined, undefined, {
+      registries: injectedRegistries((request) => {
+        const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
+        const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
+        if (toolNames.has('bash') && !lastToolResult) {
+          return {
+            toolCalls: [
+              {
+                name: 'bash',
+                arguments: {
+                  command: `git clone ${sourceRepo} SAG`,
+                  reason: 'clone the requested repository for inspection',
+                },
+              },
+            ],
+          };
+        }
+        if (toolNames.has('finishTask') && lastToolResult?.role === 'toolResult') {
+          return {
+            toolCalls: [
+              {
+                name: 'finishTask',
+                arguments: {
+                  status: 'completed',
+                  message: 'Cloned SAG.',
+                  artifacts: [{ kind: 'file', ref: clonedReadme, description: 'README.md' }],
+                },
+              },
+            ],
+          };
+        }
+        return 'ok';
+      }),
+      modelId: TEST_MODEL,
+      store: cliWorkspaceStore(['bash']),
+    });
+    const runPersistence = (engine as unknown as {
+      runPersistence: {
+        finalizeTask(input: { workspaceResult?: { artifacts?: Array<{ ref?: string; kind?: string; source?: string }> } }): Promise<void>;
+      };
+    }).runPersistence;
+    const originalFinalizeTask = runPersistence.finalizeTask.bind(runPersistence);
+    runPersistence.finalizeTask = async (input) => {
+      finalized.push(input);
+      await originalFinalizeTask(input);
+    };
+
+    try {
+      const deltas = await drain('clone SAG', engine, {
+        confirm: async () => true,
+        targetSpace: 'cli',
+        workspaceRoot,
+      });
+
+      expect(deltas.some((delta) => delta.type === 'done')).toBe(true);
+      expect(finalized.at(-1)?.workspaceResult?.artifacts ?? []).toEqual([]);
+      await expect(access(clonedReadme)).resolves.toBeUndefined();
+      await expect(readFile(join(workspaceRoot, '.zleap', 'artifacts.json'), 'utf8')).rejects.toThrow();
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+      await rm(sourceRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('does not promote read-only workspace files to result references', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'zleap-cli-read-refs-'));
+    await mkdir(join(workspaceRoot, 'SAG'), { recursive: true });
+    await writeFile(join(workspaceRoot, 'SAG', 'README.md'), '# SAG\n');
+    const engine = new ChatEngine(undefined, undefined, {
+      registries: injectedRegistries((request) => {
+        const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
+        const lastToolResult = [...request.messages].reverse().find((message) => message.role === 'toolResult');
+        if (toolNames.has('read') && !lastToolResult) {
+          return {
+            toolCalls: [
+              {
+                name: 'read',
+                arguments: {
+                  path: 'SAG/README.md',
+                  reason: 'inspect cloned source material',
+                },
+              },
+            ],
+          };
+        }
+        if (toolNames.has('finishTask') && lastToolResult?.role === 'toolResult') {
+          return {
+            toolCalls: [
+              {
+                name: 'finishTask',
+                arguments: {
+                  status: 'completed',
+                  message: 'Inspected SAG source.',
+                },
+              },
+            ],
+          };
+        }
+        return 'ok';
+      }),
+      modelId: TEST_MODEL,
+      store: cliWorkspaceStore(['read']),
+    });
+
+    try {
+      const deltas = await drain('read SAG source', engine, {
+        confirm: async () => true,
+        targetSpace: 'cli',
+        workspaceRoot,
+      });
+
+      const result = deltas.find((delta): delta is Extract<ChatDelta, { type: 'space_result' }> => (
+        delta.type === 'space_result' && delta.id === 'cli'
+      ));
+      expect(result).toBeTruthy();
+      expect(result?.envelope.references?.map((ref) => ref.path ?? ref.url ?? '') ?? []).not.toContain('SAG/README.md');
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('registers files created by cli commands as workspace artifacts', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'zleap-cli-artifacts-'));
-    const finalized: Array<{ workspaceResult?: { artifacts?: Array<{ ref?: string; kind?: string }> } }> = [];
+    const finalized: Array<{ workspaceResult?: { artifacts?: Array<{ ref?: string; kind?: string; source?: string }> } }> = [];
     const engine = new ChatEngine(undefined, undefined, {
       registries: injectedRegistries((request) => {
         const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
@@ -2550,11 +2716,11 @@ describe('ChatEngine dispatch-as-tool', () => {
             ],
           };
         }
-        if (toolNames.has('enterWorkspace') && lastToolResult?.role === 'toolResult') {
+        if (toolNames.has('finishTask') && lastToolResult?.role === 'toolResult') {
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'finishTask',
                 arguments: {
                   status: 'completed',
                   message: 'Created report.pptx.',
@@ -2570,7 +2736,7 @@ describe('ChatEngine dispatch-as-tool', () => {
     });
     const runPersistence = (engine as unknown as {
       runPersistence: {
-        finalizeTask(input: { workspaceResult?: { artifacts?: Array<{ ref?: string; kind?: string }> } }): Promise<void>;
+        finalizeTask(input: { workspaceResult?: { artifacts?: Array<{ ref?: string; kind?: string; source?: string }> } }): Promise<void>;
       };
     }).runPersistence;
     const originalFinalizeTask = runPersistence.finalizeTask.bind(runPersistence);
@@ -2608,9 +2774,18 @@ describe('ChatEngine dispatch-as-tool', () => {
           expect.objectContaining({
             kind: 'file',
             ref: expect.stringMatching(/report\.pptx$/),
+            source: 'generated',
           }),
         ]),
       );
+      const registry = JSON.parse(await readFile(join(workspaceRoot, '.zleap', 'artifacts.json'), 'utf8')) as unknown[];
+      expect(registry).toEqual([
+        expect.objectContaining({
+          path: expect.stringMatching(/report\.pptx$/),
+          source: 'generated',
+          title: 'report.pptx',
+        }),
+      ]);
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }

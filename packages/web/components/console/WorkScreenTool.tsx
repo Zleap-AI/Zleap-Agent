@@ -63,7 +63,7 @@ export function WorkScreenTool({
 
   const showArgs = Boolean(tool.args) && tool.args !== '()';
   const argsSummary = showArgs ? summarizeToolPayload(tool.args) : '';
-  const isExitWorkspace = tool.name === 'enterWorkspace' || tool.name === 'exitWorkspace';
+  const isExitWorkspace = ['switchWorkspace', 'finishTask', 'enterWorkspace', 'exitWorkspace'].includes(tool.name);
 
   const diff = Boolean(tool.result) && isDiffResult(tool.result);
   const isFile = !diff && Boolean(tool.result) && FILE_READ_TOOLS.test(tool.name);

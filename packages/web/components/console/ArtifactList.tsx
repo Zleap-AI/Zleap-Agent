@@ -13,6 +13,7 @@ import { ArtifactPreviewContent } from '../ArtifactPreviewContent';
 import { DiffBlock } from '../DiffBlock';
 
 const ARTIFACT_PREVIEW_MAX_LINES = 240;
+const COLLAPSED_ARTIFACT_LIMIT = 3;
 
 type RemotePreviewState =
   | { status: 'loading' }
@@ -22,10 +23,13 @@ type RemotePreviewState =
 export function ArtifactList({ artifacts }: { artifacts: ArtifactView[] }) {
   const { t } = useTranslation();
   const [openId, setOpenId] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [remotePreviews, setRemotePreviews] = useState<Record<number, RemotePreviewState>>({});
 
   const openArtifact = artifacts.find((artifact) => artifact.id === openId);
   const openPath = openArtifact ? artifactPath(openArtifact) : undefined;
+  const hiddenCount = Math.max(artifacts.length - COLLAPSED_ARTIFACT_LIMIT, 0);
+  const visibleArtifacts = expanded ? artifacts : artifacts.slice(0, COLLAPSED_ARTIFACT_LIMIT);
 
   useEffect(() => {
     if (!openArtifact || openArtifact.preview || !openPath || remotePreviews[openArtifact.id]) {
@@ -51,7 +55,7 @@ export function ArtifactList({ artifacts }: { artifacts: ArtifactView[] }) {
     <div className="mt-4">
       <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Artifacts</div>
       <div className="flex flex-col gap-2">
-        {artifacts.map((artifact) => {
+        {visibleArtifacts.map((artifact) => {
           const resolvedPath = artifactPath(artifact);
           const remote = remotePreviews[artifact.id];
           const preview = artifact.preview ?? (remote?.status === 'ready' ? remote.content : undefined);
@@ -127,6 +131,19 @@ export function ArtifactList({ artifacts }: { artifacts: ArtifactView[] }) {
             </div>
           );
         })}
+        {hiddenCount ? (
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-1 rounded border border-dashed border-border bg-surface px-2.5 py-2 text-xs text-muted-foreground transition hover:bg-muted/60 hover:text-ink"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded
+              ? t('artifactList.collapseList', { defaultValue: '收起产物列表' })
+              : t('artifactList.expandMore', { defaultValue: '展开剩余 {{count}} 个产物', count: hiddenCount })}
+            <ChevronDown className={clsx('h-3.5 w-3.5 transition-transform', expanded ? 'rotate-180' : '')} />
+          </button>
+        ) : null}
       </div>
     </div>
   );

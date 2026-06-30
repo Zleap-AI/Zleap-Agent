@@ -42,6 +42,7 @@ export type Reference = {
   id?: string;
   mime?: string;
   title?: string;
+  source?: 'generated' | 'explicit' | 'imported';
   /** Which work conversation produced it (溯源). */
   sourceConversationId?: string;
 };

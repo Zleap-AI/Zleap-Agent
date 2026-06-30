@@ -20,12 +20,18 @@ export function memoryOrchestratorFromStore(store: ZleapStore): MemoryOrchestrat
 }
 
 /** Management scope: agent + actor, anchored on the runtime main/session space. */
-export function mainMemoryScope(agentId: string, actor?: Pick<ActorContext, 'userId' | 'role'>): MemoryScopeContext {
+export function mainMemoryScope(
+  agentId: string,
+  actor?: Pick<ActorContext, 'userId' | 'role' | 'tenantId'>,
+  options: { threadId?: string } = {},
+): MemoryScopeContext {
   return {
     agentId,
     userId: actor?.userId,
     actorRole: actor?.role,
+    tenantId: actor?.tenantId,
     spaceId: LEGACY_SESSION_SPACE_ID,
+    threadId: options.threadId,
   };
 }
 

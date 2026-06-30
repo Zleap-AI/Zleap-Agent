@@ -70,8 +70,7 @@ import {
   type ZleapStore,
 } from '@zleap/store';
 import { prepareWorkspaceExecution } from '../workspace-execution/index.js';
-import { mkdir, readdir, stat } from 'node:fs/promises';
-import { basename, extname, join, relative } from 'node:path';
+import { mkdir, readdir } from 'node:fs/promises';
 import { getEncoding, getEncodingNameForModel, type Tiktoken, type TiktokenEncoding, type TiktokenModel } from 'js-tiktoken';
 import { CompactionService, type CompactionPersistenceInput, type CompactionSourceMetadata } from '../compaction/service.js';
 import {
@@ -101,6 +100,7 @@ import { SOUL, composeSystemPersona } from '../soul.js';
 import { BUILTIN_TOOLS } from '../tools.js';
 import { sanitizeDisplayText, truncate } from '../util/text.js';
 import { runTurnLoop, runtimeToolExchange, LOOP_DISCIPLINE, type ToolConfirm, type WorkspaceProviderContextSnapshot } from '../workspaces/turnLoop.js';
+import { writeArtifactRegistry, type ArtifactCandidate } from '../artifactSources.js';
 import {
   defaultMainWorkspaceSpec,
   FALLBACK_WORKSPACE_ID,
@@ -119,8 +119,8 @@ export type ChatTaskManager = {
   delete(input: Record<string, unknown>): Promise<unknown>;
   runNow(input: Record<string, unknown>): Promise<unknown>;
 };
-/** The workspace hand-off tool id; main and work spaces both use this one verb. */
-const ENTER_WORKSPACE_TOOL_ID = 'enterWorkspace';
+/** Session-visible tool id for switching from Main into a workspace. */
+const SWITCH_WORKSPACE_TOOL_ID = 'switchWorkspace';
 /** Session tool to fetch bounded original transcript messages on demand. */
 const READ_MESSAGE_TOOL_ID = 'readMessage';
 /** Session tool for scheduled-task CRUD and manual runs. */
@@ -130,38 +130,9 @@ const FIND_SKILL_TOOL_ID = 'findSkill';
 /** Baseline tools every workspace receives without requiring manual selection. */
 const DEFAULT_WORKSPACE_TOOL_IDS = ['get_time', READ_MESSAGE_TOOL_ID];
 /** Control tools that are valid only in the resident session/main space. */
-const SESSION_ONLY_TOOL_IDS = new Set([ENTER_WORKSPACE_TOOL_ID, TASK_MANAGE_TOOL_ID]);
+const SESSION_ONLY_TOOL_IDS = new Set([SWITCH_WORKSPACE_TOOL_ID, TASK_MANAGE_TOOL_ID]);
 /** Spaces that may execute scripts from mounted skill packages. */
 const SCRIPT_EXECUTION_SPACE_IDS = new Set(['cli', 'terminal']);
-const WORKSPACE_ARTIFACT_SCAN_EXCLUDES = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'coverage']);
-const WORKSPACE_ARTIFACT_SCAN_MAX_FILES = 5_000;
-const WORKSPACE_ARTIFACT_EXTENSIONS = new Set([
-  '.ppt',
-  '.pptx',
-  '.pdf',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.webp',
-  '.gif',
-  '.svg',
-  '.docx',
-  '.xlsx',
-  '.xls',
-  '.csv',
-  '.html',
-  '.md',
-  '.txt',
-  '.json',
-  '.py',
-  '.js',
-  '.mjs',
-  '.cjs',
-  '.ts',
-  '.tsx',
-  '.sh',
-]);
-type WorkspaceArtifactSnapshot = Map<string, { size: number; mtimeMs: number }>;
 const MODEL_MEMORY_TOOL_IDS = MEMORY_PLUGIN_TOOL_IDS.filter((id) => id === 'remember' || id === 'recall');
 const DENIED_WITHOUT_HITL_TOOL_IDS = new Set(['bash', 'write', 'append', 'edit']);
 const REMOVED_PLACEHOLDER_TOOL_IDS = new Set([
@@ -877,7 +848,7 @@ export type ChatDelta =
   | { type: 'message_entries'; userEntryId?: string; assistantEntryIds: string[] }
   | { type: 'tool'; name: string; phase: 'start' | 'end'; detail: string; isError?: boolean; toolCallId?: string }
   | { type: 'needs_approval'; approvalId: string; name: string; args: string; preview?: string; message: string; workspaceId?: string }
-  | { type: 'space'; phase: 'enter'; id: string; label: string; goal?: string }
+  | { type: 'space'; phase: 'enter'; id: string; label: string; goal?: string; task?: string }
   | { type: 'space_result'; id: string; envelope: DispatchEnvelope }
   // A dispatched work space's own prose — surfaced ONLY in the 调度台 (not main
   // chat, where it rides back via carry-back), so the user can watch the
@@ -1041,7 +1012,7 @@ const MEMORY_INSTRUCTION =
     '- Interpret listMemory.impressions subject/about labels as ownership: about=user is the current user; about=agent is this agent. Resolve pronouns by speaker: in user messages, first-person pronouns refer to the user and second-person pronouns refer to this agent; in assistant messages, first-person pronouns refer to this agent. Answer from the matching subject or persona.',
     '- recall searches only work and experience memory, not impressions/user profile. It returns complete memory paragraphs plus evidence ids. Use memory directly when enough.',
     '- readMessage requires a visible id from runtime context, memory evidence, sourceRefs, or shortened historical tool results. Use it only for original wording, long source material, historical tool result recovery, or detail verification.',
-    '- enterWorkspace returns a full handoff to Main by default. If exact original workspace messages are needed, use readMessage with a visible id from context or memory evidence.',
+    '- switchWorkspace returns a full workspace result by default. If exact original workspace messages are needed, use readMessage with a visible id from context or memory evidence.',
     '- For questions such as "do you remember me", "who am I", or "what did I tell you before", answer from memory directly instead of entering a filesystem workspace.',
   ].join('\n');
 
@@ -1119,6 +1090,8 @@ export class ChatEngine {
   /** Push into the active reply's delta stream, so the dispatch handler can emit
    *  the finished space_result (status + summary) it computed. Set per reply(). */
   private activePush?: (delta: ChatDelta) => void;
+  /** Overall goal currently being handed into a nested workspace run. */
+  private activeDispatchGoal?: string;
 
   /**
    * @param custom   OpenAI-compatible model from config/flags (the real model).
@@ -1224,12 +1197,12 @@ export class ChatEngine {
   }
 
   /**
-   * Build the `dispatch` tool: session's hand-off into a work space. It enters
+   * Build the `switchWorkspace` tool: session's hand-off into a work space. It enters
    * the target space as a nested `runtime.run` (safe — the runtime is reentrant),
    * which streams its own space transition + tool/text deltas onto the shared
    * event bus, then returns the work's distilled result as an envelope. Only
    * only the session lists this tool. Work spaces request follow-up work via
-   * enterWorkspace(status=handoff) after they exit; they never enter another space while active.
+   * switchWorkspace after they exit; they never enter another space while active.
    */
   private registerRuntimeWorkspace(spec: WorkspaceSpec): void {
     this.spaceLabels.set(spec.id, workspaceView(spec).label);
@@ -1254,10 +1227,7 @@ export class ChatEngine {
           cacheBreakpoints,
           approvalPolicy,
         } = parseWorkspaceInput(context.input);
-        const artifactSnapshot = isScriptExecutionSpace(spec.id)
-          ? await snapshotWorkspaceArtifactFiles(context.workspaceRoot).catch(() => undefined)
-          : undefined;
-        const { summary, hitToolLimit, conclusion, produced, workspaceResult } = await runTurnLoop(
+        const { summary, hitToolLimit, conclusion, produced, workspaceResult, artifactCandidates } = await runTurnLoop(
           context,
           {
             registries: this.registries,
@@ -1300,12 +1270,12 @@ export class ChatEngine {
           },
           signal,
         );
-        const detectedArtifacts = artifactSnapshot
-          ? await detectWorkspaceFileArtifacts(context.workspaceRoot, artifactSnapshot).catch((): WorkspaceResultArtifact[] => [])
-          : [];
-        const enrichedWorkspaceResult = workspaceResult && detectedArtifacts.length
-          ? { ...workspaceResult, artifacts: mergeWorkspaceArtifacts(workspaceResult.artifacts, detectedArtifacts) }
+        const enrichedWorkspaceResult = workspaceResult
+          ? workspaceResultWithSourceArtifacts(workspaceResult, artifactCandidates)
           : workspaceResult;
+        if (enrichedWorkspaceResult?.artifacts.length) {
+          await writeArtifactRegistry(context.workspaceRoot, enrichedWorkspaceResult.artifacts).catch(() => {});
+        }
         return {
           title: context.goal || spec.label,
           summary,
@@ -2171,30 +2141,31 @@ export class ChatEngine {
     // by `spaceCatalogPrompt`. The top-level description names the single
     // function and forbids calling a space name as if it were its own tool.
     const description = [
-      'Enter a specialized workspace with a concrete task, or continue a workspace chain. This is the only model-visible workspace switch tool.',
+      'Switch to a specialized workspace with a concrete task, or continue a workspace chain. This is the only model-visible workspace switch tool.',
       'Use this when the request needs files, commands, web work, artifact creation, or specialized tools.',
       'Pick `space` from the "Available workspaces" list in your system prompt. Space names are values for `space`, not separate tools.',
-      'Main may set `goal` to the original user objective. Child workspaces must preserve that goal; runtime carries it forward.',
+      'Main must set `goal` to the complete overall user objective it understands from the user request, including the final deliverable and success condition. If the original user request is already clear, preserve it or keep it very close; only normalize or expand it when the request is fragmented or depends on context. Do not replace a multi-step deliverable with only the first workspace step. Example: for "research a technical topic and write a PDF introduction", goal should remain like "Research a topic and write a PDF introduction", while task can be the current web-search collection step. Child workspaces must preserve that goal; runtime carries it forward.',
+      'If the user is giving feedback on an existing file or artifact, make `task` tell the target workspace to read, locate, and minimally edit that existing file. Do not use Generate, Create, Rebuild, or Rewrite unless the user explicitly asks for a new full version.',
       'Use one serial task at a time. Do not create parallel task arrays here.',
     ].join('\n');
 
     return {
-      id: ENTER_WORKSPACE_TOOL_ID,
+      id: SWITCH_WORKSPACE_TOOL_ID,
       description,
-      promptSnippet: 'Enter one specialized workspace with a concrete serial task.',
+      promptSnippet: 'Switch to one specialized workspace with a concrete serial task.',
       promptGuidelines: [
-        'Use enterWorkspace when the task requires files, commands, tools, artifacts, web search, or a specialized workspace.',
-        'Keep `goal` as the original user objective; keep `task` as the current concrete step for the target workspace.',
-        'If the task requires scripts, shell commands, Python/Node execution, local file generation, or executing a skill procedure, enter the cli workspace.',
-        'Use status=handoff or omit status when Main enters a workspace. completed/failed are only for a workspace returning to Main.',
-        'Do not send parallel arrays. Workspaces run serially; if another workspace is needed, that workspace can hand off with enterWorkspace(status=handoff).',
+        'Use switchWorkspace when the task requires files, commands, tools, artifacts, web search, or a specialized workspace.',
+        'Always pass `goal` as the complete overall user objective, preserving the requested final deliverable and success condition; keep `task` as the current concrete step for the target workspace.',
+        'Preserve the user action verb in `task`: feedback or fixes to an existing file/artifact should become read/locate/minimally edit, not generate/recreate.',
+        'If the task requires scripts, shell commands, Python/Node execution, local file generation, or executing a skill procedure, switch to the cli workspace.',
+        'Do not send parallel arrays. Workspaces run serially; if another workspace is needed, that workspace can switch onward with switchWorkspace.',
       ],
       parameters: {
         type: 'object',
         properties: {
           goal: {
             type: 'string',
-            description: 'Original overall user objective. Main can fill this on first handoff; runtime carries it to later spaces.',
+            description: 'Required. Complete overall user objective as Main understands it, including the final deliverable and success condition. If the user request is already clear, preserve it or keep it very close; only extract/normalize from context when the user request is fragmented. Do not reduce a multi-step request to the first workspace step. Example: "Research a topic and write a PDF introduction", not just "Research a topic". Main must fill this on first handoff; runtime carries it to later spaces.',
           },
           space: {
             type: 'string',
@@ -2203,25 +2174,20 @@ export class ChatEngine {
           task: {
             type: 'string',
             description:
-              'The concrete current task for the target workspace. Name the deliverable and constraints. Do not just repeat the broad goal if a narrower step is needed.',
-          },
-          status: {
-            type: 'string',
-            enum: ['handoff', 'completed', 'failed'],
-            description: 'For Main entering a workspace, use handoff or omit it; completed/failed are for workspace return.',
+              'The concrete current task for the target workspace. Name the deliverable and constraints. Do not just repeat the broad goal if a narrower step is needed. For feedback on an existing file or artifact, describe the task as read/locate/minimally edit that existing file; do not say Generate/Create/Rebuild/Rewrite unless the user explicitly requested a full replacement.',
           },
           message: {
             type: 'string',
             description: 'Optional handoff note. Runtime also adds recent-message context automatically.',
           },
         },
-        required: ['space', 'task'],
+        required: ['goal', 'space', 'task'],
         additionalProperties: false,
       },
       handler: async (input, context, signal) => {
         // Depth = 1: only session may dispatch. A work space reaching here is a bug.
         if (context.workspaceId !== FALLBACK_WORKSPACE_ID) {
-          return failedResult(`enterWorkspace is only available in the session space here (was: ${context.workspaceId}).`);
+          return failedResult(`switchWorkspace is only available in the session space here (was: ${context.workspaceId}).`);
         }
         const { space, task, goal, context: taskContext } = readDispatchArgs(input);
         const detail: 'summary' | 'full' = 'full';
@@ -2246,14 +2212,15 @@ export class ChatEngine {
             : r;
 
         if (!task) {
-          return failedResult('enterWorkspace requires a non-empty "task".');
+          return failedResult('switchWorkspace requires a non-empty "task".');
         }
         const duplicate = await this.duplicateDispatchHandoff(space, task);
         if (duplicate) {
           return duplicate;
         }
+        const overallGoal = goal || this.activeGoal?.trim() || task;
         const result = await this.runTaskChain(space, task, signal, {
-          goal: this.activeGoal?.trim() || goal || task,
+          goal: overallGoal,
           context: taskContext,
         });
         if ('taskId' in result) {
@@ -2263,7 +2230,7 @@ export class ChatEngine {
           this.recordDispatchHandoff(latestResult, task, pointers);
         }
         return project(result, {
-          autoClose: 'taskId' in result && shouldAutoCloseDispatch(task, this.activeGoal, detail, result),
+          autoClose: 'taskId' in result && shouldAutoCloseDispatch(task, overallGoal, detail, result),
         });
       },
     };
@@ -2289,6 +2256,7 @@ export class ChatEngine {
     const switches = await this.followWorkspaceHandoffs(result, signal, {
       visited: new Set([toCanonicalSpaceId(result.space)]),
       depth: 0,
+      goal: handoffInput.goal,
     });
     return switches.length ? { ...result, workspaceSwitches: switches } : result;
   }
@@ -2348,35 +2316,42 @@ export class ChatEngine {
     const historyMessageCount = Math.max(0, modelMessages.length - taskPrompt.length);
     // The runtime `goal` IS this work's task (its own objective); the turn-level
     // goal is threaded separately so the space sees the big picture.
-    const run = await this.runtime.run(
-      {
-        spaces: [execution.workspaceId],
-        goal: execution.prompt,
-        toolIds: this.mountable([...new Set([...scope.toolIds, ...MODEL_MEMORY_TOOL_IDS])]),
-        skillIds: scope.skillIds,
-        skills: scope.skills,
-        searchSkills: (input) => this.searchVisibleSkills(input),
-        context: {
-          messages: modelMessages,
-          confirm: this.activeConfirm,
-          modelId: scope.modelId,
-          globalSystem: this.activeGlobalSystem,
-          turnGoal,
-          runtimeMessages: [...runtimeMessages, ...cacheRuntimeMessages],
-          handoffContext: dispatchContext,
-          suggestedSkills,
-          approvalPolicy: this.activeApprovalPolicy,
-          cacheBreakpoints: historyMessageCount > 0
-            ? [{ after: 'semiStable' as const, messageIndex: historyMessageCount }]
-            : undefined,
+    const previousDispatchGoal = this.activeDispatchGoal;
+    this.activeDispatchGoal = turnGoal;
+    let run: Run;
+    try {
+      run = await this.runtime.run(
+        {
+          spaces: [execution.workspaceId],
+          goal: execution.prompt,
+          toolIds: this.mountable([...new Set([...scope.toolIds, ...MODEL_MEMORY_TOOL_IDS])]),
+          skillIds: scope.skillIds,
+          skills: scope.skills,
+          searchSkills: (input) => this.searchVisibleSkills(input),
+          context: {
+            messages: modelMessages,
+            confirm: this.activeConfirm,
+            modelId: scope.modelId,
+            globalSystem: this.activeGlobalSystem,
+            turnGoal,
+            runtimeMessages: [...runtimeMessages, ...cacheRuntimeMessages],
+            handoffContext: dispatchContext,
+            suggestedSkills,
+            approvalPolicy: this.activeApprovalPolicy,
+            cacheBreakpoints: historyMessageCount > 0
+              ? [{ after: 'semiStable' as const, messageIndex: historyMessageCount }]
+              : undefined,
+          },
+          agent: this.agent,
+          workspaceRoot: this.activeWorkspaceRoot,
+          // Auto-memory disabled (see Kernel construction) — no curation yet.
+          memory: { scopes: [] },
         },
-        agent: this.agent,
-        workspaceRoot: this.activeWorkspaceRoot,
-        // Auto-memory disabled (see Kernel construction) — no curation yet.
-        memory: { scopes: [] },
-      },
-      { signal },
-    );
+        { signal },
+      );
+    } finally {
+      this.activeDispatchGoal = previousDispatchGoal;
+    }
     const result = this.buildTaskResult(run, execution.prompt, execution.workspaceId);
     // Persist the canonical verdict durably (best-effort) for UI recovery and ledger inspection.
     await this.runPersistence.finalizeTask(result);
@@ -2389,7 +2364,7 @@ export class ChatEngine {
   private async followWorkspaceHandoffs(
     source: TaskResult,
     signal: AbortSignal,
-    state: { visited: Set<string>; depth: number },
+    state: { visited: Set<string>; depth: number; goal?: string },
   ): Promise<WorkspaceSwitch[]> {
     const handoffs = source.workspaceResult?.handoffs ?? [];
     if (!handoffs.length || source.workspaceStatus !== 'completed') {
@@ -2419,15 +2394,16 @@ export class ChatEngine {
         continue;
       }
       state.visited.add(targetSpace);
+      const inheritedGoal = state.goal?.trim() || this.activeGoal;
       const result = await this.runTask(targetSpace, handoff.task, signal, {
-        goal: this.activeGoal,
+        goal: inheritedGoal,
         context: this.workspaceHandoffContext(source, handoff),
       });
       switches.push({ ...base, result });
       if ('taskId' in result) {
         const nextVisited = new Set(state.visited);
         nextVisited.add(toCanonicalSpaceId(result.space));
-        switches.push(...await this.followWorkspaceHandoffs(result, signal, { visited: nextVisited, depth: state.depth + 1 }));
+        switches.push(...await this.followWorkspaceHandoffs(result, signal, { visited: nextVisited, depth: state.depth + 1, goal: inheritedGoal }));
       }
     }
     return switches;
@@ -3782,8 +3758,10 @@ export class ChatEngine {
       workspaceRoot,
       ...(options.displayAttachments?.length ? { displayAttachments: options.displayAttachments } : {}),
     });
-    // workId → the goal that work was dispatched with (from `before_work`), so
-    // the space banner can be titled with its goal when it is entered.
+    // workId → task/overall-goal captured from `before_work`. The runtime
+    // work goal is the concrete workspace task; ChatEngine keeps the broader
+    // user objective separately for UI/tool-argument display.
+    const workTasks = new Map<string, string>();
     const workGoals = new Map<string, string>();
 
     // The runtime's lifecycle events are the single source of truth: every work
@@ -3793,7 +3771,9 @@ export class ChatEngine {
     // (truncated) tool-result string. The observer must be cheap (just push).
     const unobserve = this.runtime.observe((event) => {
       if (event.type === 'before_work') {
-        workGoals.set(event.work.id, event.work.goal);
+        const task = event.work.goal;
+        workTasks.set(event.work.id, task);
+        workGoals.set(event.work.id, this.activeDispatchGoal?.trim() || this.activeGoal || task);
       } else if (event.type === 'workspace_delta') {
         const delta = event.delta;
         if (delta.kind === 'text') {
@@ -3809,11 +3789,11 @@ export class ChatEngine {
           emittedText = true;
           queue.push({ type: 'delta', text: delta.text });
         } else if (delta.kind === 'tool') {
-          // `enterWorkspace` from main is not shown as its own tool card: the work space it
+          // `switchWorkspace` from main is not shown as its own tool card: the work space it
           // enters announces itself via a space transition (▸ 终端空间) and
           // delivers its result through the session's reply, so an extra switch
           // card on top is just noise.
-          if (delta.name === ENTER_WORKSPACE_TOOL_ID && event.workspaceId === FALLBACK_WORKSPACE_ID) {
+          if (delta.name === SWITCH_WORKSPACE_TOOL_ID && event.workspaceId === FALLBACK_WORKSPACE_ID) {
             return;
           }
           queue.push({
@@ -3854,6 +3834,7 @@ export class ChatEngine {
           id,
           label: this.spaceLabels.get(id) ?? id,
           goal: workGoals.get(event.workId),
+          task: workTasks.get(event.workId),
         });
       }
       // The closing `space_result` (status + summary) is NOT derived here from
@@ -4291,7 +4272,7 @@ function workspaceStatusMessage(delta: WorkspaceDelta): string | undefined {
       return 'Workspace returned a structured result';
     }
     if (delta.outcome === 'missing_exit') {
-      return 'Model stopped without enterWorkspace; requesting a workspace conclusion';
+      return 'Model stopped without finishTask or switchWorkspace; requesting a workspace conclusion';
     }
     if (delta.outcome === 'tool_limit') {
       return 'Tool step limit reached; wrapping up';
@@ -4432,7 +4413,7 @@ function dispatchToolResult(r: TaskResult): string {
     switches,
     handoffs,
     finalResult.space !== r.space ? `finalSpaceId: ${finalResult.space}` : undefined,
-    `This enterWorkspace handoff is complete, and its result has been provided as a full handoff${switches ? ' including the automatic workspace switch chain' : ''}. Unless there is a different next step, do not enter the same workspace objective again; close from this result or end the turn. If exact original workspace messages are needed, use a visible id from runtime context or recall with readMessage.`,
+    `This switchWorkspace result is complete, and its result has been provided as a full handoff${switches ? ' including the automatic workspace switch chain' : ''}. Unless there is a different next step, do not enter the same workspace objective again; close from this result or end the turn. If exact original workspace messages are needed, use a visible id from runtime context or recall with readMessage.`,
   ].filter(Boolean).join('\n');
 }
 
@@ -4460,7 +4441,7 @@ function formatWorkspaceHandoffs(handoffs: WorkspaceResult['handoffs']): string 
   return [
     'Requested follow-up workspace handoff(s) after this workspace exit:',
     ...lines,
-    'If a handoff is still needed and targets a different space, call enterWorkspace with the given task/context. Do not enter the space that just exited again.',
+    'If a handoff is still needed and targets a different space, call switchWorkspace with the given task/context. Do not enter the space that just exited again.',
   ].join('\n');
 }
 
@@ -4469,7 +4450,7 @@ function formatWorkspaceSwitches(switches: WorkspaceSwitch[] | undefined): strin
     return undefined;
   }
   return [
-      'Automatic workspace switch chain after enterWorkspace:',
+      'Automatic workspace switch chain after switchWorkspace:',
     ...switches.map((step, index) => {
       const result = step.result;
       const status = 'taskId' in result ? `${result.workspaceStatus}` : `failed ${JSON.stringify(result.summary)}`;
@@ -4531,7 +4512,7 @@ function lastTaskResult(result: TaskResult): TaskResult {
 
 function duplicateDispatchMessage(previous: DispatchHandoffRef, task: string): string {
   return [
-    `Skipped duplicate enterWorkspace to ${previous.spaceId}.`,
+    `Skipped duplicate switchWorkspace to ${previous.spaceId}.`,
     `Previous status: ${previous.workspaceStatus}`,
     `Previous task: ${truncate(previous.task.replace(/\s+/g, ' ').trim(), DISPATCH_RUNTIME_CONTEXT_LINE_CHARS)}`,
     `Duplicate task: ${truncate(task.replace(/\s+/g, ' ').trim(), DISPATCH_RUNTIME_CONTEXT_LINE_CHARS)}`,
@@ -4594,85 +4575,29 @@ function isScriptExecutionSpace(spaceId: string): boolean {
   return SCRIPT_EXECUTION_SPACE_IDS.has(toCanonicalSpaceId(spaceId));
 }
 
-async function snapshotWorkspaceArtifactFiles(workspaceRoot: string | undefined): Promise<WorkspaceArtifactSnapshot | undefined> {
-  if (!workspaceRoot) {
-    return undefined;
-  }
-  return scanWorkspaceArtifactFiles(workspaceRoot);
-}
-
-async function detectWorkspaceFileArtifacts(
-  workspaceRoot: string | undefined,
-  before: WorkspaceArtifactSnapshot,
-): Promise<WorkspaceResultArtifact[]> {
-  if (!workspaceRoot) {
-    return [];
-  }
-  const after = await scanWorkspaceArtifactFiles(workspaceRoot);
-  const changed: WorkspaceResultArtifact[] = [];
-  for (const [file, info] of after) {
-    const previous = before.get(file);
-    if (previous && previous.size === info.size && previous.mtimeMs === info.mtimeMs) {
-      continue;
+function workspaceResultWithSourceArtifacts(
+  result: WorkspaceResult,
+  candidates: ArtifactCandidate[],
+): WorkspaceResult {
+  const generated = candidates
+    .filter((candidate) => candidate.source === 'generated')
+    .map((candidate): WorkspaceResultArtifact => ({
+      kind: candidate.kind,
+      ref: candidate.ref,
+      description: candidate.description,
+      source: 'generated',
+    }));
+  const importedRefs = new Set(candidates.filter((candidate) => candidate.source === 'imported').map((candidate) => candidate.ref));
+  const explicit = result.artifacts.flatMap((artifact): WorkspaceResultArtifact[] => {
+    if (artifact.source === 'imported' || importedRefs.has(artifact.ref)) {
+      return [];
     }
-    changed.push({
-      kind: 'file',
-      ref: file,
-      description: basename(file),
-    });
-  }
-  return changed;
-}
-
-async function scanWorkspaceArtifactFiles(workspaceRoot: string): Promise<WorkspaceArtifactSnapshot> {
-  const snapshot: WorkspaceArtifactSnapshot = new Map();
-  let visited = 0;
-  const walk = async (dir: string): Promise<void> => {
-    if (visited >= WORKSPACE_ARTIFACT_SCAN_MAX_FILES) {
-      return;
-    }
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (visited >= WORKSPACE_ARTIFACT_SCAN_MAX_FILES) {
-        return;
-      }
-      if (entry.isDirectory()) {
-        if (!WORKSPACE_ARTIFACT_SCAN_EXCLUDES.has(entry.name)) {
-          await walk(join(dir, entry.name));
-        }
-        continue;
-      }
-      if (!entry.isFile()) {
-        continue;
-      }
-      visited += 1;
-      const file = join(dir, entry.name);
-      if (!isWorkspaceArtifactFile(file, workspaceRoot)) {
-        continue;
-      }
-      try {
-        const info = await stat(file);
-        snapshot.set(file, { size: info.size, mtimeMs: info.mtimeMs });
-      } catch {
-        // File may have been moved between readdir and stat; ignore it.
-      }
-    }
+    return [artifact];
+  });
+  return {
+    ...result,
+    artifacts: mergeWorkspaceArtifacts(explicit, generated),
   };
-  await walk(workspaceRoot);
-  return snapshot;
-}
-
-function isWorkspaceArtifactFile(file: string, workspaceRoot: string): boolean {
-  const rel = relative(workspaceRoot, file);
-  if (!rel || rel.startsWith('..')) {
-    return false;
-  }
-  return WORKSPACE_ARTIFACT_EXTENSIONS.has(extname(file).toLowerCase());
 }
 
 function mergeWorkspaceArtifacts(
@@ -4744,7 +4669,9 @@ function workspaceStatusLine(status: WorkspaceResultStatus, summary: string, met
   return `Failed · ${detail}`;
 }
 
-const REFERENCE_TOOLS = new Set(['read', 'write', 'append', 'edit']);
+// Only file-changing tools produce deliverable references. Read paths are source
+// evidence and must stay in the tool trace instead of becoming UI artifacts.
+const RESULT_REFERENCE_TOOLS = new Set(['write', 'append', 'edit']);
 
 /** Rule-extract file references from the run's tool trace, merged with the work's
  *  self-reported refs (deduped). Rule extraction is the deterministic base. */
@@ -4765,7 +4692,7 @@ function referencesFromRun(run: Run, reported: string[] = []): Reference[] {
   for (const work of run.works) {
     for (const step of work.steps) {
       for (const call of step.toolCalls) {
-        if (!REFERENCE_TOOLS.has(call.toolId)) {
+        if (!RESULT_REFERENCE_TOOLS.has(call.toolId)) {
           continue;
         }
         const path = readToolPath(call.input);

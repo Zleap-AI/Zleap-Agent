@@ -46,6 +46,7 @@ export type WorkspaceResultArtifact = {
   kind: string;
   ref: string;
   description?: string;
+  source?: 'generated' | 'explicit' | 'imported';
 };
 
 export type WorkspaceHandoffRequest = {
