@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { artifactFromToolResult, artifactPathFromTitle, artifactsFromExitWorkspace, dedupeArtifactViews, refToLocalPath, resolveArtifactPath } from '../lib/workspaceArtifacts';
+import { artifactFromToolResult, artifactPathFromTitle, artifactsFromExitWorkspace, artifactsFromReferences, dedupeArtifactViews, refToLocalPath, resolveArtifactPath } from '../lib/workspaceArtifacts';
 
 describe('workspace artifacts', () => {
   it('turns a write diff into a visible file artifact with inline preview', () => {
@@ -61,6 +61,34 @@ describe('workspace artifacts', () => {
         path: '/tmp/report.md',
       },
     ]);
+  });
+
+  it('skips imported source artifacts from workspace control args', () => {
+    const args = JSON.stringify({
+      status: 'completed',
+      summary: 'done',
+      artifacts: [
+        { kind: 'file', ref: '/workspace/SAG/README.md', description: 'README.md', source: 'imported' },
+        { kind: 'file', ref: '/workspace/report.pdf', description: 'report.pdf', source: 'generated' },
+      ],
+    });
+
+    expect(artifactsFromExitWorkspace(args, 'cli', () => 1).map((artifact) => artifact.title)).toEqual(['report.pdf']);
+  });
+
+  it('skips imported source references from workspace results', () => {
+    let id = 1;
+    const artifacts = artifactsFromReferences(
+      [
+        { kind: 'file', path: '/workspace/SAG/README.md', title: 'README.md', source: 'imported' },
+        { kind: 'file', path: '/workspace/report.pdf', title: 'report.pdf', source: 'generated' },
+      ],
+      'cli',
+      () => id++,
+      '/workspace',
+    );
+
+    expect(artifacts.map((artifact) => artifact.title)).toEqual(['report.pdf']);
   });
 
   it('dedupes the same file when one artifact only has the basename', () => {

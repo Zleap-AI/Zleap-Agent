@@ -103,7 +103,7 @@ export type ChatDelta =
   | { type: 'tool'; name: string; phase: 'start' | 'end'; detail: string; isError?: boolean; toolCallId?: string }
   | { type: 'needs_approval'; approvalId: string; name: string; args: string; preview?: string; message: string; workspaceId?: string }
   | { type: 'approval_status'; approvalId: string; name: string; args?: string; preview?: string; status: NonNullable<ToolApprovalRequest['status']>; message?: string }
-  | { type: 'space'; phase: 'enter'; id: string; label: string; goal?: string }
+  | { type: 'space'; phase: 'enter'; id: string; label: string; goal?: string; task?: string }
   | { type: 'space_result'; id: string; envelope: Envelope }
   | { type: 'space_message'; id: string; text: string }
   | { type: 'space_status'; id: string; message: string }

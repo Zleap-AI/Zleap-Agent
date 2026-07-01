@@ -14,7 +14,7 @@ export type Integration302Config = {
   modelBaseUrl?: string;
 };
 
-export type Integration302ValueSource = 'db' | 'env' | 'file' | 'default' | 'none';
+export type Integration302ValueSource = 'db' | 'env' | 'file' | 'model' | 'default' | 'none';
 
 export type ResolvedIntegration302 = {
   apiKey?: string;
@@ -35,6 +35,9 @@ export type ResolvedIntegration302 = {
 export type Integration302Store = {
   integrations: {
     getIntegration(channel: string): Promise<{ config: Record<string, unknown> } | undefined>;
+  };
+  models?: {
+    listModelConfigs(input?: { purpose?: string }): Promise<Array<{ config?: Record<string, unknown> }>>;
   };
 };
 
@@ -129,11 +132,13 @@ export async function resolveIntegration302(): Promise<{ apiKey?: string; apiBas
 export async function resolveIntegration302Detailed(): Promise<ResolvedIntegration302> {
   const db = await read302IntegrationConfig();
   const file = await read302FileConfigAsync();
+  const model = await read302ModelConfigFallback();
   const apiKey = pickWithSource(
     ['db', db.apiKey],
     ['env', process.env.ZLEAP_302_API_KEY],
     ['env', process.env['302_API_KEY']],
     ['file', file.apiKey],
+    ['model', model.apiKey],
   );
   const apiBaseUrl = pickWithSource(
     ['db', db.apiBaseUrl],
@@ -145,6 +150,7 @@ export async function resolveIntegration302Detailed(): Promise<ResolvedIntegrati
     ['db', db.modelBaseUrl],
     ['env', process.env.ZLEAP_302_MODEL_BASE_URL],
     ['file', file.modelBaseUrl],
+    ['model', model.modelBaseUrl],
     ['default', DEFAULT_302_MODEL_BASE_URL],
   );
   return {
@@ -157,6 +163,26 @@ export async function resolveIntegration302Detailed(): Promise<ResolvedIntegrati
       modelBaseUrl: modelBaseUrl.source === 'none' ? 'default' : modelBaseUrl.source,
     },
   };
+}
+
+async function read302ModelConfigFallback(): Promise<Integration302Config> {
+  const modelsStore = injectedStore?.models;
+  const listModelConfigs = modelsStore?.listModelConfigs;
+  if (!listModelConfigs) {
+    return {};
+  }
+  try {
+    const models = await listModelConfigs.call(modelsStore);
+    const config = models.find((record) => stringValue(record.config?.providerKey) === '302ai' && stringValue(record.config?.apiKey))?.config;
+    return config
+      ? {
+          apiKey: stringValue(config.apiKey),
+          modelBaseUrl: stringValue(config.baseUrl) ?? stringValue(config.baseURL),
+        }
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function parse302ConfigString(raw: string): Integration302Config {

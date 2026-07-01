@@ -16,6 +16,12 @@ export type Integration302Config = {
   updatedAt?: string;
 };
 
+type ModelConfigFallbackStore = {
+  models?: {
+    listModelConfigs(input?: { purpose?: string }): Promise<Array<{ config?: Record<string, unknown> }>>;
+  };
+};
+
 export function integration302ConfigPath(): string {
   return process.env.ZLEAP_302_CONFIG_PATH ?? join(process.cwd(), '.zleap', '302.json');
 }
@@ -31,9 +37,9 @@ export async function read302IntegrationConfig(): Promise<Integration302Config> 
   if (store) {
     try {
       const record = await store.integrations.getIntegration(INTEGRATION_302_CHANNEL);
-      if (record) {
-        return parse302ConfigObject(record.config);
-      }
+      const config = record ? parse302ConfigObject(record.config) : {};
+      const fallback = await read302ModelConfigFallback(store);
+      return merge302ConfigFallback(config, fallback);
     } catch {
       // DB read failed — degrade to env/file so the UI/tools can still resolve.
     }
@@ -119,6 +125,34 @@ function parse302ConfigObject(parsed: Record<string, unknown>): Integration302Co
     apiBaseUrl: stringValue(parsed.apiBaseUrl),
     modelBaseUrl: stringValue(parsed.modelBaseUrl),
     updatedAt: stringValue(parsed.updatedAt),
+  };
+}
+
+async function read302ModelConfigFallback(store: ModelConfigFallbackStore): Promise<Integration302Config> {
+  const listModelConfigs = store.models?.listModelConfigs;
+  if (!listModelConfigs) {
+    return {};
+  }
+  try {
+    const models = await listModelConfigs.call(store.models);
+    const config = models.find((record) => stringValue(record.config?.providerKey) === '302ai' && stringValue(record.config?.apiKey))?.config;
+    return config
+      ? {
+          apiKey: stringValue(config.apiKey),
+          modelBaseUrl: stringValue(config.baseUrl) ?? stringValue(config.baseURL),
+        }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function merge302ConfigFallback(config: Integration302Config, fallback: Integration302Config): Integration302Config {
+  return {
+    ...fallback,
+    ...config,
+    apiKey: config.apiKey ?? fallback.apiKey,
+    modelBaseUrl: config.modelBaseUrl ?? fallback.modelBaseUrl,
   };
 }
 

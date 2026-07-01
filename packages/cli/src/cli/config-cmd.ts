@@ -380,6 +380,8 @@ function sourceLabel(source: string): string {
       return 'env';
     case 'file':
       return 'legacy file';
+    case 'model':
+      return 'model config';
     case 'default':
       return 'default';
     default:

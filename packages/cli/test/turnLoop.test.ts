@@ -139,6 +139,11 @@ describe('work turn context assembly', () => {
     expect(assembled.systemPrompt).toContain('Base workspace persona');
     expect(assembled.systemPrompt).toContain('</workspace_persona>');
     expect(assembled.systemPrompt).toContain('<work_frame>');
+    expect(assembled.systemPrompt).toContain('<workspace_model>');
+    expect(assembled.systemPrompt).toContain('Main is the desktop');
+    expect(assembled.systemPrompt).toContain('A workspace is an app window');
+    expect(assembled.systemPrompt).toContain('call finishTask');
+    expect(assembled.systemPrompt).toContain('call switchWorkspace');
     expect(assembled.systemPrompt).toContain('<global_instructions>');
     expect(assembled.systemPrompt).toContain('Global operator rule');
     expect(assembled.systemPrompt).toContain('<workspace_tools>');
@@ -235,7 +240,8 @@ describe('work turn context assembly', () => {
         '</workspace_handoff_context>',
       ].join('\n'),
       tools: [
-        { id: 'enterWorkspace', promptSnippet: 'Leave this workspace.' },
+        { id: 'switchWorkspace', promptSnippet: 'Switch to another workspace.' },
+        { id: 'finishTask', promptSnippet: 'Finish the whole user goal.' },
         { id: 'ls', promptSnippet: 'List local files.' },
         { id: 'bash', promptSnippet: 'Run project commands.' },
         { id: 'write', promptSnippet: 'Write files.' },
@@ -257,7 +263,7 @@ describe('work turn context assembly', () => {
       'If handoff text contains an absolute local output path outside the current Working directory, do not follow it',
     );
     expect(assembled.systemPrompt).toContain(
-      'If genuinely new public web evidence is required, call enterWorkspace with status=handoff and space=web-search.',
+      'If genuinely new public web evidence is required, call switchWorkspace with space=web-search.',
     );
     expect(assembled.systemPrompt).toContain(
       'Do not use bash, curl, wget, or ad-hoc HTTP scripts for public web research.',
@@ -441,6 +447,26 @@ describe('work turn context assembly', () => {
     expect(schema).not.toHaveProperty('executionMode');
   });
 
+  it('tells CLI workspaces to locate existing-file details before using edit instead of write', () => {
+    const fileTools: ToolDescriptor[] = ['grep', 'read', 'edit', 'write'].map((id) => ({
+      id,
+      description: `${id} schema description`,
+      promptSnippet: `Use ${id}.`,
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    }));
+
+    const assembled = assembleWorkTurnContext({
+      persona: 'Cli workspace persona',
+      tools: fileTools,
+      messages: [{ role: 'user', content: '这个已有 HTML 页面有个细节问题' }],
+    });
+
+    expect(assembled.systemPrompt).toContain('For small changes to an existing file or artifact');
+    expect(assembled.systemPrompt).toContain('locate the relevant text with grep/read first');
+    expect(assembled.systemPrompt).toContain('then call edit with exact old_string/new_string');
+    expect(assembled.systemPrompt).toContain('Use write only for new files or when the user explicitly asks for a full rewrite/regeneration');
+  });
+
   it('renders Cache tool guidance as XML without exposing write-cache tools', () => {
     const assembled = assembleWorkTurnContext({
       persona: 'Base workspace persona',
@@ -483,14 +509,14 @@ describe('work turn context assembly', () => {
     expect(assembled.systemPrompt).not.toContain('&lt;tool name=');
   });
 
-  it('adds enterWorkspace as the structured handoff path for work spaces', async () => {
+  it('keeps legacy enterWorkspace compatible as a hidden structured result path', async () => {
     const emitted: WorkspaceDelta[] = [];
     const result = await runTurnLoop(
       workContext(emitted),
       {
         registries: registries((request) => {
           const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
-          expect(toolNames.has('enterWorkspace')).toBe(true);
+          expect(toolNames.has('enterWorkspace')).toBe(false);
           return {
             toolCalls: [
               {
@@ -536,6 +562,263 @@ describe('work turn context assembly', () => {
       phase: 'end',
       toolCallId: 'tool_enterWorkspace',
       detail: exitStart!.detail,
+      isError: false,
+    }));
+  });
+
+  it('exposes switchWorkspace and finishTask instead of enterWorkspace in work spaces', async () => {
+    const emitted: WorkspaceDelta[] = [];
+    let toolNames: string[] = [];
+    let switchWorkspaceSchema: ProviderRequest['tools'][number] | undefined;
+    let systemPrompt = '';
+
+    await runTurnLoop(
+      workContext(emitted),
+      {
+        registries: registries((request) => {
+          const tools = request.tools ?? [];
+          toolNames = tools.map((tool) => tool.name);
+          switchWorkspaceSchema = tools.find((tool) => tool.name === 'switchWorkspace');
+          systemPrompt = request.systemPrompt;
+          return {
+            toolCalls: [{
+              name: 'finishTask',
+              arguments: { message: 'Final result from finishTask.' },
+            }],
+          };
+        }),
+        modelId: TEST_MODEL,
+        persona: 'Work persona',
+        messages: [{ role: 'user', content: 'finish this' }],
+        deliverFinal: true,
+      },
+      new AbortController().signal,
+    );
+
+    expect(toolNames).toContain('switchWorkspace');
+    expect(toolNames).toContain('finishTask');
+    expect(toolNames).not.toContain('enterWorkspace');
+    const switchParameters = switchWorkspaceSchema?.parameters as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(switchParameters.properties).not.toHaveProperty('goal');
+    expect(switchParameters.required).not.toContain('goal');
+    expect(systemPrompt).toContain('call finishTask');
+    expect(systemPrompt).toContain('call switchWorkspace');
+    expect(systemPrompt).not.toContain('Call enterWorkspace exactly once');
+  });
+
+  it('finishes a work space with finishTask defaulting to completed', async () => {
+    const emitted: WorkspaceDelta[] = [];
+    const result = await runTurnLoop(
+      workContext(emitted),
+      {
+        registries: registries(() => ({
+          toolCalls: [{
+            id: 'tool_finishTask',
+            name: 'finishTask',
+            arguments: { message: 'The report is complete.' },
+          }],
+        })),
+        modelId: TEST_MODEL,
+        persona: 'Work persona',
+        messages: [{ role: 'user', content: 'finish this' }],
+        deliverFinal: true,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.workspaceResult).toEqual({
+      status: 'completed',
+      summary: 'The report is complete.',
+      artifacts: [],
+      observations: [],
+      errors: [],
+      suggestedNextSteps: [],
+    });
+    expect(result.conclusion).toBe('The report is complete.');
+    expect(emitted).toContainEqual(expect.objectContaining({
+      kind: 'tool',
+      name: 'finishTask',
+      phase: 'end',
+      toolCallId: 'tool_finishTask',
+      isError: false,
+    }));
+  });
+
+  it('records git clone outputs as imported instead of generated artifacts', async () => {
+    const emitted: WorkspaceDelta[] = [];
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'zleap-artifact-source-'));
+    const clonedReadme = join(workspaceRoot, 'SAG', 'README.md');
+    let calls = 0;
+    try {
+      const result = await runTurnLoop(
+        {
+          ...workContext(emitted, [], [{ id: 'bash', description: 'Run shell commands.' }]),
+          workspaceRoot,
+          callTool: async () => {
+            calls += 1;
+            await mkdir(join(workspaceRoot, 'SAG'), { recursive: true });
+            await writeFile(clonedReadme, '# SAG');
+            return 'cloned SAG';
+          },
+        },
+        {
+          registries: registries((request) => {
+            const latestToolResult = request.messages
+              .filter((message): message is Extract<(typeof request.messages)[number], { role: 'toolResult' }> => message.role === 'toolResult')
+              .at(-1);
+            if (!latestToolResult) {
+              return {
+                toolCalls: [{
+                  id: 'tool_bash_clone',
+                  name: 'bash',
+                  arguments: {
+                    command: 'git clone https://github.com/Zleap-AI/SAG.git SAG',
+                    reason: 'clone the requested repository for inspection',
+                  },
+                }],
+              };
+            }
+            return {
+              toolCalls: [{
+                id: 'tool_finishTask',
+                name: 'finishTask',
+                arguments: {
+                  status: 'completed',
+                  message: 'Repository cloned.',
+                  artifacts: [{ kind: 'file', ref: clonedReadme, description: 'README.md' }],
+                },
+              }],
+            };
+          }),
+          modelId: TEST_MODEL,
+          persona: 'Work persona',
+          messages: [{ role: 'user', content: 'clone SAG' }],
+          deliverFinal: true,
+          workspaceId: 'cli',
+          approvalPolicy: {
+            rules: [{ id: 'allow-bash-clone-test', decision: 'allow', toolIds: ['bash'] }],
+          },
+        },
+        new AbortController().signal,
+      );
+
+      expect(calls).toBe(1);
+      expect(result.artifactCandidates).toEqual([
+        expect.objectContaining({ ref: clonedReadme, source: 'imported', toolName: 'bash' }),
+      ]);
+      expect(result.workspaceResult?.artifacts).toEqual([]);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('records generated bash outputs as generated artifacts', async () => {
+    const emitted: WorkspaceDelta[] = [];
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'zleap-artifact-source-'));
+    const report = join(workspaceRoot, 'report.pdf');
+    try {
+      const result = await runTurnLoop(
+        {
+          ...workContext(emitted, [], [{ id: 'bash', description: 'Run shell commands.' }]),
+          workspaceRoot,
+          callTool: async () => {
+            await writeFile(report, '%PDF-1.4\n%%EOF');
+            return 'generated report.pdf';
+          },
+        },
+        {
+          registries: registries((request) => {
+            const latestToolResult = request.messages
+              .filter((message): message is Extract<(typeof request.messages)[number], { role: 'toolResult' }> => message.role === 'toolResult')
+              .at(-1);
+            if (!latestToolResult) {
+              return {
+                toolCalls: [{
+                  id: 'tool_bash_generate',
+                  name: 'bash',
+                  arguments: {
+                    command: 'python generate_report.py',
+                    reason: 'generate the requested PDF report',
+                  },
+                }],
+              };
+            }
+            return {
+              toolCalls: [{
+                id: 'tool_finishTask',
+                name: 'finishTask',
+                arguments: {
+                  status: 'completed',
+                  message: 'Report generated.',
+                },
+              }],
+            };
+          }),
+          modelId: TEST_MODEL,
+          persona: 'Work persona',
+          messages: [{ role: 'user', content: 'generate pdf' }],
+          deliverFinal: true,
+          workspaceId: 'cli',
+          approvalPolicy: {
+            rules: [{ id: 'allow-bash-generate-test', decision: 'allow', toolIds: ['bash'] }],
+          },
+        },
+        new AbortController().signal,
+      );
+
+      expect(result.artifactCandidates).toEqual([
+        expect.objectContaining({ ref: report, source: 'generated', toolName: 'bash' }),
+      ]);
+      expect(result.workspaceResult?.artifacts).toEqual([
+        expect.objectContaining({ ref: report, source: 'generated' }),
+      ]);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('requests a direct workspace switch with switchWorkspace', async () => {
+    const emitted: WorkspaceDelta[] = [];
+    const result = await runTurnLoop(
+      workContext(emitted),
+      {
+        registries: registries(() => ({
+          toolCalls: [{
+            id: 'tool_switchWorkspace',
+            name: 'switchWorkspace',
+            arguments: {
+              space: 'cli',
+              task: 'Generate the PDF from collected research.',
+              message: 'Research is complete; CLI should generate the PDF.',
+            },
+          }],
+        })),
+        modelId: TEST_MODEL,
+        persona: 'Work persona',
+        messages: [{ role: 'user', content: 'collect research then generate pdf' }],
+        deliverFinal: true,
+        workspaceId: 'web-search',
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.workspaceResult).toMatchObject({
+      status: 'completed',
+      summary: 'Research is complete; CLI should generate the PDF.',
+      handoffs: [{
+        space: 'cli',
+        task: 'Generate the PDF from collected research.',
+        reason: 'Research is complete; CLI should generate the PDF.',
+      }],
+    });
+    expect(emitted).toContainEqual(expect.objectContaining({
+      kind: 'tool',
+      name: 'switchWorkspace',
+      phase: 'end',
+      toolCallId: 'tool_switchWorkspace',
       isError: false,
     }));
   });
@@ -3970,16 +4253,15 @@ describe('work turn context assembly', () => {
           const toolNames = new Set((request.tools ?? []).map((tool) => tool.name));
           expect(toolNames.has('readSkill')).toBe(true);
           expect(toolNames.has('runSkill')).toBe(false);
-          expect(request.systemPrompt).toContain('status=handoff, space=cli');
-          expect(request.systemPrompt).toContain('Use status=handoff, not completed, when another workspace still needs to continue the task');
-          expect(request.systemPrompt).toContain('Use completed only when this workspace produced the final result for Main');
-          expect(request.systemPrompt).toContain('For scripts, shell commands, Python/Node execution, or local file generation, hand off to space=cli');
+          expect(request.systemPrompt).toContain('switch to space=cli');
+          expect(request.systemPrompt).toContain('Use switchWorkspace when another workspace still needs to continue the same user goal');
+          expect(request.systemPrompt).toContain('Use finishTask only when the whole user goal is complete or failed');
+          expect(request.systemPrompt).toContain('For scripts, shell commands, Python/Node execution, or local file generation, switch to space=cli');
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'switchWorkspace',
                 arguments: {
-                  status: 'handoff',
                   space: 'cli',
                   task: 'Generate the PDF using reportlab.',
                   message: 'Need CLI to generate the PDF because this workspace cannot execute scripts.',
@@ -4025,20 +4307,18 @@ describe('work turn context assembly', () => {
           expect(toolNames).toContain('read');
           expect(toolNames).toContain('readSkill');
           expect(toolNames).not.toContain('runSkill');
-          expect(toolNames).toContain('enterWorkspace');
+          expect(toolNames).toContain('switchWorkspace');
+          expect(toolNames).toContain('finishTask');
+          expect(toolNames).not.toContain('enterWorkspace');
           expect(toolNames).not.toContain('write');
           expect(toolNames).not.toContain('bash');
           return {
             toolCalls: [
               {
-                name: 'enterWorkspace',
+                name: 'finishTask',
                 arguments: {
                   status: 'completed',
-                  summary: 'Tool schemas were narrowed.',
-                  artifacts: [],
-                  observations: [],
-                  errors: [],
-                  suggestedNextSteps: [],
+                  message: 'Tool schemas were narrowed.',
                 },
               },
             ],
@@ -4075,13 +4355,13 @@ describe('work turn context assembly', () => {
     expect(result.hitToolLimit).toBe(false);
     expect(result.workspaceResult).toMatchObject({
       status: 'failed',
-      summary: 'The model did not complete this workspace task: it stopped without calling enterWorkspace to return the result to Main.',
+      summary: 'The model did not complete this workspace task: it stopped without calling finishTask or switchWorkspace.',
       errors: ['workspace_result_missing'],
     });
-    expect(result.workspaceResult?.summary).toContain('enterWorkspace');
+    expect(result.workspaceResult?.summary).toContain('finishTask or switchWorkspace');
   });
 
-  it('rejects a plain-text wrap-up after tools ran when the model omits enterWorkspace', async () => {
+  it('rejects a plain-text wrap-up after tools ran when the model omits finishTask or switchWorkspace', async () => {
     const emitted: WorkspaceDelta[] = [];
     const readTool: ToolDescriptor = {
       id: 'read',
@@ -4131,12 +4411,77 @@ describe('work turn context assembly', () => {
     expect(result.hitToolLimit).toBe(false);
     expect(result.workspaceResult).toMatchObject({
       status: 'failed',
-      summary: 'The model did not complete this workspace task: it stopped without calling enterWorkspace to return the result to Main.',
+      summary: 'The model did not complete this workspace task: it stopped without calling finishTask or switchWorkspace.',
       errors: ['workspace_result_missing'],
     });
     expect(result.workspaceResult?.observations).toEqual(expect.arrayContaining([
       expect.stringContaining('workspace-oriented agent app'),
     ]));
+  });
+
+  it('treats omitted finishTask as completed when a final answer follows a successful file artifact write', async () => {
+    const emitted: WorkspaceDelta[] = [];
+    const writeTool: ToolDescriptor = {
+      id: 'write',
+      description: 'Write a file',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          content: { type: 'string' },
+        },
+        required: ['path', 'content'],
+        additionalProperties: false,
+      },
+    };
+    let writeAttempts = 0;
+    const context: WorkContext = {
+      ...workContext(emitted, [], [writeTool]),
+      callTool: async (toolId) => {
+        expect(toolId).toBe('write');
+        writeAttempts += 1;
+        if (writeAttempts === 1) {
+          throw new Error('Unterminated string in JSON at position 7188');
+        }
+        return 'Created sag_analysis.html (+1444)\n+<!doctype html>\n+<title>SAG analysis</title>';
+      },
+    };
+
+    const result = await runTurnLoop(
+      context,
+      {
+        registries: registries((request) => {
+          const writeResults = request.messages.filter((message) => message.role === 'toolResult' && message.toolName === 'write');
+          const hasSuccessfulWrite = writeResults.some((message) => message.content.includes('Created sag_analysis.html'));
+          if (!writeResults.length || !hasSuccessfulWrite) {
+            return {
+              toolCalls: [
+                {
+                  name: 'write',
+                  arguments: { path: 'sag_analysis.html', content: '<!doctype html>' },
+                },
+              ],
+            };
+          }
+          return '完成！sag_analysis.html 已成功生成，包含 SAG 项目深度分析页面。';
+        }),
+        modelId: TEST_MODEL,
+        persona: 'Work persona',
+        messages: [{ role: 'user', content: 'generate a deep analysis html report' }],
+        confirm: async () => true,
+        deliverFinal: true,
+      },
+      new AbortController().signal,
+    );
+
+    expect(writeAttempts).toBe(2);
+    expect(result.hitToolLimit).toBe(false);
+    expect(result.workspaceResult).toMatchObject({
+      status: 'completed',
+      summary: expect.stringContaining('sag_analysis.html'),
+      errors: [],
+    });
+    expect(result.workspaceResult?.observations).toEqual([]);
   });
 });
 

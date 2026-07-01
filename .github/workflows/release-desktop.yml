@@ -604,25 +604,57 @@ jobs:
           tauriScript: pnpm tauri
           releaseId: ${{ needs.create-release.outputs.release_id }}
           includeUpdaterJson: true
+          # macOS: build ONLY the .app (+ its updater .app.tar.gz/.sig, emitted via
+          # createUpdaterArtifacts) and let Tauri notarize just that app. We do NOT
+          # let Tauri build the .dmg here: Tauri would also submit the several-
+          # hundred-MB fat .dmg to Apple for notarization, and that submission is
+          # what hung until the 6h job timeout. A later mac-only step packages the
+          # already-notarized .app into a DMG ourselves (unnotarized, on purpose).
+          # Windows passes no extra args → keeps the default targets (nsis).
+          args: ${{ matrix.platform == 'mac-arm64' && '--bundles app,updater' || '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          # NOTE: Notarization is temporarily DISABLED to unblock releases.
-          # Tauri notarizes both the .app and the (several-hundred-MB fat) .dmg;
-          # the DMG submission to Apple was hanging until the 6h job timeout.
-          # Notarization is all-or-nothing in Tauri (driven by the presence of
-          # these Apple credentials), so we drop them here while keeping
-          # Developer ID code-signing via APPLE_SIGNING_IDENTITY. Result:
-          # signed-but-unnotarized app+dmg (one first-launch Gatekeeper prompt).
-          # To re-enable, uncomment the APPLE_ID/APPLE_API_* block below.
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          # APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          # APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          # Apple notarization: app-only. Gatekeeper validates the .app (not the
+          # .dmg) on first launch, so notarizing the app alone is enough for a
+          # silent first open; the DMG is intentionally left unnotarized (see the
+          # "Package notarized .app into DMG" step) to avoid the 6h DMG-submission
+          # hang. Creds are gated to TAG releases so dispatch/test builds stay fast
+          # (empty creds → Tauri skips notarization, same as before).
+          APPLE_ID: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.APPLE_TEAM_ID || '' }}
           APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Package notarized .app into DMG (macOS, unnotarized on purpose)
+        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node scripts/distribution.mjs version)"
+          APP="packages/desktop/src-tauri/target/release/bundle/macos/Zleap.app"
+          [ -d "$APP" ] || { echo "Notarized app bundle missing at $APP" >&2; exit 1; }
+          # tauri-action above notarized + stapled the .app. Package it into a DMG
+          # OURSELVES (hdiutil, not Tauri) so the DMG is never submitted to Apple —
+          # that submission is what hung until the 6h timeout. Copying the .app
+          # preserves its stapled ticket, so Gatekeeper clears the app silently on
+          # first launch (it validates the .app, not the .dmg).
+          xcrun stapler validate "$APP" || echo "WARN: stapler validate flagged the app; DMG will still ship"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          DMG="Zleap_${VERSION}_aarch64.dmg"
+          rm -f "$DMG"
+          hdiutil create -volname "Zleap" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            codesign --force --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
+            codesign --verify --verbose=2 "$DMG"
+          fi
+          echo "Uploading $DMG to release ${GITHUB_REF_NAME}"
+          gh release upload "${GITHUB_REF_NAME}" "$DMG" --clobber
 
   release:
     needs: [build-runtime, build-npm-platforms, tauri]

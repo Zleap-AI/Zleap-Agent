@@ -25,9 +25,10 @@ export async function GET(req: Request): Promise<Response> {
   }
   const url = new URL(req.url);
   const agentId = url.searchParams.get('agentId')?.trim() || DEFAULT_AVATAR_ID;
+  const threadId = cleanParam(url.searchParams.get('threadId'));
   try {
     const orchestrator = memoryOrchestratorFromStore(store);
-    const scope = mainMemoryScope(agentId, actor);
+    const scope = mainMemoryScope(agentId, actor, { threadId });
     const { impressions, experiences, records } = await orchestrator.list(scope, 100);
     const recordDetails = await Promise.all(records.map((record) => scopedRecordDetail(orchestrator, record, scope)));
     const experienceDetails = await Promise.all(experiences.map((record) => scopedRecordDetail(orchestrator, record, scope)));
@@ -223,6 +224,11 @@ export async function DELETE(req: Request): Promise<Response> {
   } finally {
     await store.close().catch(() => {});
   }
+}
+
+function cleanParam(value: string | null): string | undefined {
+  const cleaned = value?.trim();
+  return cleaned || undefined;
 }
 
 function serializeActor(actor: { userId?: string; role?: string }) {

@@ -135,7 +135,7 @@ describe('/api/memory route actor scope', () => {
     });
     storeFromEnvMock.mockResolvedValue(store as unknown as ZleapStore);
 
-    const response = await GET(actorRequest('GET'));
+    const response = await GET(actorRequest('GET', '?threadId=thread_1'));
     await expectStatus(response, 200);
     const json = (await response.json()) as { memories: Array<{ kind: string; memory: string; userId?: string; messageIds?: string[]; workKind?: string }> };
     expect(json.memories).toEqual([
@@ -332,6 +332,7 @@ function makeStore(): TestStore {
     userId: 'u1',
     tenantId: 't1',
     spaceId: 'session',
+    threadId: 'thread_1',
     status: 'active',
     createdAt: now,
     updatedAt: now,
@@ -408,6 +409,7 @@ function makeStore(): TestStore {
           if (query.scope.userId !== undefined && row.userId !== query.scope.userId) return false;
           if (query.scope.tenantId !== undefined && row.tenantId !== query.scope.tenantId) return false;
           if (query.scope.spaceId !== undefined && row.spaceId !== query.scope.spaceId) return false;
+          if (query.scope.threadId !== undefined && row.threadId !== query.scope.threadId) return false;
           return true;
         })
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())

@@ -134,9 +134,9 @@ describe('seedSuperAgentDefaults', () => {
     expect(writes.spaces.map((space) => space.slug)).toEqual([...DEFAULT_SPACE_IDS]);
     expect(writes.spaceVersions).toHaveLength(DEFAULT_SPACE_IDS.length);
     expect(writes.capabilities.map((capability) => capability.id)).toEqual(
-      expect.arrayContaining(['enterWorkspace', 'readMessage', 'task_manage', 'recall', 'read', 'bash', 'get_time', 'web_search', 'read_webpage']),
+      expect.arrayContaining(['switchWorkspace', 'readMessage', 'task_manage', 'recall', 'read', 'bash', 'get_time', 'web_search', 'read_webpage']),
     );
-    expect(writes.bindings).toEqual(expect.arrayContaining([expect.objectContaining({ spaceId: 'main', capabilityId: 'enterWorkspace' })]));
+    expect(writes.bindings).toEqual(expect.arrayContaining([expect.objectContaining({ spaceId: 'main', capabilityId: 'switchWorkspace' })]));
     expect(writes.bindings).toEqual(expect.arrayContaining([
       expect.objectContaining({ spaceId: 'cli', capabilityId: 'ls' }),
       expect.objectContaining({ spaceId: 'cli', capabilityId: 'find' }),
@@ -149,7 +149,7 @@ describe('seedSuperAgentDefaults', () => {
       expect.objectContaining({ spaceId: 'web-search', capabilityId: 'read_webpage' }),
     ]));
     expect(writes.bindings.filter((binding) => binding.spaceId === 'main').map((binding) => binding.capabilityId)).toEqual([
-      'enterWorkspace',
+      'switchWorkspace',
       'readMessage',
       'task_manage',
       'recall',

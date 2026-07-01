@@ -1,6 +1,6 @@
 [package]
 name = "zleap-desktop"
-version = "0.2.0" # x-releaser-pleaser-version
+version = "0.3.2" # x-releaser-pleaser-version
 description = "Zleap desktop shell"
 authors = ["Zleap"]
 edition = "2021"

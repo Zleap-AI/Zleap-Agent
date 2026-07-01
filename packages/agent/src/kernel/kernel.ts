@@ -21,7 +21,7 @@ type KernelOptions = {
 /**
  * The workspace-entry kernel. Every reply enters the resident `session` space,
  * where the session model itself routes to a work space by calling
- * `enterWorkspace(space, task)` (see ChatEngine). The kernel no longer
+ * `switchWorkspace(space, task)` (see ChatEngine). The kernel no longer
  * picks a work space up front — it just runs session and carries identity,
  * memory policy, and recall. Main→work depth stays 1 at the runtime tool layer.
  */

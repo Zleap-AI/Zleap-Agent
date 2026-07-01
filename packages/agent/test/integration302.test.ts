@@ -68,4 +68,37 @@ describe('302 integration resolution', () => {
       },
     });
   });
+
+  it('falls back to a stored 302 model key when the shared integration row has no key', async () => {
+    setIntegration302Store({
+      integrations: {
+        getIntegration: async () => undefined,
+      },
+      models: {
+        listModelConfigs: async () => [
+          {
+            id: '302-qwen3-6-flash',
+            providerId: 'openai-compatible',
+            model: 'qwen3.6-flash',
+            purpose: 'main',
+            config: {
+              providerKey: '302ai',
+              apiKey: 'sk-model-302',
+            },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ],
+      },
+    } as unknown as Parameters<typeof setIntegration302Store>[0]);
+
+    const resolved = await resolveIntegration302Detailed();
+
+    expect(resolved).toMatchObject({
+      apiKey: 'sk-model-302',
+      source: {
+        apiKey: 'model',
+      },
+    });
+  });
 });

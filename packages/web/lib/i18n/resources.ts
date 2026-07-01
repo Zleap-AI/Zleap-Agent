@@ -103,6 +103,8 @@ export const resources = {
         loadingPptx: '正在加载 PPTX 预览...',
       },
       artifactList: {
+        collapseList: '收起产物列表',
+        expandMore: '展开剩余 {{count}} 个产物',
         openInFile: '在文件中打开',
         preview: '预览',
         previewAria: '预览 {{title}}',
@@ -933,6 +935,8 @@ export const resources = {
         loadingPptx: 'Loading PPTX preview…',
       },
       artifactList: {
+        collapseList: 'Collapse artifacts',
+        expandMore: 'Show {{count}} more',
         openInFile: 'Open in files',
         preview: 'Preview',
         previewAria: 'Preview {{title}}',

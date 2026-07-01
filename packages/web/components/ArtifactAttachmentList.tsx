@@ -24,6 +24,8 @@ type PreviewState =
   | { status: 'ready'; content: string }
   | { status: 'error'; message: string };
 
+const COLLAPSED_ARTIFACT_LIMIT = 3;
+
 export function ArtifactAttachmentList({
   artifacts,
   onOpenWorkspaceFile,
@@ -33,6 +35,7 @@ export function ArtifactAttachmentList({
 }) {
   const { t } = useTranslation();
   const visibleArtifacts = dedupeArtifacts(artifacts).filter(isVisibleArtifact);
+  const [expanded, setExpanded] = useState(false);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const [previews, setPreviews] = useState<Record<string, PreviewState>>({});
 
@@ -66,11 +69,13 @@ export function ArtifactAttachmentList({
   };
 
   const previewArtifact = previewKey ? visibleArtifacts.find((artifact) => artifactKey(artifact) === previewKey) : undefined;
+  const hiddenCount = Math.max(visibleArtifacts.length - COLLAPSED_ARTIFACT_LIMIT, 0);
+  const displayedArtifacts = expanded ? visibleArtifacts : visibleArtifacts.slice(0, COLLAPSED_ARTIFACT_LIMIT);
 
   return (
     <>
       <div className="mt-3 flex w-full max-w-xl flex-col gap-2">
-        {visibleArtifacts.map((artifact) => {
+        {displayedArtifacts.map((artifact) => {
           const key = artifactKey(artifact);
           const localPath = artifactLocalPath(artifact);
           const canPreview = Boolean(localPath || artifact.preview);
@@ -118,6 +123,21 @@ export function ArtifactAttachmentList({
             </Item>
           );
         })}
+        {hiddenCount ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full justify-center border-dashed text-muted-foreground hover:text-ink"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {expanded
+              ? t('artifactList.collapseList', { defaultValue: '收起产物列表' })
+              : t('artifactList.expandMore', { defaultValue: '展开剩余 {{count}} 个产物', count: hiddenCount })}
+            <ChevronDown data-icon="inline-end" className={expanded ? 'rotate-180' : undefined} />
+          </Button>
+        ) : null}
       </div>
       <ArtifactPreviewDialog
         artifact={previewArtifact}

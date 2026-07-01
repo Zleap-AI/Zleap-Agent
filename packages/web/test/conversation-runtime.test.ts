@@ -292,17 +292,24 @@ describe('conversationRuntime tool settlement', () => {
   it('records the main dispatch that enters a workspace', async () => {
     const conversationId = `test-main-dispatch-${Date.now()}`;
     const engine: Engine = async function* () {
-      yield { type: 'space', phase: 'enter', id: 'web-search', label: 'Web Search', goal: 'research topic' };
+      yield {
+        type: 'space',
+        phase: 'enter',
+        id: 'web-search',
+        label: 'Web Search',
+        goal: '完成一份 SAG 技术中文报告',
+        task: '搜索 SAG 技术资料',
+      };
       yield { type: 'space_result', id: 'web-search', envelope: { status: 'success', summary: '调研完成' } };
       yield { type: 'done' };
     };
     const runtime = getConversationRuntime(conversationId, engine);
     try {
-      await runtime.send('research topic');
+      await runtime.send('SAG 是啥，帮我写个报告');
 
       const snap = runtime.getSnapshot();
       expect(snap.activeWorkspaceId).toBe('web-search');
-      expect(snap.workspaces[0]).toMatchObject({ id: 'web-search', spaceId: 'web-search' });
+      expect(snap.workspaces[0]).toMatchObject({ id: 'web-search', spaceId: 'web-search', goal: '搜索 SAG 技术资料' });
       expect(snap.workspaces[1]).toMatchObject({
         id: 'main',
         spaceId: 'main',
@@ -310,10 +317,17 @@ describe('conversationRuntime tool settlement', () => {
         statusLine: '已进入 Web Search',
       });
       expect(snap.workspaces[1]?.tools[0]).toMatchObject({
-        name: 'enterWorkspace',
+        name: 'switchWorkspace',
         status: 'done',
         result: '已进入 Web Search',
       });
+      const args = JSON.parse(snap.workspaces[1]?.tools[0]?.args ?? '{}');
+      expect(args).toMatchObject({
+        space: 'web-search',
+        goal: '完成一份 SAG 技术中文报告',
+        task: '搜索 SAG 技术资料',
+      });
+      expect(args).not.toHaveProperty('label');
     } finally {
       dropConversationRuntime(conversationId);
     }
@@ -336,7 +350,7 @@ describe('conversationRuntime tool settlement', () => {
       expect(snap.workspaces.map((pane) => pane.id)).toEqual(['web-search', 'main']);
       expect(snap.workspaces.filter((pane) => pane.spaceId === 'main')).toHaveLength(1);
       expect(snap.workspaces.some((pane) => pane.spaceId === 'session')).toBe(false);
-      expect(snap.workspaces[1]?.tools.map((tool) => tool.name)).toEqual(['get_time', 'enterWorkspace']);
+      expect(snap.workspaces[1]?.tools.map((tool) => tool.name)).toEqual(['get_time', 'switchWorkspace']);
     } finally {
       dropConversationRuntime(conversationId);
     }

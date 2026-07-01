@@ -422,6 +422,67 @@ describe('/api/chat/conversation route', () => {
     expect(body.messages[0].artifacts).toBeUndefined();
   });
 
+  it('does not create artifact shortcuts from cloned repository file inventories', async () => {
+    const store = makeStore([
+      {
+        id: 'entry-1',
+        sessionId: 'web:conversation-1:main',
+        type: 'message',
+        role: 'assistant',
+        content: [
+          '已成功将 https://github.com/Zleap-AI/SAG 仓库克隆到当前工作目录。',
+          '',
+          '仓库结构包括：',
+          '- README-CN.md',
+          '- README.md',
+          '- package-lock.json',
+          '- package.json',
+          '- web/index.html',
+          '- src/api/server.ts',
+        ].join('\n'),
+        createdAt: new Date('2026-06-17T06:09:00.000Z'),
+      },
+    ]);
+    storeFromEnvMock.mockResolvedValue(store as unknown as ZleapStore);
+
+    const response = await GET(actorRequest('?conversationId=conversation-1'));
+
+    await expectStatus(response, 200);
+    const body = await response.json();
+    expect(body.messages[0]).toMatchObject({ role: 'assistant' });
+    expect(body.messages[0].artifacts).toBeUndefined();
+  });
+
+  it('only restores generated artifacts from mixed source inventory and output text', async () => {
+    const store = makeStore([
+      {
+        id: 'entry-1',
+        sessionId: 'web:conversation-1:main',
+        type: 'message',
+        role: 'assistant',
+        content: [
+          '我已经阅读了 SAG 仓库源码，关键文件包括：',
+          '- docs/logo.svg',
+          '- README.md',
+          '- docs/sag-chat.png',
+          '- docs/paper-sag-architecture.jpeg',
+          '',
+          '已生成 SAG-SAG功能分析报告.md，可以打开查看。',
+        ].join('\n'),
+        createdAt: new Date('2026-06-17T06:09:30.000Z'),
+      },
+    ]);
+    storeFromEnvMock.mockResolvedValue(store as unknown as ZleapStore);
+
+    const response = await GET(actorRequest('?conversationId=conversation-1'));
+
+    await expectStatus(response, 200);
+    const body = await response.json();
+    expect(body.messages[0].artifacts).toEqual([
+      expect.objectContaining({ title: 'SAG-SAG功能分析报告.md' }),
+    ]);
+  });
+
   it('normalizes escaped markdown newlines when restoring assistant messages', async () => {
     const store = makeStore([
       {
@@ -895,9 +956,8 @@ describe('/api/chat/conversation route', () => {
           content: 'Workspace result accepted: completed',
           data: {
             projectionKind: 'tool_execution_record',
-            toolId: 'enterWorkspace',
+            toolId: 'switchWorkspace',
             input: {
-              status: 'handoff',
               space: 'cli',
               task: '写验证文件',
               message: 'web-search 已整理完需求，交给 cli 写文件。',
@@ -923,12 +983,11 @@ describe('/api/chat/conversation route', () => {
           type: 'tool_call',
           role: 'assistant',
           content: JSON.stringify({
-            status: 'completed',
             message: 'cli 已完成文件写入，返回主空间。',
           }),
           data: {
             projectionKind: 'workspace_tool_preview',
-            toolName: 'enterWorkspace',
+            toolName: 'finishTask',
             phase: 'start',
           },
           createdAt: new Date('2026-06-17T06:06:00.000Z'),
