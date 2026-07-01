@@ -649,10 +649,12 @@ jobs:
           DMG="Zleap_${VERSION}_aarch64.dmg"
           rm -f "$DMG"
           hdiutil create -volname "Zleap" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            codesign --force --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
-            codesign --verify --verbose=2 "$DMG"
-          fi
+          # The DMG is intentionally left unsigned: Gatekeeper validates the .app
+          # (notarized + stapled above), not the .dmg, so a silent first launch does
+          # not need a signed DMG. We deliberately do NOT codesign it here — after
+          # the ~9-min tauri-action step the build keychain has auto-relocked, and a
+          # `codesign --sign` would block forever on a GUI unlock prompt on the
+          # headless runner (that hang is exactly what stalled v0.3.2).
           echo "Uploading $DMG to release ${GITHUB_REF_NAME}"
           gh release upload "${GITHUB_REF_NAME}" "$DMG" --clobber
 
