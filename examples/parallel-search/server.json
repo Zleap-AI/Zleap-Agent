@@ -1,0 +1,13 @@
+{
+  "id": "parallel-search",
+  "name": "Parallel Search",
+  "transport": "http",
+  "config": {
+    "url": "https://search.parallel.ai/mcp",
+    "headers": {
+      "User-Agent": "Zleap-Agent/parallel-search-example"
+    }
+  },
+  "secretRefs": [],
+  "status": "active"
+}
