@@ -181,6 +181,9 @@ pnpm --filter @zleap-ai/cli start -- --yes "Create a README draft in the current
 
 ## Common Commands
 
+For a standalone, keyless web search and page fetching example using the existing
+HTTP MCP connector, see [Parallel Search MCP](./examples/parallel-search/README.md).
+
 ```bash
 pnpm dev:web       # Web UI development loop
 pnpm dev           # Web UI + task worker + gateway development loop
